@@ -1,5 +1,6 @@
 import type { ChatSummary, EngineMapper, GroupInfo, GroupSummary } from "../domain/message.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
+import { pageAll } from "./paging.js";
 
 /** Newest first; entries without a known activity time go last. */
 function byActivityDesc<T extends { lastActivity: string | null }>(items: T[]): T[] {
@@ -35,15 +36,7 @@ async function groupActivity(gw: WahaGateway, m: EngineMapper): Promise<Map<stri
   return out;
 }
 
-async function fetchAllChats(gw: WahaGateway): Promise<unknown[]> {
-  const raws: unknown[] = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const items = await gw.listChats({ limit: CHAT_PAGE, offset: page * CHAT_PAGE });
-    if (items.length === 0) break;
-    raws.push(...items);
-  }
-  return raws;
-}
+const fetchAllChats = (gw: WahaGateway) => pageAll((q) => gw.listChats(q), CHAT_PAGE);
 
 export async function getGroupInfo(
   gw: WahaGateway,
@@ -60,8 +53,6 @@ const isDirectChatId = (id: string) => DIRECT_SUFFIXES.some((s) => id.endsWith(s
 
 const CHAT_PAGE = 500;
 const CONTACT_PAGE = 5000;
-// Guards against a gateway that never returns an empty page.
-const MAX_PAGES = 100;
 const CONTACTS_TTL_MS = 10 * 60_000;
 
 export interface ContactNames {
@@ -91,14 +82,10 @@ export async function loadContacts(
   const cached = contactCache.get(gw);
   if (cached && now - cached.loadedAt < CONTACTS_TTL_MS) return cached.byId;
   const byId = new Map<string, ContactNames>();
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const items = await gw.listContacts({ limit: CONTACT_PAGE, offset: page * CONTACT_PAGE });
-    if (items.length === 0) break;
-    for (const item of items) {
-      const c = asRecord(item);
-      const id = idOf(c.id);
-      if (id) byId.set(joinKey(id), { name: nonEmpty(c.name), pushname: nonEmpty(c.pushname) });
-    }
+  for (const item of await pageAll((q) => gw.listContacts(q), CONTACT_PAGE)) {
+    const c = asRecord(item);
+    const id = idOf(c.id);
+    if (id) byId.set(joinKey(id), { name: nonEmpty(c.name), pushname: nonEmpty(c.pushname) });
   }
   contactCache.set(gw, { loadedAt: now, byId });
   return byId;

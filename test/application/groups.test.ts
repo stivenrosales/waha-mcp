@@ -160,7 +160,7 @@ describe("listChats (direct chats only)", () => {
     expect(ok.chats.find((c) => c.id === "51911111111@c.us")?.name).toBe("Mum");
   });
 
-  it("pages contacts until an empty page and caches them for 10 minutes", async () => {
+  it("pages contacts until a short page and caches them for 10 minutes", async () => {
     const many = Array.from({ length: 5001 }, (_, i) => ({ id: `c${i}@c.us`, name: `N${i}` }));
     const gw = new InMemoryWahaGateway({ chats, contacts: many });
     let t = 1_000;
@@ -170,13 +170,54 @@ describe("listChats (direct chats only)", () => {
     expect(first).toEqual([
       { limit: 5000, offset: 0 },
       { limit: 5000, offset: 5000 },
-      { limit: 5000, offset: 10000 },
     ]);
     t += 9 * 60_000;
     await listChats(gw, m, {}, deps);
-    expect(gw.count("listContacts")).toBe(3);
+    expect(gw.count("listContacts")).toBe(2);
     t += 2 * 60_000;
     await listChats(gw, m, {}, deps);
-    expect(gw.count("listContacts")).toBe(6);
+    expect(gw.count("listContacts")).toBe(4);
+  });
+
+  it("never requests the page after a short page (WAHA answers 500 past the end)", async () => {
+    const many = Array.from({ length: 10_000 }, (_, i) => ({ id: `c${i}@c.us`, name: `N${i}` }));
+    const gw = new InMemoryWahaGateway({ chats, contacts: many });
+    const total = many.length;
+    const orig = gw.listContacts.bind(gw);
+    gw.listContacts = async (q) => {
+      if (q.offset > total) throw new Error("500 past the end");
+      return orig(q);
+    };
+    // exactly-full last page: the next request (offset == total) returns [] and still works
+    const full = await listChats(gw, m, {}, { now: () => 0 });
+    expect(full.namesResolved).toBe(true);
+    const gw2 = new InMemoryWahaGateway({
+      chats,
+      contacts: [{ id: "51911111111@c.us", name: "Mum" }],
+    });
+    let requests = 0;
+    gw2.listContacts = async (q) => {
+      requests++;
+      if (q.offset > 0) throw new Error("500 past the end");
+      return [{ id: "51911111111@c.us", name: "Mum" }];
+    };
+    const out = await listChats(gw2, m, {}, { now: () => 0 });
+    expect(out.namesResolved).toBe(true);
+    expect(out.chats.find((c) => c.id === "51911111111@c.us")?.name).toBe("Mum");
+    expect(requests).toBe(1);
+  });
+
+  it("chat listing also stops after a short page", async () => {
+    const gw = new InMemoryWahaGateway({
+      groups: [{ JID: "a@g.us", Name: "A", Participants: [] }],
+      chats: [{ id: "a@g.us", conversationTimestamp: 5 }],
+    });
+    const orig = gw.listChats.bind(gw);
+    gw.listChats = async (q) => {
+      if (q.offset > 0) throw new Error("500 past the end");
+      return orig(q);
+    };
+    expect((await listGroups(gw, m, {}))[0]?.lastActivity).not.toBeNull();
+    expect(gw.count("listChats")).toBe(1);
   });
 });

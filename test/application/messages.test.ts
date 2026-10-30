@@ -158,6 +158,20 @@ describe("fetchRange", () => {
     expect(out.truncated).toBe(false);
   });
 
+  it("does not request past a short page (500 past the end)", async () => {
+    const gw = new InMemoryWahaGateway({ messages: { [CHAT]: history(250) } });
+    const orig = gw.getMessages.bind(gw);
+    gw.getMessages = async (chat, q) => {
+      if (q.offset >= 250) throw new Error("500 past the end");
+      return orig(chat, q);
+    };
+    const out = await fetchRange(gw, m, { chatId: CHAT, cap: 1000 });
+    expect(out.messages).toHaveLength(250);
+    // an exactly-full last page is followed by [] and still works
+    const gw2 = new InMemoryWahaGateway({ messages: { [CHAT]: history(200) } });
+    expect((await fetchRange(gw2, m, { chatId: CHAT, cap: 1000 })).messages).toHaveLength(200);
+  });
+
   it("empty history returns no messages and is not truncated", async () => {
     const gw = new InMemoryWahaGateway({ messages: {} });
     expect(await fetchRange(gw, m, { chatId: CHAT, cap: 10 })).toEqual({

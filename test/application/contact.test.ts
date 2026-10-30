@@ -181,6 +181,6 @@ describe("getContact", () => {
     const gw = gateway(data());
     await run(gw, { phone: "51999000111" });
     await run(gw, { name: "bob" });
-    expect(gw.count("listContacts")).toBe(2); // one page + the terminating empty page, once
+    expect(gw.count("listContacts")).toBe(1); // a single short page, loaded once
   });
 });

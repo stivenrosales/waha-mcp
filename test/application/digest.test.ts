@@ -145,4 +145,39 @@ describe("buildActivityDigest", () => {
     ).rejects.toBeInstanceOf(InvalidInputError);
     await expect(run(gw, { from: "nope" })).rejects.toBeInstanceOf(InvalidInputError);
   });
+
+  it("100 active chats shrink the per-chat window to 15 and say so; a small day keeps 30", async () => {
+    const ids = Array.from({ length: 100 }, (_, i) => `5199${String(i).padStart(7, "0")}@c.us`);
+    const messages = Object.fromEntries(
+      ids.map((id) => [
+        id,
+        Array.from({ length: 20 }, (_, k) =>
+          msg(String(20 - k), T_START + (20 - k) * 60, `m${20 - k}`, { chat: id }),
+        ),
+      ]),
+    );
+    const big = await run(gateway({ chats: ids.map((id) => chat(id, T_LATE)), messages }), {
+      date: "2026-10-29",
+    });
+    expect(big.chats).toHaveLength(100);
+    expect(big.chats[0]?.messages).toHaveLength(15);
+    expect(big.chats[0]?.messagesOmitted).toBe(5);
+    expect(big.coverage.notes.join(" ")).toMatch(/window reduced to 15/);
+    const small = await run(gateway(data()), { date: "2026-10-29" });
+    expect(small.coverage.notes.join(" ")).not.toMatch(/window reduced/);
+  });
+
+  it("explains that old days may miss chats when candidates were skipped", async () => {
+    const ids = Array.from({ length: 130 }, (_, i) => `5199${String(i).padStart(7, "0")}@c.us`);
+    const old = sec("2026-10-01T10:00:00Z");
+    const gw = gateway({
+      chats: ids.map((id) => chat(id, T_LATE)),
+      messages: Object.fromEntries(ids.map((id) => [id, [msg("1", old, "x", { chat: id })]])),
+    });
+    const r = await run(gw, { date: "2026-10-01" });
+    expect(r.coverage.chatsSkipped).toBe(30);
+    expect(r.coverage.notes.join(" ")).toMatch(/older days may miss chats/);
+    const recent = await run(gateway(data()), { date: "2026-10-29" });
+    expect(recent.coverage.notes.join(" ")).not.toMatch(/older days/);
+  });
 });

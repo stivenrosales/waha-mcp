@@ -2,19 +2,8 @@ import { describe, expect, it } from "vitest";
 import { findPendingReplies } from "../../src/application/pending.js";
 import { InvalidInputError } from "../../src/domain/errors.js";
 import { gowsMapper } from "../../src/infrastructure/waha/engines/gows.js";
-import { InMemoryWahaGateway } from "../fakes/InMemoryWahaGateway.js";
-import {
-  ANA,
-  BOB,
-  chat,
-  GROUP_A,
-  GROUP_B,
-  gateway,
-  ME_LID,
-  ME_PHONE,
-  msg,
-  systemMsg,
-} from "./helpers.js";
+import { InMemoryWahaGateway, rawReaction } from "../fakes/InMemoryWahaGateway.js";
+import { ANA, BOB, chat, GROUP_A, gateway, ME_LID, ME_PHONE, msg, systemMsg } from "./helpers.js";
 
 const NOW = Date.parse("2026-10-30T15:00:00Z");
 const nowSec = NOW / 1000;
@@ -223,6 +212,22 @@ describe("findPendingReplies: groups", () => {
   });
 });
 
+describe("findPendingReplies: reactions", () => {
+  it("a trailing reaction does not make a direct chat pending", async () => {
+    const gw = gateway({
+      chats: [chat(ANA, nowSec - 10)],
+      messages: {
+        [ANA]: [
+          rawReaction("r", nowSec - 10, "2", "👍", { chat: ANA, sender: ANA }),
+          msg("2", nowSec - 100, "listo", { chat: ANA, mine: true }),
+          msg("1", nowSec - 200, "hola", { chat: ANA }),
+        ],
+      },
+    });
+    expect((await run(gw)).pending).toEqual([]);
+  });
+});
+
 describe("findPendingReplies: scope and coverage", () => {
   const data = () => ({
     chats: [chat(ANA, nowSec - 10), chat(GROUP_A, nowSec - 10)],
@@ -326,6 +331,5 @@ describe("findPendingReplies: scope and coverage", () => {
     expect(gw.calls.filter((c) => c.method === "getMessages").map((c) => c.args[0])).toEqual([
       GROUP_A,
     ]);
-    void GROUP_B;
   });
 });

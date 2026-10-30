@@ -13,6 +13,10 @@ import type { ChatScope } from "./groups.js";
 import type { FanoutDeps } from "./pending.js";
 
 const MAX_MESSAGES = 30;
+const MIN_MESSAGES = 5;
+/** Total compact messages across all chats, so the answer fits a client's context. */
+export const TOTAL_MESSAGE_BUDGET = 1500;
+const OLD_DAY_MS = 7 * 86_400_000;
 
 export interface DigestChat {
   chatId: string;
@@ -143,12 +147,28 @@ export async function buildActivityDigest(
     cap: deps.statsMaxMessages,
   });
 
+  const active = scanned
+    .map((s) => ({ s, conversational: s.messages.filter(isConversational) }))
+    .filter((x) => x.conversational.length > 0);
+  const window = Math.max(
+    MIN_MESSAGES,
+    Math.min(MAX_MESSAGES, Math.floor(TOTAL_MESSAGE_BUDGET / Math.max(1, active.length))),
+  );
+  const notes = [...coverage.notes];
+  if (window < MAX_MESSAGES)
+    notes.push(
+      `Per-chat message window reduced to ${window} to fit ${active.length} active chats; see messagesOmitted per chat and use get_messages for the rest.`,
+    );
+  if (to < now - OLD_DAY_MS && coverage.chatsSkipped > 0)
+    notes.push(
+      "This range ended more than 7 days ago and chats were skipped: candidates are picked by last activity, so older days may miss chats that have been quiet since.",
+    );
+
   const chats: (DigestChat & { lastAt: string })[] = [];
-  for (const s of scanned) {
-    const conversational = s.messages.filter(isConversational);
+  for (const { s, conversational } of active) {
     const newest = conversational[0];
     if (!newest) continue;
-    const shown = conversational.slice(0, MAX_MESSAGES).reverse();
+    const shown = conversational.slice(0, window).reverse();
     chats.push({
       chatId: s.chat.id,
       name: s.chat.name ?? s.chat.phone ?? s.chat.id,
@@ -168,6 +188,6 @@ export async function buildActivityDigest(
     timezone,
     scope,
     chats: chats.map(({ lastAt: _lastAt, ...c }) => c),
-    coverage,
+    coverage: { ...coverage, notes },
   };
 }

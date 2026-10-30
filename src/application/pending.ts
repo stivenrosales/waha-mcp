@@ -16,6 +16,8 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 const DEFAULT_WINDOW_MS = 7 * 86_400_000;
 const LAST_MESSAGES = 5;
+/** Total lastMessages across the answer (limit 200 x 5 stays within it). */
+const TOTAL_MESSAGE_BUDGET = 1500;
 
 export interface PendingChat {
   chatId: string;
@@ -72,6 +74,7 @@ export async function findPendingReplies(
     cap: deps.statsMaxMessages,
   });
 
+  const perChat = Math.max(1, Math.min(LAST_MESSAGES, Math.floor(TOTAL_MESSAGE_BUDGET / limit)));
   const all: PendingChat[] = [];
   for (const s of scanned) {
     const conversational = s.messages.filter(isConversational);
@@ -86,7 +89,7 @@ export async function findPendingReplies(
       unansweredCount: waiting.unansweredCount,
       reason: waiting.reason,
       lastMessages: conversational
-        .slice(0, LAST_MESSAGES)
+        .slice(0, perChat)
         .reverse()
         .map((msg) => toCompact(msg, who.isMine)),
     });

@@ -31,12 +31,16 @@ export const listPendingRepliesTool: ToolDefinition<
     'Finds chats where someone is waiting for the owner\'s answer, longest wait first, with waiting time and the last messages. Direct chats: the other side spoke last. Groups (scope "groups"/"all"): only mentions of the owner or replies to the owner\'s messages not yet answered. Always read coverage: it states which chats were scanned and what is missing. Turn the result into to-dos yourself; the server never creates tasks.',
   inputSchema,
   outputSchema: pendingRepliesSchema,
-  async run(input, { gateway, mapper, config }) {
+  async run(input, { gateway, mapper, config, transcription }) {
     const r = await findPendingReplies(
       gateway,
       mapper,
       { since: input.since, scope: input.scope, limit: input.limit },
-      { statsMaxMessages: config.statsMaxMessages, timezone: config.timezone },
+      {
+        statsMaxMessages: config.statsMaxMessages,
+        timezone: config.timezone,
+        transcripts: transcription,
+      },
     );
     const lines = r.pending.map(
       (p) =>

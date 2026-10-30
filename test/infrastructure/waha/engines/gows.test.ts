@@ -63,6 +63,7 @@ describe("GOWS message mapper - real fixtures", () => {
       location: null,
       contact: null,
       poll: null,
+      transcript: null,
     });
   });
 
@@ -105,6 +106,8 @@ describe("GOWS message mapper - real fixtures", () => {
     expect(out.type).toBe("voice");
     expect(out.attachment?.kind).toBe("voice");
     expect(out.attachment?.mimetype).toBe("audio/ogg; codecs=opus");
+    expect(out.attachment?.durationSeconds).toBe(raw._data.Message.audioMessage.seconds);
+    expect(out.transcript).toBeNull();
   });
 
   it("maps non-PTT audio as audio", () => {

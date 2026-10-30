@@ -151,6 +151,7 @@ function unknownMessage(raw: unknown, rawType?: string): NormalizedMessage {
     location: null,
     contact: null,
     poll: null,
+    transcript: null,
   };
 }
 
@@ -201,6 +202,7 @@ function mapMessage(rawIn: unknown): NormalizedMessage {
     const kind: Attachment["kind"] =
       baseKind === "audio" && (content.PTT === true || content.ptt === true) ? "voice" : baseKind;
     const caption = str(content.caption);
+    const seconds = baseKind === "audio" ? num(content.seconds) : null;
     out.type = kind;
     out.text = caption;
     out.attachment = {
@@ -211,6 +213,7 @@ function mapMessage(rawIn: unknown): NormalizedMessage {
       caption,
       mediaId: str(raw.id) && chatId ? encodeMediaId(chatId, str(raw.id) as string) : null,
       available: true,
+      ...(seconds === null ? {} : { durationSeconds: seconds }),
     };
     return out;
   }

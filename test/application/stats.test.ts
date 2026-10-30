@@ -25,6 +25,7 @@ function msg(
     location: null,
     contact: null,
     poll: null,
+    transcript: null,
   };
 }
 

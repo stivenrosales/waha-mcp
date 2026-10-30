@@ -203,3 +203,43 @@ export function rawReaction(
     },
   };
 }
+
+/**
+ * Raw GOWS-shaped audio message whose file WAHA serves at `url` (put the bytes in `media`).
+ * `seconds: null` leaves the duration out; `ptt: false` makes it a plain audio file.
+ */
+export function rawVoice(
+  id: string,
+  timestamp: number,
+  o: {
+    url: string;
+    seconds?: number | null;
+    ptt?: boolean;
+    sender?: string;
+    chat?: string;
+    mimetype?: string;
+    fromMe?: boolean;
+  },
+): Raw {
+  const base = rawText(id, timestamp, "", { chat: o.chat, sender: o.sender });
+  const mimetype = o.mimetype ?? "audio/ogg; codecs=opus";
+  const seconds = o.seconds === undefined ? 5 : o.seconds;
+  return {
+    ...base,
+    fromMe: o.fromMe === true,
+    body: null,
+    hasMedia: true,
+    media: { url: o.url, mimetype, filename: null },
+    _data: {
+      ...(base._data as Raw),
+      Message: {
+        audioMessage: {
+          mimetype,
+          fileLength: 100,
+          ...(seconds === null ? {} : { seconds }),
+          PTT: o.ptt !== false,
+        },
+      },
+    },
+  };
+}

@@ -89,6 +89,7 @@ flowchart LR
 | 📜           | `get_messages`         | Reads messages of a chat, newest first, with cursor pagination.                   |
 | 🧵           | `get_thread`           | The conversation around a message.                                                |
 | 📎           | `get_media`            | Fetches an attachment by `media_id` (inline when small, otherwise a signed link). |
+| 🎙️           | `transcribe_audio`     | Transcribes an audio or voice note by `media_id` (optional, see below).           |
 | **Analyze**  |                        |                                                                                   |
 | 📊           | `get_chat_stats`       | Counts, rankings, activity and response times for a chat in a period.             |
 | ⏳           | `list_pending_replies` | Who is waiting for your answer, longest first.                                    |
@@ -114,22 +115,30 @@ flowchart LR
 
 All configuration is through environment variables.
 
-| Variable                 | Required | Default     | Description                                                        |
-| ------------------------ | -------- | ----------- | ------------------------------------------------------------------ |
-| `WAHA_API_URL`           | yes      |             | Base URL of WAHA (internal URL when deployed next to it).          |
-| `WAHA_API_KEY`           | yes      |             | WAHA API key. Also the OAuth login secret.                         |
-| `PUBLIC_BASE_URL`        | yes      |             | Public HTTPS URL of this server (`http` only for localhost).       |
-| `WAHA_SESSION`           | no       | `default`   | WAHA session name.                                                 |
-| `DATA_DIR`               | no       | `/data`     | OAuth state (`auth.db`), message cache (`cache.db`), media secret. |
-| `PORT`                   | no       | `3000`      | HTTP port.                                                         |
-| `TIMEZONE`               | no       | `UTC`       | IANA time zone for dates and day boundaries (`America/Lima`).      |
-| `STATS_MAX_MESSAGES`     | no       | `5000`      | Per-chat message cap; fan-out tools read up to 100 chats each.     |
-| `MEDIA_LINK_TTL_SECONDS` | no       | `600`       | Lifetime of signed media links.                                    |
-| `MEDIA_INLINE_MAX_BYTES` | no       | `5242880`   | Largest file returned inline (5 MiB); larger ones get a link.      |
-| `MEDIA_MAX_BYTES`        | no       | `104857600` | Largest file served by `/media/:token` (100 MiB).                  |
-| `CACHE_ENABLED`          | no       | `true`      | Keep a SQLite copy of read messages in `DATA_DIR/cache.db`.        |
-| `CACHE_REFRESH_HOURS`    | no       | `48`        | Each sync re-reads this window before the newest cached message.   |
-| `CACHE_MAX_AGE_DAYS`     | no       | `0`         | Prune cached messages older than N days (`0` keeps them forever).  |
+| Variable                     | Required | Default     | Description                                                                 |
+| ---------------------------- | -------- | ----------- | --------------------------------------------------------------------------- |
+| `WAHA_API_URL`               | yes      |             | Base URL of WAHA (internal URL when deployed next to it).                   |
+| `WAHA_API_KEY`               | yes      |             | WAHA API key. Also the OAuth login secret.                                  |
+| `PUBLIC_BASE_URL`            | yes      |             | Public HTTPS URL of this server (`http` only for localhost).                |
+| `WAHA_SESSION`               | no       | `default`   | WAHA session name.                                                          |
+| `DATA_DIR`                   | no       | `/data`     | OAuth state (`auth.db`), message cache (`cache.db`), media secret.          |
+| `PORT`                       | no       | `3000`      | HTTP port.                                                                  |
+| `TIMEZONE`                   | no       | `UTC`       | IANA time zone for dates and day boundaries (`America/Lima`).               |
+| `STATS_MAX_MESSAGES`         | no       | `5000`      | Per-chat message cap; fan-out tools read up to 100 chats each.              |
+| `MEDIA_LINK_TTL_SECONDS`     | no       | `600`       | Lifetime of signed media links.                                             |
+| `MEDIA_INLINE_MAX_BYTES`     | no       | `5242880`   | Largest file returned inline (5 MiB); larger ones get a link.               |
+| `MEDIA_MAX_BYTES`            | no       | `104857600` | Largest file served by `/media/:token` (100 MiB).                           |
+| `CACHE_ENABLED`              | no       | `true`      | Keep a SQLite copy of read messages in `DATA_DIR/cache.db`.                 |
+| `CACHE_REFRESH_HOURS`        | no       | `48`        | Each sync re-reads this window before the newest cached message.            |
+| `CACHE_MAX_AGE_DAYS`         | no       | `0`         | Prune cached messages older than N days (`0` keeps them forever).           |
+| `TRANSCRIPTION_API_URL`      | no       |             | OpenAI-compatible speech-to-text base URL (`https://openrouter.ai/api/v1`). |
+| `TRANSCRIPTION_API_KEY`      | no       |             | API key of that provider.                                                   |
+| `TRANSCRIPTION_MODEL`        | no       |             | Model id (`openai/whisper-large-v3-turbo`).                                 |
+| `TRANSCRIPTION_LANGUAGE`     | no       |             | Language hint (ISO 639-1, e.g. `es`); omit to auto-detect.                  |
+| `TRANSCRIPTION_MAX_SECONDS`  | no       | `300`       | Longer voice notes are not transcribed automatically.                       |
+| `TRANSCRIPTION_MAX_PER_CALL` | no       | `20`        | New automatic transcriptions per tool call (`0` = only `transcribe_audio`). |
+
+Transcription is off unless `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL` are all set (setting only some of them is a startup error). The server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions` with OpenAI-style multipart (`file`, `model`, `language`), which OpenRouter, OpenAI and Groq accept. When on, voice notes in `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` get a `transcript` (within the limits above; coverage notes report the skipped ones), `search_messages` also matches stored transcripts, and each transcript is stored in `cache.db` so it is never paid twice.
 
 </details>
 
@@ -190,6 +199,7 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 - The API key and WAHA URL are never logged or returned in errors.
 - Rotating `WAHA_API_KEY` revokes every issued token at the next start: only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
 - The message cache (`cache.db`, `0600`) is a copy of the conversations you read, at rest on the server. A chat is cached the first time a tool reads it; later reads ask WAHA only for messages newer than (newest cached − `CACHE_REFRESH_HOURS`), so edits and deletions older than that window are not picked up. A chat read less than 60 s ago is answered without calling WAHA. Logout does not clear it; delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Media files are never cached.
+- Transcription (off by default): when configured, voice notes are sent to the configured provider (a third party such as OpenRouter) to be transcribed, and their transcripts are stored in `cache.db` (also when `CACHE_ENABLED=false`). A different WhatsApp account wipes them together with the message cache. `TRANSCRIPTION_API_KEY` is never logged or returned; provider errors are reported with fixed messages.
 - At most 50 OAuth clients can be registered. Clients older than 24 h with no live token are pruned automatically when a new one registers; `<base>/logout` clears them all.
 
 > [!WARNING]

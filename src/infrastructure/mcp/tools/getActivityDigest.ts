@@ -29,7 +29,7 @@ export const getActivityDigestTool: ToolDefinition<
     "Lists every chat active on a day or range in one call: message count, who spoke last, whether it awaits the owner's reply, and the last 30 messages (compact, oldest first). Use it to review a day across all chats, then build summaries or to-dos yourself. Always read coverage: it states which chats were scanned and what is missing.",
   inputSchema,
   outputSchema: activityDigestSchema,
-  async run(input, { gateway, mapper, config }) {
+  async run(input, { gateway, mapper, config, transcription }) {
     const r = await buildActivityDigest(
       gateway,
       mapper,
@@ -40,7 +40,7 @@ export const getActivityDigestTool: ToolDefinition<
         timezone: input.timezone ?? config.timezone,
         scope: input.scope,
       },
-      { statsMaxMessages: config.statsMaxMessages },
+      { statsMaxMessages: config.statsMaxMessages, transcripts: transcription },
     );
     const lines = r.chats.map(
       (c) =>

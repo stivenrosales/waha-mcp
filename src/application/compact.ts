@@ -9,6 +9,8 @@ export interface CompactMessage {
   type: NormalizedMessage["type"];
   text: string | null;
   hasAttachment: boolean;
+  /** Voice-note transcript, cut like `text`; null when there is none. */
+  transcript: string | null;
 }
 
 const MAX_TEXT = 280;
@@ -29,6 +31,7 @@ export function toCompact(
     type: msg.type,
     text: msg.text === null ? null : cut(msg.text),
     hasAttachment: msg.attachment !== null,
+    transcript: msg.transcript === null ? null : cut(msg.transcript),
   };
 }
 

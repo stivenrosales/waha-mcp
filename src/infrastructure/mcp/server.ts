@@ -1,4 +1,5 @@
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import type { TranscriptionService } from "../../application/transcripts.js";
 import type { Config } from "../../config.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import type { AuthInfo } from "../auth/bearer.js";
@@ -19,6 +20,8 @@ export interface CreateMcpServerOptions {
   links: SignedLinks;
   /** Idle timeout for media bodies (default 30 s); injectable for tests. */
   mediaIdleTimeoutMs?: number;
+  /** Voice-note transcription (default: off). */
+  transcription?: TranscriptionService;
   logger?: Logger;
 }
 
@@ -35,7 +38,8 @@ const bearerToken = (req: Request): string =>
  * engine mapper lookup is shared across requests, so `getSession()` runs once.
  */
 export function createMcpServer(options: CreateMcpServerOptions): McpServerHandle {
-  const { tools, instructions, gateway, config, links, logger, mediaIdleTimeoutMs } = options;
+  const { tools, instructions, gateway, config, links, logger, mediaIdleTimeoutMs, transcription } =
+    options;
   const mapper = createEngineResolver(gateway);
 
   const http = createMcpHandler(() => {
@@ -48,7 +52,15 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
       { instructions },
     );
     for (const tool of tools)
-      toMcpTool(server, tool, { gateway, mapper, config, links, logger, mediaIdleTimeoutMs });
+      toMcpTool(server, tool, {
+        gateway,
+        mapper,
+        config,
+        links,
+        logger,
+        mediaIdleTimeoutMs,
+        transcription,
+      });
     registerPrompts(server, { timezone: config.timezone });
     return server;
   });

@@ -5,6 +5,7 @@ import { type CompactMessage, identityOf, toCompact } from "./compact.js";
 import { parseRange } from "./dates.js";
 import { type Coverage, checkLimit, collectChats } from "./fanout.js";
 import type { ChatScope } from "./groups.js";
+import type { TranscriptionService } from "./transcripts.js";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -54,7 +55,7 @@ export function fold(text: string): { folded: string; map: number[] } {
 
 /** The searchable fields of a message, in priority order. */
 function fieldsOf(m: NormalizedMessage): string[] {
-  return [m.text, m.attachment?.caption, m.attachment?.filename].filter(
+  return [m.text, m.attachment?.caption, m.attachment?.filename, m.transcript].filter(
     (f): f is string => typeof f === "string" && f !== "",
   );
 }
@@ -82,7 +83,8 @@ function matchSnippet(m: NormalizedMessage, needle: string): string | null {
 }
 
 /**
- * Case- and accent-insensitive search over text, caption and filename, newest hits first.
+ * Case- and accent-insensitive search over text, caption, filename and stored voice-note
+ * transcripts, newest hits first.
  * With `chatId` it reads that single chat (any type); otherwise it fans out over `scope`.
  */
 export async function searchMessages(
@@ -96,7 +98,13 @@ export async function searchMessages(
     to?: string;
     limit?: number;
   },
-  deps: { now?: () => number; statsMaxMessages: number; timezone?: string },
+  deps: {
+    now?: () => number;
+    statsMaxMessages: number;
+    timezone?: string;
+    /** Stored voice-note transcripts are searched too (never transcribes anything new). */
+    transcripts?: Pick<TranscriptionService, "attachStored">;
+  },
 ): Promise<SearchResult> {
   const query = q.query.trim();
   const queryLength = Array.from(query).length;
@@ -125,6 +133,7 @@ export async function searchMessages(
     cap: deps.statsMaxMessages,
   });
 
+  await deps.transcripts?.attachStored(chats.flatMap((c) => c.messages));
   const all: SearchHit[] = [];
   for (const c of chats)
     for (const message of c.messages) {

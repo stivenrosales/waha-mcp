@@ -29,6 +29,8 @@ export interface Attachment {
   mediaId: string | null;
   /** True when the message carries a media payload (actual availability is checked on download). */
   available: boolean;
+  /** Length of an audio or voice note in seconds, when the message declares it. */
+  durationSeconds?: number;
 }
 
 export interface Reaction {
@@ -53,6 +55,8 @@ export interface NormalizedMessage {
   location: { lat: number; lng: number; name: string | null } | null;
   contact: { name: string | null; phone: string | null } | null;
   poll: { question: string; options: string[] } | null;
+  /** Speech-to-text of a voice note; null when transcription is off or not done. */
+  transcript: string | null;
 }
 
 export interface GroupSummary {

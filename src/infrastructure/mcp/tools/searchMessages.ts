@@ -7,7 +7,7 @@ const inputSchema = z.object({
   query: z
     .string()
     .describe(
-      "Text to find, 2-200 characters. Case- and accent-insensitive; matches message text, media captions and file names.",
+      "Text to find, 2-200 characters. Case- and accent-insensitive; matches message text, media captions, file names and stored voice-note transcripts.",
     ),
   chat_id: z
     .string()
@@ -30,10 +30,10 @@ export const searchMessagesTool: ToolDefinition<typeof inputSchema, typeof searc
   name: "search_messages",
   title: "Search messages",
   description:
-    'Finds messages containing a text, newest first, with a snippet centered on the match. Case- and accent-insensitive ("ano" also matches "año") over text, captions and file names. Give chat_id to search one chat of any type; otherwise it searches the chats of `scope` (default "direct") active in the range (default last 30 days). Always read coverage: it states which chats were scanned and what is missing, so no hits does not prove the text was never written. Use get_thread with a hit\'s message id to read the conversation around it.',
+    'Finds messages containing a text, newest first, with a snippet centered on the match. Case- and accent-insensitive ("ano" also matches "año") over text, captions, file names and voice-note transcripts already stored (it never transcribes). Give chat_id to search one chat of any type; otherwise it searches the chats of `scope` (default "direct") active in the range (default last 30 days). Always read coverage: it states which chats were scanned and what is missing, so no hits does not prove the text was never written. Use get_thread with a hit\'s message id to read the conversation around it.',
   inputSchema,
   outputSchema: searchMessagesSchema,
-  async run(input, { gateway, mapper, config }) {
+  async run(input, { gateway, mapper, config, transcription }) {
     const r = await searchMessages(
       gateway,
       mapper,
@@ -45,7 +45,11 @@ export const searchMessagesTool: ToolDefinition<typeof inputSchema, typeof searc
         to: input.to,
         limit: input.limit,
       },
-      { statsMaxMessages: config.statsMaxMessages, timezone: config.timezone },
+      {
+        statsMaxMessages: config.statsMaxMessages,
+        timezone: config.timezone,
+        transcripts: transcription,
+      },
     );
     const where = r.scope === null ? `chat ${input.chat_id}` : `scope ${r.scope}`;
     const lines = r.hits.map(

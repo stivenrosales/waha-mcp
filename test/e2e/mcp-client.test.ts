@@ -3,6 +3,10 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { Hono } from "hono";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createCachedGateway } from "../../src/application/cachedMessages.js";
+import {
+  createTranscriptionService,
+  type TranscriptionService,
+} from "../../src/application/transcripts.js";
 import { loadConfig } from "../../src/config.js";
 import { WahaAuthError } from "../../src/domain/errors.js";
 import { bearerGuard } from "../../src/infrastructure/auth/bearer.js";
@@ -13,13 +17,21 @@ import {
   createSqliteMessageStore,
   openCacheDatabase,
 } from "../../src/infrastructure/cache/sqliteMessageStore.js";
+import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
 import { createApp } from "../../src/infrastructure/http/app.js";
 import { SERVER_INSTRUCTIONS } from "../../src/infrastructure/mcp/instructions.js";
 import { createMcpServer } from "../../src/infrastructure/mcp/server.js";
 import { createTools } from "../../src/infrastructure/mcp/tools/index.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
-import { type InMemoryData, InMemoryWahaGateway, rawText } from "../fakes/InMemoryWahaGateway.js";
+import { createOpenAiCompatibleTranscriber } from "../../src/infrastructure/transcription/openaiCompatible.js";
+import { createWahaAudioSource } from "../../src/infrastructure/transcription/wahaAudioSource.js";
+import {
+  type InMemoryData,
+  InMemoryWahaGateway,
+  rawText,
+  rawVoice,
+} from "../fakes/InMemoryWahaGateway.js";
 
 /**
  * End to end: the official MCP client talks to `createApp` (OAuth bearer guard,
@@ -129,7 +141,13 @@ interface Setup {
 /** Every e2e test runs twice: CACHE_ENABLED=false (today's path) and with the message cache. */
 let cacheOn = false;
 
-function setup(data: InMemoryData = baseData(), gateway = new InMemoryWahaGateway(data)): Setup {
+function setup(
+  data: InMemoryData = baseData(),
+  gateway = new InMemoryWahaGateway(data),
+  transcription?: (
+    served: InMemoryWahaGateway | ReturnType<typeof createCachedGateway>,
+  ) => TranscriptionService,
+): Setup {
   const served = cacheOn
     ? createCachedGateway(gateway, createSqliteMessageStore(openCacheDatabase(":memory:")), {
         refreshHours: 48,
@@ -157,6 +175,7 @@ function setup(data: InMemoryData = baseData(), gateway = new InMemoryWahaGatewa
     config,
     links,
     mediaIdleTimeoutMs: IDLE_MS,
+    ...(transcription ? { transcription: transcription(served) } : {}),
   });
   const app = createApp({
     oauth: createOAuthRoutes({
@@ -221,7 +240,7 @@ for (const cache of [false, true])
       cacheOn = cache;
     });
 
-    it("lists exactly the twelve tools, all readOnlyHint true, none named like send/delete/edit", async () => {
+    it("lists exactly the thirteen tools, all readOnlyHint true, none named like send/delete/edit", async () => {
       const client = await connect(setup());
       expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
       const { tools } = await client.listTools();
@@ -239,6 +258,7 @@ for (const cache of [false, true])
           "list_pending_replies",
           "list_shared_files",
           "search_messages",
+          "transcribe_audio",
         ].sort(),
       );
       for (const t of tools) {
@@ -581,6 +601,109 @@ for (const cache of [false, true])
       const r = await call(client, "get_chat_stats", { chat_id: "51999000111@c.us" });
       expect(Array.isArray(sc(r).responseTimes)).toBe(true);
       expect(typeof (sc(r).coverage as { ignoredGaps: number }).ignoredGaps).toBe("number");
+    });
+
+    it("transcribe_audio says transcription is not configured, without an error or a provider call", async () => {
+      const s = setup();
+      const client = await connect(s);
+      const [mediaId] = await mediaIds(client, DIRECT);
+      const r = await call(client, "transcribe_audio", { media_id: mediaId });
+      expect(r.isError).toBeFalsy();
+      expect(textOf(r)).toBe(
+        "Transcription is not configured on this server (set TRANSCRIPTION_API_URL, TRANSCRIPTION_API_KEY, TRANSCRIPTION_MODEL).",
+      );
+      expect(sc(r)).toEqual({ transcript: null, cached: false });
+      const messages = sc(await call(client, "get_messages", { chat_id: DIRECT, limit: 200 }))
+        .messages as { type: string; transcript: string | null }[];
+      const voice = messages.filter((m) => m.type === "voice");
+      expect(voice.length).toBeGreaterThan(0);
+      for (const m of voice) expect(m.transcript).toBeNull();
+      expect(s.gateway.count("getMessage")).toBe(0);
+    });
+
+    it("with transcription on, voice notes carry transcripts across tools, paid once", async () => {
+      const ANA = "51999000111@c.us";
+      const SPOKEN = "Nos vemos mañana en la oficina";
+      const data = baseData();
+      const voice = rawVoice("V1", 1793286060, {
+        url: fileUrl("ana-v1"),
+        chat: ANA,
+        sender: ANA,
+        seconds: 4,
+      });
+      data.messages = { ...data.messages, [ANA]: [voice, ...(data.messages?.[ANA] ?? [])] };
+      data.media = {
+        ...data.media,
+        [fileUrl("ana-v1")]: { bytes: bytes(300, 9), mimetype: "audio/ogg; codecs=opus" },
+      };
+      const providerCalls: Request[] = [];
+      const providerFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        providerCalls.push(new Request(input, init));
+        return new Response(JSON.stringify({ text: SPOKEN }), {
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+      const s = setup(data, undefined, (served) =>
+        createTranscriptionService({
+          gateway: served,
+          audio: createWahaAudioSource(served, { maxBytes: MAX_BYTES, idleTimeoutMs: IDLE_MS }),
+          store: createSqliteTranscriptStore(openCacheDatabase(":memory:")),
+          transcriber: createOpenAiCompatibleTranscriber({
+            apiUrl: "https://stt.example/v1",
+            apiKey: "stt-secret",
+            model: "whisper",
+            language: null,
+            fetch: providerFetch,
+          }),
+          session: "default",
+          maxSeconds: 300,
+          maxPerCall: 20,
+        }),
+      );
+      const client = await connect(s);
+
+      const got = await call(client, "get_messages", { chat_id: ANA });
+      const [first] = sc(got).messages as { id: string; type: string; transcript: string | null }[];
+      expect(first).toMatchObject({ type: "voice", transcript: SPOKEN });
+      expect(textOf(got)).toContain(SPOKEN);
+      expect(providerCalls).toHaveLength(1);
+      expect(providerCalls[0]?.url).toBe("https://stt.example/v1/audio/transcriptions");
+
+      const pending = await call(client, "list_pending_replies", { since: "2026-10-01T00:00:00Z" });
+      const ana = (
+        sc(pending).pending as {
+          chatId: string;
+          lastMessages: { type: string; transcript: string | null }[];
+        }[]
+      ).find((p) => p.chatId === ANA);
+      expect(ana?.lastMessages.at(-1)).toMatchObject({ type: "voice", transcript: SPOKEN });
+
+      const digest = await call(client, "get_activity_digest", { date: "2026-10-29" });
+      const chat = (
+        sc(digest).chats as { chatId: string; messages: { transcript: string | null }[] }[]
+      ).find((c) => c.chatId === ANA);
+      expect(chat?.messages.map((m) => m.transcript)).toContain(SPOKEN);
+
+      const thread = await call(client, "get_thread", { chat_id: ANA, message_id: first?.id });
+      expect((sc(thread).anchor as { transcript: string | null }).transcript).toBe(SPOKEN);
+
+      const found = await call(client, "search_messages", {
+        query: "OFICINA",
+        from: "2026-10-01T00:00:00Z",
+      });
+      expect(sc(found).hits).toEqual([expect.objectContaining({ chatId: ANA, snippet: SPOKEN })]);
+
+      const voiceId = (sc(got).messages as { attachment: { mediaId: string } | null }[])[0]
+        ?.attachment?.mediaId;
+      const onDemand = await call(client, "transcribe_audio", { media_id: voiceId });
+      expect(onDemand.isError).toBeFalsy();
+      expect(sc(onDemand)).toEqual({ transcript: SPOKEN, cached: true });
+      expect(textOf(onDemand)).toContain(SPOKEN);
+
+      expect(providerCalls).toHaveLength(1);
+      expect(JSON.stringify([got, pending, digest, thread, found, onDemand])).not.toContain(
+        "stt-secret",
+      );
     });
 
     it("lists the three prompts and each names the tools to call", async () => {

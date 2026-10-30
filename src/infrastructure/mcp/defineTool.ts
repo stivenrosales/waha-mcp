@@ -6,10 +6,15 @@ import type {
   ToolCallback,
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
+import {
+  DISABLED_TRANSCRIPTION,
+  type TranscriptionService,
+} from "../../application/transcripts.js";
 import type { Config } from "../../config.js";
 import {
   InvalidInputError,
   MediaStalledError,
+  TranscriptionError,
   UnsupportedEngineError,
   WahaAuthError,
   WahaNotFoundError,
@@ -27,6 +32,8 @@ export interface ToolRunContext {
   links: SignedLinks;
   /** Idle timeout for media bodies read by `get_media`. */
   mediaIdleTimeoutMs: number;
+  /** Voice-note transcription; the disabled service when TRANSCRIPTION_* is not configured. */
+  transcription: TranscriptionService;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
@@ -66,6 +73,8 @@ export interface ToolDeps {
   links: SignedLinks;
   /** Default `MEDIA_IDLE_TIMEOUT_MS` (30 s); injectable for tests. */
   mediaIdleTimeoutMs?: number;
+  /** Default: transcription off. */
+  transcription?: TranscriptionService;
   logger?: Logger;
 }
 
@@ -84,8 +93,12 @@ function describeError(error: unknown): { message: string; unexpected: boolean }
   if (error instanceof WahaUnavailableError)
     return { message: MESSAGES.unavailable, unexpected: false };
   if (error instanceof WahaNotFoundError) return { message: MESSAGES.notFound, unexpected: false };
-  // These two carry messages written to be shown (no key, no URL).
-  if (error instanceof UnsupportedEngineError || error instanceof InvalidInputError)
+  // These carry messages written to be shown (no key, no URL).
+  if (
+    error instanceof UnsupportedEngineError ||
+    error instanceof InvalidInputError ||
+    error instanceof TranscriptionError
+  )
     return { message: error.message, unexpected: false };
   return { message: MESSAGES.unexpected, unexpected: true };
 }
@@ -110,6 +123,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         config: deps.config,
         links: deps.links,
         mediaIdleTimeoutMs: deps.mediaIdleTimeoutMs ?? MEDIA_IDLE_TIMEOUT_MS,
+        transcription: deps.transcription ?? DISABLED_TRANSCRIPTION,
       });
       logger.info(`tool=${def.name} ms=${Date.now() - start} result=ok`);
       if ("content" in out) return { content: out.content };

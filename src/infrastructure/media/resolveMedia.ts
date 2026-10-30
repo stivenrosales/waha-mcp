@@ -1,5 +1,5 @@
 import { InvalidInputError, MediaStalledError, WahaNotFoundError } from "../../domain/errors.js";
-import type { EngineMapper } from "../../domain/message.js";
+import type { Attachment, EngineMapper } from "../../domain/message.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import { decodeMediaId } from "../waha/engines/gows.js";
 
@@ -13,6 +13,10 @@ export interface OpenedMedia {
   length: number | null;
   /** Best known size: Content-Length, else the message's `fileLength`, else `null`. */
   size: number | null;
+  /** The message's attachment kind (needs a `mapper`), else `null`. */
+  kind: Attachment["kind"] | null;
+  /** Declared audio length in seconds (needs a `mapper`), else `null`. */
+  durationSeconds: number | null;
 }
 
 export const MEDIA_GONE = "This file is no longer available on WAHA.";
@@ -26,7 +30,8 @@ const nonEmpty = (v: unknown): string | null =>
  * mediaId → message (`downloadMedia=true`) → `media.url` → opened (unread) file.
  * Returns `null` when the message, its media URL or the file is gone. Nothing is
  * buffered here. Throws `InvalidInputError` for a malformed id; other WAHA errors
- * propagate. With a `mapper`, the message's declared `fileLength` fills `size`.
+ * propagate. With a `mapper`, the message's declared `fileLength` fills `size`, and its
+ * attachment kind and audio duration are reported.
  */
 export async function openMediaById(
   gw: WahaGateway,
@@ -45,13 +50,15 @@ export async function openMediaById(
     if (!url) return null;
     const file = await gw.openMedia(url);
     if (!file) return null;
-    const declared = mapper?.message(raw).attachment?.size ?? null;
+    const attachment = mapper?.message(raw).attachment ?? null;
     return {
       body: file.body,
       mimetype: nonEmpty(media.mimetype) ?? file.mimetype,
       filename: nonEmpty(media.filename),
       length: file.length,
-      size: file.length ?? declared,
+      size: file.length ?? attachment?.size ?? null,
+      kind: attachment?.kind ?? null,
+      durationSeconds: attachment?.durationSeconds ?? null,
     };
   } catch (err) {
     if (err instanceof WahaNotFoundError) return null;

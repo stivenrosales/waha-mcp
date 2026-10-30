@@ -62,11 +62,16 @@ export const messageSchema = z.object({
       caption: z.string().nullable(),
       mediaId: z.string().nullable(),
       available: z.boolean(),
+      durationSeconds: z.number().optional(),
     })
     .nullable(),
   location: z.object({ lat: z.number(), lng: z.number(), name: z.string().nullable() }).nullable(),
   contact: z.object({ name: z.string().nullable(), phone: z.string().nullable() }).nullable(),
   poll: z.object({ question: z.string(), options: z.array(z.string()) }).nullable(),
+  transcript: z
+    .string()
+    .nullable()
+    .describe("Voice-note transcript (only when transcription is configured), else null."),
 });
 
 export const chatStatsSchema = z.object({
@@ -132,6 +137,7 @@ export const compactMessageSchema = z.object({
   type: messageTypeSchema,
   text: z.string().nullable(),
   hasAttachment: z.boolean(),
+  transcript: z.string().nullable(),
 });
 
 /** What a multi-chat call did and did not read; the model must never assume completeness. */

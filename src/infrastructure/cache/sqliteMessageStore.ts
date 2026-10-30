@@ -7,8 +7,8 @@ import type {
 } from "../../domain/ports/MessageStore.js";
 
 /**
- * `cache.db` schema. Other cache tables (e.g. voice-note transcripts keyed by chat id and
- * message id) can live in the same file: add them here and open stores on the same database.
+ * `cache.db` schema: the message cache and the voice-note transcripts share one file and one
+ * owner identity (`meta.owner`), so an account change wipes both in one transaction.
  */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages (
@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS chat_sync (
   newest_ts INTEGER,
   oldest_ts INTEGER,
   last_sync_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS transcripts (
+  chat_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (chat_id, message_id)
 );
 `;
 
@@ -53,6 +60,37 @@ export function openCacheDatabase(dbPath: string): DatabaseSync {
   return db;
 }
 
+/** Runs `fn` in one `BEGIN IMMEDIATE` transaction, rolling back when it throws. */
+export function inTransaction<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/** The account the rows of `cache.db` belong to, or null when never recorded. */
+export function readCacheOwner(db: DatabaseSync): string | null {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'owner'").get() as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+/** Wipes every cached message, sync state and transcript, then records `owner`, atomically. */
+export function resetCacheForOwner(db: DatabaseSync, owner: string): void {
+  inTransaction(db, () => {
+    db.exec("DELETE FROM messages");
+    db.exec("DELETE FROM chat_sync");
+    db.exec("DELETE FROM transcripts");
+    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('owner', ?)").run(owner);
+  });
+}
+
 /** Builds the WHERE clause shared by reads and counts. */
 function rangeWhere(q: { fromTs?: number; toTs?: number }): { sql: string; args: number[] } {
   let sql = "chat_id = ?";
@@ -69,17 +107,7 @@ function rangeWhere(q: { fromTs?: number; toTs?: number }): { sql: string; args:
 }
 
 export function createSqliteMessageStore(db: DatabaseSync): MessageStore {
-  const transaction = <T>(fn: () => T): T => {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = fn();
-      db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw error;
-    }
-  };
+  const transaction = <T>(fn: () => T): T => inTransaction(db, fn);
 
   // ON CONFLICT ... DO UPDATE keeps the rowid, which orders messages that share a second
   // in the order WAHA returned them.
@@ -144,20 +172,9 @@ export function createSqliteMessageStore(db: DatabaseSync): MessageStore {
       ).run(chatId, s.newestTs, s.oldestTs, s.lastSyncAt);
     },
 
-    getOwner() {
-      const row = db.prepare("SELECT value FROM meta WHERE key = 'owner'").get() as
-        | { value: string }
-        | undefined;
-      return row?.value ?? null;
-    },
+    getOwner: () => readCacheOwner(db),
 
-    resetForOwner(owner) {
-      transaction(() => {
-        db.exec("DELETE FROM messages");
-        db.exec("DELETE FROM chat_sync");
-        db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('owner', ?)").run(owner);
-      });
-    },
+    resetForOwner: (owner) => resetCacheForOwner(db, owner),
 
     prune(olderThanTs) {
       return transaction(() => {

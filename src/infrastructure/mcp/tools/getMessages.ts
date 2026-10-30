@@ -31,6 +31,7 @@ function line(m: NormalizedMessage): string {
     );
   else if (m.type !== "text") parts.push(`[${m.type}]`);
   if (m.text) parts.push(m.text);
+  if (m.transcript !== null) parts.push(`(transcript: ${m.transcript})`);
   if (m.location) parts.push(`(${m.location.lat}, ${m.location.lng}) ${m.location.name ?? ""}`);
   if (m.contact) parts.push(`${m.contact.name ?? ""} ${m.contact.phone ?? ""}`.trim());
   if (m.poll) parts.push(`${m.poll.question} — ${m.poll.options.join(" / ")}`);
@@ -42,10 +43,10 @@ export const getMessagesTool: ToolDefinition<typeof inputSchema, typeof outputSc
   name: "get_messages",
   title: "Read chat messages",
   description:
-    "Reads messages of a group or direct chat, NEWEST FIRST, optionally within a date range. Paginate with nextCursor. Attachments carry a media_id for get_media. For counts and rankings use get_chat_stats instead of counting pages.",
+    "Reads messages of a group or direct chat, NEWEST FIRST, optionally within a date range. Paginate with nextCursor. Attachments carry a media_id for get_media. Voice notes carry a transcript when transcription is configured. For counts and rankings use get_chat_stats instead of counting pages.",
   inputSchema,
   outputSchema,
-  async run(input, { gateway, mapper, config }) {
+  async run(input, { gateway, mapper, config, transcription }) {
     const { messages, nextCursor, cacheNote } = await getMessages(gateway, mapper, {
       chatId: input.chat_id,
       from: input.from,
@@ -54,6 +55,7 @@ export const getMessagesTool: ToolDefinition<typeof inputSchema, typeof outputSc
       cursor: input.cursor,
       timezone: config.timezone,
     });
+    const notes = await transcription.annotate(messages);
     const body =
       messages.length === 0
         ? "No messages returned for this chat and range. WAHA may have no stored history for it; this does not mean the chat was silent."
@@ -62,6 +64,7 @@ export const getMessagesTool: ToolDefinition<typeof inputSchema, typeof outputSc
       ? `\n\nMore messages available: call again with cursor="${nextCursor}".`
       : "";
     const cache = cacheNote ? `\n\n${cacheNote}` : "";
-    return { text: `${body}${more}${cache}`, data: { messages, nextCursor } };
+    const voice = notes.length > 0 ? `\n\n${notes.join("\n")}` : "";
+    return { text: `${body}${more}${cache}${voice}`, data: { messages, nextCursor } };
   },
 };

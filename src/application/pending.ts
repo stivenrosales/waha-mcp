@@ -1,5 +1,5 @@
 import { InvalidInputError } from "../domain/errors.js";
-import type { EngineMapper } from "../domain/message.js";
+import type { EngineMapper, NormalizedMessage } from "../domain/message.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
 import {
   assessWaiting,
@@ -12,6 +12,7 @@ import {
 import { parseRangeBound } from "./dates.js";
 import { type Coverage, scanChats } from "./fanout.js";
 import type { ChatScope } from "./groups.js";
+import type { TranscriptionService } from "./transcripts.js";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -47,6 +48,8 @@ export interface FanoutDeps {
   statsMaxMessages: number;
   /** TIMEZONE: reads bare dates and offsetless date-times (default UTC). */
   timezone?: string;
+  /** Transcribes the voice notes among the returned messages (limits per call). */
+  transcripts?: Pick<TranscriptionService, "annotate">;
 }
 
 /** Chats where the other side is waiting for the owner, longest wait first. */
@@ -77,7 +80,7 @@ export async function findPendingReplies(
   });
 
   const perChat = Math.max(1, Math.min(LAST_MESSAGES, Math.floor(TOTAL_MESSAGE_BUDGET / limit)));
-  const all: PendingChat[] = [];
+  const all: (Omit<PendingChat, "lastMessages"> & { last: NormalizedMessage[] })[] = [];
   for (const s of scanned) {
     const conversational = s.messages.filter(isConversational);
     const waiting = assessWaiting(conversational, s.isGroup, who);
@@ -90,10 +93,7 @@ export async function findPendingReplies(
       waitingMinutes: Math.max(0, Math.floor((now - Date.parse(waiting.waitingSince)) / 60_000)),
       unansweredCount: waiting.unansweredCount,
       reason: waiting.reason,
-      lastMessages: conversational
-        .slice(0, perChat)
-        .reverse()
-        .map((msg) => toCompact(msg, who.isMine)),
+      last: conversational.slice(0, perChat).reverse(),
     });
   }
   all.sort(
@@ -101,5 +101,18 @@ export async function findPendingReplies(
       (a.waitingSince < b.waitingSince ? -1 : a.waitingSince > b.waitingSince ? 1 : 0) ||
       a.chatId.localeCompare(b.chatId),
   );
-  return { since, scope, pending: all.slice(0, limit), totalPending: all.length, coverage };
+  const shown = all.slice(0, limit);
+  // Only the messages that are returned are transcribed.
+  const notes = (await deps.transcripts?.annotate(shown.flatMap((p) => p.last))) ?? [];
+  const pending = shown.map(({ last, ...p }) => ({
+    ...p,
+    lastMessages: last.map((msg) => toCompact(msg, who.isMine)),
+  }));
+  return {
+    since,
+    scope,
+    pending,
+    totalPending: all.length,
+    coverage: { ...coverage, notes: [...coverage.notes, ...notes] },
+  };
 }

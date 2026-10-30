@@ -6,6 +6,7 @@ import {
   createSqliteMessageStore,
   openCacheDatabase,
 } from "../../../src/infrastructure/cache/sqliteMessageStore.js";
+import { createSqliteTranscriptStore } from "../../../src/infrastructure/cache/sqliteTranscriptStore.js";
 
 const CHAT = "100000000000009@g.us";
 const row = (id: string, ts: number, text = id) => ({ id, ts, raw: { id, timestamp: ts, text } });
@@ -131,5 +132,40 @@ describe("sqlite message store", () => {
       oldestTs: 800,
       lastSyncAt: 1,
     });
+  });
+
+  it("stores transcripts in the same cache.db and keeps them across a reopen", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-cache-"));
+    dirs.push(dir);
+    const file = path.join(dir, "cache.db");
+    const db = openCacheDatabase(file);
+    const transcripts = createSqliteTranscriptStore(db);
+    expect(transcripts.get(CHAT, "m1")).toBeNull();
+    transcripts.put(CHAT, "m1", "hola");
+    transcripts.put(CHAT, "m1", "hola otra vez");
+    expect(transcripts.get(CHAT, "m1")).toBe("hola otra vez");
+    expect(transcripts.get("other@g.us", "m1")).toBeNull();
+    db.close();
+    const again = createSqliteTranscriptStore(openCacheDatabase(file));
+    expect(again.get(CHAT, "m1")).toBe("hola otra vez");
+  });
+
+  it("an owner change wipes transcripts together with messages, from either store", () => {
+    const db = openCacheDatabase(":memory:");
+    const messages = createSqliteMessageStore(db);
+    const transcripts = createSqliteTranscriptStore(db);
+    messages.resetForOwner("default|a");
+    messages.upsertRaw(CHAT, [row("a", 10)]);
+    transcripts.put(CHAT, "a", "hola");
+    messages.resetForOwner("default|b");
+    expect(transcripts.get(CHAT, "a")).toBeNull();
+    expect(transcripts.getOwner()).toBe("default|b");
+
+    messages.upsertRaw(CHAT, [row("a", 10)]);
+    transcripts.put(CHAT, "a", "hola");
+    transcripts.resetForOwner("default|c");
+    expect(transcripts.get(CHAT, "a")).toBeNull();
+    expect(messages.countRange(CHAT, {})).toBe(0);
+    expect(messages.getOwner()).toBe("default|c");
   });
 });

@@ -113,11 +113,13 @@ export async function buildActivityDigest(
       "This range ended more than 7 days ago and chats were skipped: candidates are picked by last activity, so older days may miss chats that have been quiet since.",
     );
 
+  const picked = active.map((x) => ({ ...x, shown: x.conversational.slice(0, window).reverse() }));
+  // Only the messages that are returned are transcribed.
+  notes.push(...((await deps.transcripts?.annotate(picked.flatMap((x) => x.shown))) ?? []));
   const chats: (DigestChat & { lastAt: string })[] = [];
-  for (const { s, conversational } of active) {
+  for (const { s, conversational, shown } of picked) {
     const newest = conversational[0];
     if (!newest) continue;
-    const shown = conversational.slice(0, window).reverse();
     chats.push({
       chatId: s.chat.id,
       name: s.chat.name ?? s.chat.phone ?? s.chat.id,

@@ -56,6 +56,73 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...minimal, MEDIA_MAX_BYTES: "lots" })).toThrow(/MEDIA_MAX_BYTES/);
   });
 
+  it("leaves transcription off unless all three TRANSCRIPTION_* variables are set", () => {
+    expect(loadConfig(minimal).transcription).toBeNull();
+    const c = loadConfig({
+      ...minimal,
+      TRANSCRIPTION_API_URL: "https://openrouter.ai/api/v1/",
+      TRANSCRIPTION_API_KEY: "sk-or-secret",
+      TRANSCRIPTION_MODEL: "openai/whisper-large-v3-turbo",
+    });
+    expect(c.transcription).toEqual({
+      apiUrl: "https://openrouter.ai/api/v1",
+      apiKey: "sk-or-secret",
+      model: "openai/whisper-large-v3-turbo",
+      language: null,
+      maxSeconds: 300,
+      maxPerCall: 20,
+    });
+    const tuned = loadConfig({
+      ...minimal,
+      TRANSCRIPTION_API_URL: "http://localhost:9999/v1",
+      TRANSCRIPTION_API_KEY: "k2",
+      TRANSCRIPTION_MODEL: "m",
+      TRANSCRIPTION_LANGUAGE: "es",
+      TRANSCRIPTION_MAX_SECONDS: "60",
+      TRANSCRIPTION_MAX_PER_CALL: "0",
+    }).transcription;
+    expect(tuned).toMatchObject({ language: "es", maxSeconds: 60, maxPerCall: 0 });
+  });
+
+  it("rejects a partial transcription config naming the missing variables, never the values", () => {
+    const secret = "sk-or-very-secret";
+    let message = "";
+    try {
+      loadConfig({ ...minimal, TRANSCRIPTION_API_KEY: secret });
+      expect.unreachable();
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain("TRANSCRIPTION_API_URL");
+    expect(message).toContain("TRANSCRIPTION_MODEL");
+    expect(message).not.toContain("TRANSCRIPTION_API_KEY is");
+    expect(message).not.toContain(secret);
+    expect(() =>
+      loadConfig({
+        ...minimal,
+        TRANSCRIPTION_API_URL: "https://x.example",
+        TRANSCRIPTION_MODEL: "m",
+      }),
+    ).toThrow(/TRANSCRIPTION_API_KEY/);
+  });
+
+  it("rejects a non-https transcription URL (except localhost) and invalid limits", () => {
+    const on = { ...minimal, TRANSCRIPTION_API_KEY: "k", TRANSCRIPTION_MODEL: "m" };
+    expect(() => loadConfig({ ...on, TRANSCRIPTION_API_URL: "http://api.example.com/v1" })).toThrow(
+      /TRANSCRIPTION_API_URL must use https/,
+    );
+    expect(() => loadConfig({ ...on, TRANSCRIPTION_API_URL: "not a url" })).toThrow(
+      /TRANSCRIPTION_API_URL/,
+    );
+    const url = { ...on, TRANSCRIPTION_API_URL: "https://api.example.com/v1" };
+    expect(() => loadConfig({ ...url, TRANSCRIPTION_MAX_SECONDS: "0" })).toThrow(
+      /TRANSCRIPTION_MAX_SECONDS/,
+    );
+    expect(() => loadConfig({ ...url, TRANSCRIPTION_MAX_PER_CALL: "-1" })).toThrow(
+      /TRANSCRIPTION_MAX_PER_CALL/,
+    );
+  });
+
   it("strips trailing slash from URLs", () => {
     const c = loadConfig({
       ...minimal,

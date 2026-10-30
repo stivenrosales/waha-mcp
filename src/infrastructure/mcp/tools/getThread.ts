@@ -26,15 +26,14 @@ const inputSchema = z.object({
     .describe("Messages to include after (newer than) the anchor, 0-50 (default 10)."),
 });
 
+const cut = (s: string) =>
+  Array.from(s).length > 280 ? `${Array.from(s).slice(0, 279).join("")}…` : s;
+
 function line(m: NormalizedMessage, mark = " "): string {
   const who = m.fromMe ? "me" : m.author.name || m.author.phone || m.author.id || "unknown";
-  const text =
-    m.text === null
-      ? null
-      : Array.from(m.text).length > 280
-        ? `${Array.from(m.text).slice(0, 279).join("")}…`
-        : m.text;
-  const body = text ?? (m.attachment ? `[${m.attachment.kind}]` : `[${m.type}]`);
+  const text = m.text === null ? null : cut(m.text);
+  const transcript = m.transcript === null ? "" : ` (transcript: ${cut(m.transcript)})`;
+  const body = (text ?? (m.attachment ? `[${m.attachment.kind}]` : `[${m.type}]`)) + transcript;
   return `${mark} [${m.timestamp}] ${who} (id=${m.id}): ${body}${m.replyToId ? ` (reply to ${m.replyToId})` : ""}`;
 }
 
@@ -45,7 +44,7 @@ export const getThreadTool: ToolDefinition<typeof inputSchema, typeof threadSche
     "Reads the conversation around one message: the message itself, up to 50 messages before and after it (chronological), and its reply chain (up to 10 messages it answers, oldest first). Use it after search_messages or get_messages to see the context of a message. If the message is not in the chat's recent history it fails with a clear error. Missing reply ancestors are listed in coverage.",
   inputSchema,
   outputSchema: threadSchema,
-  async run(input, { gateway, mapper, config }) {
+  async run(input, { gateway, mapper, config, transcription }) {
     const t = await getThread(
       gateway,
       mapper,
@@ -56,6 +55,9 @@ export const getThreadTool: ToolDefinition<typeof inputSchema, typeof threadSche
         after: input.after,
       },
       { statsMaxMessages: config.statsMaxMessages },
+    );
+    t.coverage.notes.push(
+      ...(await transcription.annotate([t.anchor, ...t.before, ...t.after, ...t.replyChain])),
     );
     const parts = [
       `Thread around ${t.anchor.id} in ${t.chatId} (${t.before.length} before, ${t.after.length} after, chronological; > marks the anchor):`,

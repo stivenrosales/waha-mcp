@@ -11,4 +11,5 @@ export const SERVER_INSTRUCTIONS = `Read-only access to the owner's WhatsApp (vi
 - Any count, ranking or activity metric must come from get_chat_stats (including response times per party). Do not recount messages yourself from get_messages pages.
 - Respect coverage notes: when history is partial, truncated or unavailable, say so instead of presenting the numbers as complete. An empty result does not mean the chat was silent.
 - Media is not included in messages; fetch an attachment on demand with get_media using its media_id.
+- When the server has transcription configured, voice notes carry a transcript (null otherwise). Coverage notes say which voice notes were skipped; transcribe one on demand with transcribe_audio and its media_id.
 - Reactions are usually unavailable on the GOWS engine; do not conclude that nobody reacted.`;

@@ -33,6 +33,8 @@ export interface AuthStore {
   rotateRefreshToken(token: string, clientId: string): IssuedTokens | null;
   /** Logout: removes every client, code and token. */
   revokeAll(): void;
+  /** Closes the database; the store must not be used afterwards. */
+  close(): void;
 }
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
@@ -208,6 +210,10 @@ export function createAuthStore(dbPath: string, now: () => number = Date.now): A
         db.exec("DELETE FROM codes");
         db.exec("DELETE FROM clients");
       });
+    },
+
+    close() {
+      db.close();
     },
   };
 }

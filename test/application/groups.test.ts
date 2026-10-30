@@ -44,6 +44,35 @@ describe("listGroups", () => {
   });
 });
 
+describe("listGroups activity from chats", () => {
+  const groups = [
+    { JID: "a@g.us", Name: "A", Participants: [] },
+    { JID: "b@g.us", Name: "B", Participants: [] },
+  ];
+  it("merges lastActivity from @g.us chats and sorts desc", async () => {
+    const gw = new InMemoryWahaGateway({
+      groups,
+      chats: [
+        { id: "a@g.us", conversationTimestamp: 100 },
+        { id: "b@g.us", conversationTimestamp: 200 },
+        { id: "5@c.us", conversationTimestamp: 999 },
+      ],
+    });
+    const out = await listGroups(gw, m, {});
+    expect(out.map((g) => g.id)).toEqual(["b@g.us", "a@g.us"]);
+    expect(out[0]?.lastActivity).toBe("1970-01-01T00:03:20.000Z");
+  });
+  it("still returns the groups when listChats fails", async () => {
+    const gw = new InMemoryWahaGateway({ groups });
+    gw.listChats = async () => {
+      throw new Error("down");
+    };
+    const out = await listGroups(gw, m, {});
+    expect(out.map((g) => g.id)).toEqual(["a@g.us", "b@g.us"]);
+    expect(out.every((g) => g.lastActivity === null)).toBe(true);
+  });
+});
+
 describe("getGroupInfo", () => {
   it("maps the group detail", async () => {
     const gw = new InMemoryWahaGateway({
@@ -77,7 +106,7 @@ describe("listChats (direct chats only)", () => {
 
   it("returns only direct chats, sorted by lastActivity desc", async () => {
     const gw = new InMemoryWahaGateway({ chats, contacts });
-    const out = await listChats(gw, m, {}, { now: () => 0 });
+    const out = (await listChats(gw, m, {}, { now: () => 0 })).chats;
     expect(out.map((c) => c.id)).toEqual([
       "51922222222@c.us",
       "777@lid",
@@ -88,7 +117,7 @@ describe("listChats (direct chats only)", () => {
 
   it("name precedence: contact.name, contact.pushname, chat.name, null", async () => {
     const gw = new InMemoryWahaGateway({ chats, contacts });
-    const out = await listChats(gw, m, {}, { now: () => 0 });
+    const out = (await listChats(gw, m, {}, { now: () => 0 })).chats;
     const names = Object.fromEntries(out.map((c) => [c.id, c.name]));
     expect(names).toEqual({
       "51911111111@c.us": "Mum",
@@ -97,18 +126,38 @@ describe("listChats (direct chats only)", () => {
       "51933333333@s.whatsapp.net": "Pushy",
     });
     const gw2 = new InMemoryWahaGateway({ chats: [{ id: "5@c.us", name: "" }], contacts: [] });
-    expect((await listChats(gw2, m, {}, { now: () => 0 }))[0]?.name).toBeNull();
+    expect((await listChats(gw2, m, {}, { now: () => 0 })).chats[0]?.name).toBeNull();
   });
 
   it("nameContains is case-insensitive over name and phone", async () => {
     const gw = new InMemoryWahaGateway({ chats, contacts });
     const deps = { now: () => 0 };
-    expect((await listChats(gw, m, { nameContains: "mUM" }, deps)).map((c) => c.id)).toEqual([
+    expect((await listChats(gw, m, { nameContains: "mUM" }, deps)).chats.map((c) => c.id)).toEqual([
       "51911111111@c.us",
     ]);
-    expect((await listChats(gw, m, { nameContains: "922222" }, deps)).map((c) => c.id)).toEqual([
-      "51922222222@c.us",
-    ]);
+    expect(
+      (await listChats(gw, m, { nameContains: "922222" }, deps)).chats.map((c) => c.id),
+    ).toEqual(["51922222222@c.us"]);
+  });
+
+  it("degrades when contacts fail: chats kept, flag set, failure not cached", async () => {
+    const gw = new InMemoryWahaGateway({ chats, contacts });
+    let fail = true;
+    const orig = gw.listContacts.bind(gw);
+    gw.listContacts = async (q) => {
+      if (fail) throw new Error("timeout");
+      return orig(q);
+    };
+    const deps = { now: () => 0 };
+    const bad = await listChats(gw, m, {}, deps);
+    expect(bad.namesResolved).toBe(false);
+    expect(bad.chats).toHaveLength(4);
+    expect(bad.chats.find((c) => c.id === "51911111111@c.us")?.name).toBeNull();
+    expect(bad.chats.find((c) => c.id === "51922222222@c.us")?.name).toBe("Chat Name");
+    fail = false;
+    const ok = await listChats(gw, m, {}, deps);
+    expect(ok.namesResolved).toBe(true);
+    expect(ok.chats.find((c) => c.id === "51911111111@c.us")?.name).toBe("Mum");
   });
 
   it("pages contacts until an empty page and caches them for 10 minutes", async () => {

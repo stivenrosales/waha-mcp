@@ -18,10 +18,15 @@ function history(n: number) {
 
 describe("cursor", () => {
   it("round-trips base64url JSON and rejects garbage", () => {
-    const c = encodeCursor({ offset: 50, from: "a", to: null });
+    const c = encodeCursor({ chatId: "c", offset: 50, from: "a", to: null });
     expect(c).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(decodeCursor(c)).toEqual({ offset: 50, from: "a", to: null });
+    expect(decodeCursor(c)).toEqual({ chatId: "c", offset: 50, from: "a", to: null });
     expect(() => decodeCursor("%%%")).toThrow(InvalidInputError);
+    expect(() =>
+      decodeCursor(
+        Buffer.from('{"chatId":"c","offset":1e308,"from":null,"to":null}').toString("base64url"),
+      ),
+    ).toThrow(InvalidInputError);
     expect(() => decodeCursor(Buffer.from('{"offset":-1}').toString("base64url"))).toThrow(
       InvalidInputError,
     );
@@ -55,6 +60,15 @@ describe("getMessages", () => {
     await expect(
       getMessages(gw, m, { chatId: CHAT, limit: 2, cursor: p1.nextCursor as string }),
     ).rejects.toThrow(/different date range/);
+  });
+
+  it("rejects a cursor from another chat", async () => {
+    const other = "100000000000010@g.us";
+    const gw = new InMemoryWahaGateway({ messages: { [CHAT]: history(5), [other]: history(5) } });
+    const p1 = await getMessages(gw, m, { chatId: CHAT, limit: 2 });
+    await expect(
+      getMessages(gw, m, { chatId: other, limit: 2, cursor: p1.nextCursor as string }),
+    ).rejects.toThrow(/different chat/);
   });
 
   it("validates limit (1..200, default 50) and dates", async () => {
@@ -126,6 +140,22 @@ describe("fetchRange", () => {
     expect(out.messages).toHaveLength(450);
     expect(out.truncated).toBe(false);
     expect(gw.calls.map((c) => (c.args[1] as { offset: number }).offset)).toEqual([0, 200, 400]);
+  });
+
+  it("dedupes events repeated when a message arrives between pages", async () => {
+    const all = history(300);
+    const gw = new InMemoryWahaGateway({ messages: { [CHAT]: all } });
+    const orig = gw.getMessages.bind(gw);
+    let n = 0;
+    gw.getMessages = async (chat, q) => {
+      if (n++ === 1) all.unshift(rawText("NEW", 2_000_000, "new")); // shifts offsets by one
+      return orig(chat, q);
+    };
+    const out = await fetchRange(gw, m, { chatId: CHAT, cap: 1000 });
+    const ids = out.messages.map((x) => x.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toHaveLength(300);
+    expect(out.truncated).toBe(false);
   });
 
   it("empty history returns no messages and is not truncated", async () => {

@@ -67,13 +67,22 @@ export async function getMessages(
       throw new InvalidInputError(
         "This cursor belongs to a different date range. Repeat the call without a cursor to start over.",
       );
+    if (c.chatId !== q.chatId)
+      throw new InvalidInputError(
+        "This cursor belongs to a different chat. Repeat the call without a cursor.",
+      );
     offset = c.offset;
   }
   const raws = await gw.getMessages(q.chatId, { limit, offset, from, to });
   const nextCursor =
     raws.length < limit
       ? null
-      : encodeCursor({ offset: offset + raws.length, from: q.from ?? null, to: q.to ?? null });
+      : encodeCursor({
+          chatId: q.chatId,
+          offset: offset + raws.length,
+          from: q.from ?? null,
+          to: q.to ?? null,
+        });
   return { messages: mapAndAttach(m, raws), nextCursor };
 }
 
@@ -89,16 +98,20 @@ export async function fetchRange(
   const from = toUnix(q.from, "from");
   const to = toUnix(q.to, "to");
   const raws: unknown[] = [];
+  const seen = new Set<string>();
+  let fetched = 0;
   let counted = 0;
   // Read until we hold one message more than the cap (proof that the cap cut something) or run out.
   while (counted <= q.cap) {
-    const page = await gw.getMessages(q.chatId, {
-      limit: RANGE_PAGE,
-      offset: raws.length,
-      from,
-      to,
-    });
+    const page = await gw.getMessages(q.chatId, { limit: RANGE_PAGE, offset: fetched, from, to });
+    fetched += page.length;
     for (const raw of page) {
+      // A message arriving mid-fetch shifts later offsets and repeats events: keep the first copy.
+      const id = (raw as { id?: unknown } | null)?.id;
+      if (typeof id === "string") {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
       raws.push(raw);
       if (!m.reaction(raw)) counted++;
     }

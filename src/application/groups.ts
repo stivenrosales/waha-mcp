@@ -19,7 +19,30 @@ export async function listGroups(
   const needle = q.nameContains?.trim().toLowerCase();
   const groups = (await gw.listGroups()).map((raw) => m.groupSummary(raw));
   const filtered = needle ? groups.filter((g) => g.name.toLowerCase().includes(needle)) : groups;
-  return byActivityDesc(filtered);
+  // The groups endpoint has no activity time; the chats list does. Best-effort merge.
+  const activity = await groupActivity(gw, m).catch(() => new Map<string, string>());
+  return byActivityDesc(
+    filtered.map((g) => ({ ...g, lastActivity: g.lastActivity ?? activity.get(g.id) ?? null })),
+  );
+}
+
+async function groupActivity(gw: WahaGateway, m: EngineMapper): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const raw of await fetchAllChats(gw)) {
+    const c = m.chatSummary(raw);
+    if (c.id.endsWith("@g.us") && c.lastActivity) out.set(c.id, c.lastActivity);
+  }
+  return out;
+}
+
+async function fetchAllChats(gw: WahaGateway): Promise<unknown[]> {
+  const raws: unknown[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const items = await gw.listChats({ limit: CHAT_PAGE, offset: page * CHAT_PAGE });
+    if (items.length === 0) break;
+    raws.push(...items);
+  }
+  return raws;
 }
 
 export async function getGroupInfo(
@@ -83,16 +106,18 @@ export async function listChats(
   m: EngineMapper,
   q: { nameContains?: string },
   deps: { now?: () => number } = {},
-): Promise<ChatSummary[]> {
+): Promise<{ chats: ChatSummary[]; namesResolved: boolean }> {
   const now = (deps.now ?? Date.now)();
-  const raws: unknown[] = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const items = await gw.listChats({ limit: CHAT_PAGE, offset: page * CHAT_PAGE });
-    if (items.length === 0) break;
-    raws.push(...items);
-  }
+  const raws = await fetchAllChats(gw);
   const direct = raws.map((raw) => m.chatSummary(raw)).filter((c) => isDirectChatId(c.id));
-  const contacts = await loadContacts(gw, now);
+  // Names are best-effort: a failing contacts load must not hide the chats (and is not cached).
+  let namesResolved = true;
+  let contacts = new Map<string, ContactNames>();
+  try {
+    contacts = await loadContacts(gw, now);
+  } catch {
+    namesResolved = false;
+  }
   const named = direct.map((c) => {
     const contact = contacts.get(joinKey(c.id));
     return { ...c, name: contact?.name ?? contact?.pushname ?? c.name };
@@ -105,5 +130,5 @@ export async function listChats(
           (c.phone?.toLowerCase().includes(needle) ?? false),
       )
     : named;
-  return byActivityDesc(filtered);
+  return { chats: byActivityDesc(filtered), namesResolved };
 }

@@ -2,15 +2,16 @@ import { InvalidInputError } from "../domain/errors.js";
 
 /** Opaque pagination state: the raw WAHA offset plus the range it belongs to. */
 export interface Cursor {
+  chatId: string;
   offset: number;
   from: string | null;
   to: string | null;
 }
 
 export function encodeCursor(c: Cursor): string {
-  return Buffer.from(JSON.stringify({ offset: c.offset, from: c.from, to: c.to })).toString(
-    "base64url",
-  );
+  return Buffer.from(
+    JSON.stringify({ chatId: c.chatId, offset: c.offset, from: c.from, to: c.to }),
+  ).toString("base64url");
 }
 
 export function decodeCursor(value: string): Cursor {
@@ -29,12 +30,18 @@ export function decodeCursor(value: string): Cursor {
   >;
   const bound = (v: unknown) => v === null || typeof v === "string";
   if (
+    typeof o.chatId !== "string" ||
     typeof o.offset !== "number" ||
-    !Number.isInteger(o.offset) ||
+    !Number.isSafeInteger(o.offset) ||
     o.offset < 0 ||
     !bound(o.from) ||
     !bound(o.to)
   )
     throw invalid();
-  return { offset: o.offset, from: o.from as string | null, to: o.to as string | null };
+  return {
+    chatId: o.chatId,
+    offset: o.offset,
+    from: o.from as string | null,
+    to: o.to as string | null,
+  };
 }

@@ -27,6 +27,8 @@ export interface InMemoryData {
   >;
   /** Owner returned by `getMe` (default: the owner of the direct fixtures). */
   me?: { id: string; lid: string | null };
+  /** Phone jid per lid for `lookupLid` (missing = no mapping). */
+  lids?: Record<string, string>;
   /** Engine reported by `getSession` (default "GOWS"). */
   engine?: string;
   /** When set, every method rejects with this error (simulates WAHA failures). */
@@ -37,6 +39,7 @@ export interface Call {
   method:
     | "getSession"
     | "getMe"
+    | "lookupLid"
     | "listChats"
     | "listContacts"
     | "getMessages"
@@ -72,6 +75,12 @@ export class InMemoryWahaGateway implements WahaGateway {
     this.calls.push({ method: "getMe", args: [] });
     this.guard();
     return this.data.me ?? { id: "51000000002@c.us", lid: "100000000000002@lid" };
+  }
+
+  async lookupLid(lid: string) {
+    this.calls.push({ method: "lookupLid", args: [lid] });
+    this.guard();
+    return this.data.lids?.[lid] ?? null;
   }
 
   async listGroups() {

@@ -9,6 +9,8 @@ export interface WahaGateway {
   getSession(): Promise<{ engine: string; status: string }>;
   /** The account owner. `id` is the phone JID (`…@c.us`); `lid` the linked id when WAHA reports one. Cached per process. */
   getMe(): Promise<{ id: string; lid: string | null }>;
+  /** Phone jid (`…@c.us`) behind a `@lid`, or null when WAHA has no mapping. */
+  lookupLid(lid: string): Promise<string | null>;
   listGroups(): Promise<unknown[]>;
   getGroup(groupId: string): Promise<unknown>;
   /** All chat types (groups, direct, newsletters...); filtering happens in the use case. */

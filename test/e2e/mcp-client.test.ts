@@ -73,6 +73,7 @@ function baseData(): InMemoryData {
       { id: "123@newsletter", name: "News" },
     ],
     contacts: [{ id: "51999000111@c.us", name: "Ana", pushname: "ana" }],
+    lids: { "10000000000002@lid": "51999000333@c.us" },
     messages: {
       [GROUP]: [...groupMedia, ...groupText],
       [DIRECT]: directMedia,
@@ -196,7 +197,7 @@ async function mediaIds(client: Client, chatId: string): Promise<(string | null)
 }
 
 describe("e2e: MCP client against createApp", () => {
-  it("lists exactly the ten tools, all readOnlyHint true, none named like send/delete/edit", async () => {
+  it("lists exactly the twelve tools, all readOnlyHint true, none named like send/delete/edit", async () => {
     const client = await connect(setup());
     expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
     const { tools } = await client.listTools();
@@ -204,6 +205,7 @@ describe("e2e: MCP client against createApp", () => {
       [
         "get_activity_digest",
         "get_chat_stats",
+        "get_contact",
         "get_group_info",
         "get_media",
         "get_messages",
@@ -211,6 +213,7 @@ describe("e2e: MCP client against createApp", () => {
         "list_chats",
         "list_groups",
         "list_pending_replies",
+        "list_shared_files",
         "search_messages",
       ].sort(),
     );
@@ -321,6 +324,65 @@ describe("e2e: MCP client against createApp", () => {
     expect(textOf(missing)).toContain("message not found in the recent history");
     const bad = await call(client, "get_thread", { chat_id: GROUP, message_id: "x", before: 99 });
     expect(bad.isError).toBe(true);
+  });
+
+  it("list_shared_files lists media of one chat and across scope, with coverage", async () => {
+    const client = await connect(setup());
+    const range = { from: "2026-10-01T00:00:00Z" };
+    const docs = await call(client, "list_shared_files", {
+      chat_id: DIRECT,
+      kind: "document",
+      ...range,
+    });
+    expect(docs.isError).toBeFalsy();
+    const items = sc(docs).items as {
+      kind: string;
+      chatId: string;
+      mediaId: string | null;
+      filename: string | null;
+    }[];
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((i) => i.kind === "document" && i.chatId === DIRECT)).toBe(true);
+    expect(items.every((i) => typeof i.mediaId === "string")).toBe(true);
+    expect(textOf(docs)).toContain("Coverage:");
+    // The media_id is usable with get_media.
+    const media = await call(client, "get_media", { media_id: items[0]?.mediaId });
+    expect(media.isError).toBeFalsy();
+    const all = await call(client, "list_shared_files", { scope: "all", ...range });
+    expect(sc(all).scope).toBe("all");
+    const chats = new Set((sc(all).items as { chatId: string }[]).map((i) => i.chatId));
+    expect(chats).toEqual(new Set([GROUP, DIRECT]));
+    const bad = await call(client, "list_shared_files", { limit: 500 });
+    expect(bad.isError).toBe(true);
+  });
+
+  it("get_contact resolves by phone, by lid and by name, and refuses bad input", async () => {
+    const client = await connect(setup());
+    const phone = await call(client, "get_contact", { phone: "+51 999 000 111" });
+    expect(phone.isError).toBeFalsy();
+    expect(sc(phone)).toMatchObject({
+      match: "unique",
+      contact: {
+        id: "51999000111@c.us",
+        name: "Ana",
+        pushname: "ana",
+        lastInteraction: "2026-10-29T15:00:00.000Z",
+      },
+    });
+    const byLid = await call(client, "get_contact", { contact_id: "10000000000002@lid" });
+    expect(sc(byLid)).toMatchObject({
+      match: "unique",
+      contact: { id: "51999000333@c.us", lid: "10000000000002@lid" },
+    });
+    const groups = (sc(byLid).contact as { groupsInCommon: { id: string }[] }).groupsInCommon;
+    expect(groups.length).toBeGreaterThan(0);
+    const ana = await call(client, "get_contact", { name: "ANA" });
+    expect(sc(ana)).toMatchObject({ match: "unique", contact: { id: "51999000111@c.us" } });
+    const none = await call(client, "get_contact", { name: "zzzz" });
+    expect(sc(none)).toMatchObject({ match: "none", contact: null });
+    const two = await call(client, "get_contact", { name: "ana", phone: "51999000111" });
+    expect(two.isError).toBe(true);
+    expect(textOf(two)).toContain("exactly one");
   });
 
   it("list_pending_replies maps domain errors", async () => {

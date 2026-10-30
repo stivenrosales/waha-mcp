@@ -2,9 +2,8 @@ import { InvalidInputError } from "../domain/errors.js";
 import type { EngineMapper, NormalizedMessage } from "../domain/message.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
 import { type CompactMessage, identityOf, toCompact } from "./compact.js";
-import { type Coverage, scanChats } from "./fanout.js";
-import { type ChatScope, listChatsByScope } from "./groups.js";
-import { fetchRange } from "./messages.js";
+import { type Coverage, checkLimit, collectChats, parseIso } from "./fanout.js";
+import type { ChatScope } from "./groups.js";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -40,7 +39,7 @@ const strip = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "");
  * Matching ignores case and accents ("ano" also matches "año"). Returns the lowercase,
  * accent-free form of `text`, with each folded UTF-16 unit mapped to its source code point index.
  */
-function fold(text: string): { folded: string; map: number[] } {
+export function fold(text: string): { folded: string; map: number[] } {
   let folded = "";
   const map: number[] = [];
   Array.from(text).forEach((ch, i) => {
@@ -81,25 +80,6 @@ function matchSnippet(m: NormalizedMessage, needle: string): string | null {
   return null;
 }
 
-function parseIso(value: string | undefined, label: string): number | undefined {
-  if (value === undefined) return undefined;
-  const ms = Date.parse(value);
-  if (Number.isNaN(ms))
-    throw new InvalidInputError(`"${label}" must be an ISO 8601 date, got "${value}".`);
-  return ms;
-}
-
-/** Best-effort display name of one chat; null when it cannot be resolved. */
-async function chatName(gw: WahaGateway, m: EngineMapper, chatId: string): Promise<string | null> {
-  try {
-    const { chats } = await listChatsByScope(gw, m, chatId.endsWith("@g.us") ? "groups" : "direct");
-    const found = chats.find((c) => c.id === chatId);
-    return found ? (found.name ?? found.phone ?? null) : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Case- and accent-insensitive search over text, caption and filename, newest hits first.
  * With `chatId` it reads that single chat (any type); otherwise it fans out over `scope`.
@@ -123,9 +103,7 @@ export async function searchMessages(
     throw new InvalidInputError(
       `"query" must be between ${MIN_QUERY} and ${MAX_QUERY} characters after trimming.`,
     );
-  const limit = q.limit ?? DEFAULT_LIMIT;
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT)
-    throw new InvalidInputError(`"limit" must be an integer between 1 and ${MAX_LIMIT}.`);
+  const limit = checkLimit(q.limit, DEFAULT_LIMIT, MAX_LIMIT);
   const now = (deps.now ?? Date.now)();
   const fromMs = parseIso(q.from, "from") ?? now - DEFAULT_WINDOW_MS;
   const toMs = parseIso(q.to, "to");
@@ -136,49 +114,14 @@ export async function searchMessages(
   const needle = fold(query).folded;
   const who = identityOf(await gw.getMe());
 
-  let chats: { id: string; name: string; isGroup: boolean; messages: NormalizedMessage[] }[];
-  let coverage: Coverage;
   const scope = q.chatId === undefined ? (q.scope ?? "direct") : null;
-  if (q.chatId === undefined) {
-    const { scanned, coverage: c } = await scanChats(gw, m, {
-      scope: scope as ChatScope,
-      from,
-      to,
-      cap: deps.statsMaxMessages,
-    });
-    coverage = c;
-    chats = scanned.map((s) => ({
-      id: s.chat.id,
-      name: s.chat.name ?? s.chat.phone ?? s.chat.id,
-      isGroup: s.isGroup,
-      messages: s.messages,
-    }));
-  } else {
-    const chatId = q.chatId;
-    const [range, name] = await Promise.all([
-      fetchRange(gw, m, { chatId, from, to, cap: deps.statsMaxMessages }),
-      chatName(gw, m, chatId),
-    ]);
-    chats = [
-      {
-        id: chatId,
-        name: name ?? chatId,
-        isGroup: chatId.endsWith("@g.us"),
-        messages: range.messages,
-      },
-    ];
-    coverage = {
-      chatsScanned: 1,
-      chatsSkipped: 0,
-      truncated: range.truncated,
-      failedChats: [],
-      notes: range.truncated
-        ? [
-            `The chat hit the cap of ${deps.statsMaxMessages} messages: only the newest ones of the range were searched.`,
-          ]
-        : [],
-    };
-  }
+  const { chats, coverage } = await collectChats(gw, m, {
+    chatId: q.chatId,
+    scope: scope ?? "direct",
+    from,
+    to,
+    cap: deps.statsMaxMessages,
+  });
 
   const all: SearchHit[] = [];
   for (const c of chats)

@@ -200,6 +200,53 @@ export const threadSchema = z.object({
   }),
 });
 
+export const sharedFilesSchema = z.object({
+  from: z.string(),
+  to: z.string().nullable(),
+  scope: z.enum(["direct", "groups", "all"]).nullable(),
+  kind: z.enum(["document", "image", "video", "audio", "voice", "sticker", "link"]).nullable(),
+  totalMatches: z.number(),
+  items: z.array(
+    z.object({
+      chatId: z.string(),
+      chatName: z.string(),
+      messageId: z.string(),
+      at: z.string(),
+      kind: z.enum(["document", "image", "video", "audio", "voice", "sticker", "link"]),
+      filename: z.string().nullable(),
+      mimetype: z.string().nullable(),
+      size: z.number().nullable(),
+      url: z.string().nullable(),
+      mediaId: z.string().nullable(),
+    }),
+  ),
+  coverage: coverageSchema,
+});
+
+export const contactSchema = z.object({
+  match: z.enum(["unique", "ambiguous", "none"]),
+  contact: z
+    .object({
+      id: z.string(),
+      lid: z.string().nullable(),
+      phone: z.string().nullable(),
+      name: z.string().nullable(),
+      pushname: z.string().nullable(),
+      groupsInCommon: z.array(z.object({ id: z.string(), name: z.string() })),
+      lastInteraction: z.string().nullable(),
+    })
+    .nullable(),
+  candidates: z.array(
+    z.object({
+      id: z.string(),
+      phone: z.string().nullable(),
+      name: z.string().nullable(),
+      pushname: z.string().nullable(),
+    }),
+  ),
+  totalCandidates: z.number(),
+});
+
 /** Shared closing lines of every multi-chat summary. */
 export function coverageText(c: z.infer<typeof coverageSchema>): string {
   const head = `Coverage: ${c.chatsScanned} chats scanned, ${c.chatsSkipped} skipped, ${c.failedChats.length} failed${c.truncated ? " (INCOMPLETE)" : ""}.`;

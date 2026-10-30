@@ -64,7 +64,7 @@ const CONTACT_PAGE = 5000;
 const MAX_PAGES = 100;
 const CONTACTS_TTL_MS = 10 * 60_000;
 
-interface ContactNames {
+export interface ContactNames {
   name: string | null;
   pushname: string | null;
 }
@@ -81,9 +81,13 @@ const nonEmpty = (v: unknown): string | null =>
 /** WAHA ids come as a plain string or as `{ _serialized }`. */
 const idOf = (v: unknown): string | null => nonEmpty(v) ?? nonEmpty(asRecord(v)._serialized);
 /** Contacts are listed as `@c.us`; chats may use the equivalent `@s.whatsapp.net`. */
-const joinKey = (id: string) => id.replace(/@s\.whatsapp\.net$/, "@c.us");
+export const joinKey = (id: string) => id.replace(/@s\.whatsapp\.net$/, "@c.us");
 
-async function loadContacts(gw: WahaGateway, now: number): Promise<Map<string, ContactNames>> {
+/** Address-book contacts by id, from the 10-minute cache shared by every direct-chat tool. */
+export async function loadContacts(
+  gw: WahaGateway,
+  now: number,
+): Promise<Map<string, ContactNames>> {
   const cached = contactCache.get(gw);
   if (cached && now - cached.loadedAt < CONTACTS_TTL_MS) return cached.byId;
   const byId = new Map<string, ContactNames>();

@@ -1,3 +1,4 @@
+import { InvalidInputError } from "../domain/errors.js";
 import type { ChatSummary, EngineMapper, NormalizedMessage } from "../domain/message.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
 import { type ChatScope, listChatsByScope } from "./groups.js";
@@ -107,6 +108,88 @@ export async function scanChats(
       truncated: skipped > 0 || cut > 0 || failedChats.length > 0,
       failedChats,
       notes,
+    },
+  };
+}
+
+export function parseIso(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms))
+    throw new InvalidInputError(`"${label}" must be an ISO 8601 date, got "${value}".`);
+  return ms;
+}
+
+export function checkLimit(limit: number | undefined, fallback: number, max: number): number {
+  const value = limit ?? fallback;
+  if (!Number.isInteger(value) || value < 1 || value > max)
+    throw new InvalidInputError(`"limit" must be an integer between 1 and ${max}.`);
+  return value;
+}
+
+/** Best-effort display name of one chat; null when it cannot be resolved. */
+async function chatName(gw: WahaGateway, m: EngineMapper, chatId: string): Promise<string | null> {
+  try {
+    const { chats } = await listChatsByScope(gw, m, chatId.endsWith("@g.us") ? "groups" : "direct");
+    const found = chats.find((c) => c.id === chatId);
+    return found ? (found.name ?? found.phone ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface CollectedChat {
+  id: string;
+  name: string;
+  isGroup: boolean;
+  messages: NormalizedMessage[];
+}
+
+/**
+ * The messages a scan-style tool works on: one chat of any type when `chatId` is given,
+ * otherwise a fan-out over `scope`. Always paired with the coverage of what was read.
+ */
+export async function collectChats(
+  gw: WahaGateway,
+  m: EngineMapper,
+  q: { chatId?: string; scope: ChatScope; from: string; to?: string; cap: number },
+): Promise<{ chats: CollectedChat[]; coverage: Coverage }> {
+  if (q.chatId === undefined) {
+    const { scanned, coverage } = await scanChats(gw, m, q);
+    return {
+      coverage,
+      chats: scanned.map((s) => ({
+        id: s.chat.id,
+        name: s.chat.name ?? s.chat.phone ?? s.chat.id,
+        isGroup: s.isGroup,
+        messages: s.messages,
+      })),
+    };
+  }
+  const chatId = q.chatId;
+  const [range, name] = await Promise.all([
+    fetchRange(gw, m, { chatId, from: q.from, to: q.to, cap: q.cap }),
+    chatName(gw, m, chatId),
+  ]);
+  return {
+    chats: [
+      {
+        id: chatId,
+        name: name ?? chatId,
+        isGroup: chatId.endsWith("@g.us"),
+        messages: range.messages,
+      },
+    ],
+    coverage: {
+      chatsScanned: 1,
+      chatsSkipped: 0,
+      truncated: range.truncated,
+      failedChats: [],
+      notes: range.truncated
+        ? [
+            `The chat hit the cap of ${q.cap} messages: only the newest ones of the range were searched.`,
+          ]
+        : [],
     },
   };
 }

@@ -344,4 +344,31 @@ describe("WahaHttpGateway", () => {
       await expect(gw.getMe()).rejects.toThrow("WAHA returned an invalid response body.");
     });
   });
+
+  describe("lookupLid", () => {
+    it("GETs /lids/{lid} and returns the phone jid", async () => {
+      const { fn, calls } = fakeFetch(() => json({ lid: "100@lid", pn: "51999000111@c.us" }));
+      expect(await make(fn).lookupLid("100@lid")).toBe("51999000111@c.us");
+      expect(new URL(calls[0]?.url ?? "").pathname).toBe("/api/my%20session/lids/100%40lid");
+      expect(calls[0]?.method).toBe("GET");
+      expect(calls[0]?.redirect).toBe("error");
+      expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+    });
+
+    it("is null when WAHA has no mapping (404, missing or malformed pn)", async () => {
+      expect(await make(fakeFetch(() => json({}, 404)).fn).lookupLid("1@lid")).toBeNull();
+      expect(await make(fakeFetch(() => json({ lid: "1@lid" })).fn).lookupLid("1@lid")).toBeNull();
+      expect(await make(fakeFetch(() => json({ pn: 5 })).fn).lookupLid("1@lid")).toBeNull();
+      expect(await make(fakeFetch(() => json({ pn: "" })).fn).lookupLid("1@lid")).toBeNull();
+    });
+
+    it("maps other failures to fixed domain errors", async () => {
+      await expect(
+        make(fakeFetch(() => json({}, 401)).fn).lookupLid("1@lid"),
+      ).rejects.toBeInstanceOf(WahaAuthError);
+      await expect(
+        make(fakeFetch(() => json({}, 500)).fn).lookupLid("1@lid"),
+      ).rejects.toBeInstanceOf(WahaUnavailableError);
+    });
+  });
 });

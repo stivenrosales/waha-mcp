@@ -124,6 +124,17 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
       return me;
     },
 
+    async lookupLid(lid) {
+      let body: unknown;
+      try {
+        body = await getJson(`/api/${session}/lids/${encodeURIComponent(lid)}`, "lid");
+      } catch (err) {
+        if (err instanceof WahaNotFoundError) return null;
+        throw err;
+      }
+      return idString(asRecord(body).pn);
+    },
+
     async listGroups() {
       return asArray(await getJson(`/api/${session}/groups`, "groups"));
     },

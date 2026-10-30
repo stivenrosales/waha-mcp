@@ -430,6 +430,29 @@ describe("e2e: MCP client against createApp", () => {
     expect(s.gateway.cancelled.has(fileUrl("d-6"))).toBe(true);
   });
 
+  it("cancels the upstream body and answers 502 when the response cannot be built", async () => {
+    const data = baseData();
+    const direct = data.messages?.[DIRECT] as Raw[];
+    // A mimetype with CR/LF is an invalid header value: building the Response throws.
+    direct[1] = {
+      ...direct[1],
+      media: { ...(direct[1]?.media as Raw), mimetype: "image/webp\r\nX-Evil: 1" },
+    };
+    (data.media as Record<string, unknown>)[fileUrl("d-1")] = {
+      bytes: bytes(2000),
+      mimetype: "image/webp",
+    };
+    const s = setup(data);
+    const client = await connect(s);
+    const id = (await mediaIds(client, DIRECT))[1];
+    const link = linkOf(await call(client, "get_media", { media_id: id }));
+    s.gateway.cancelled.clear();
+    const res = await s.app.fetch(new Request(link));
+    expect(res.status).toBe(502);
+    expect(await res.text()).toBe("Could not load this file from WAHA right now.");
+    expect(s.gateway.cancelled.has(fileUrl("d-1"))).toBe(true);
+  });
+
   it("media links answer 404 for tampered tokens and for files gone from WAHA", async () => {
     const s = setup();
     expect((await s.app.fetch(new Request(`${BASE}/media/not.valid`))).status).toBe(404);

@@ -57,24 +57,26 @@ export function createMediaHandler(deps: {
           `This file is too large to serve (${media.length} bytes; MEDIA_MAX_BYTES is ${deps.maxBytes}).`,
         );
       }
+      // The stream that currently owns the lock on WAHA's body: cancelling it
+      // propagates to WAHA. Wrapping locks `media.body`, so it must not be cancelled directly.
+      let owner: ReadableStream<Uint8Array> = media.body;
       try {
-        const headers: Record<string, string> = {
+        // Validate headers first (CR/LF in a mimetype or filename throws here).
+        const headers = new Headers({
           "Content-Type": media.mimetype,
           "Content-Disposition": contentDisposition(media.mimetype, media.filename),
           "Cache-Control": "private, no-store",
           "X-Content-Type-Options": "nosniff",
           "Content-Security-Policy": "default-src 'none'; sandbox",
           "Referrer-Policy": "no-referrer",
-        };
-        if (media.length !== null) headers["Content-Length"] = String(media.length);
-        const body = withIdleTimeout(
-          media.body,
-          deps.idleTimeoutMs ?? MEDIA_IDLE_TIMEOUT_MS,
-        ).pipeThrough(capStream(media.length ?? deps.maxBytes));
-        return new Response(body, { status: 200, headers });
+        });
+        if (media.length !== null) headers.set("Content-Length", String(media.length));
+        owner = withIdleTimeout(media.body, deps.idleTimeoutMs ?? MEDIA_IDLE_TIMEOUT_MS);
+        owner = owner.pipeThrough(capStream(media.length ?? deps.maxBytes));
+        return new Response(owner, { status: 200, headers });
       } catch (err) {
         // Never leave WAHA's body open if building the response fails.
-        await media.body.cancel().catch(() => {});
+        await owner.cancel().catch(() => {});
         throw err;
       }
     } catch (err) {

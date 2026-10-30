@@ -27,3 +27,11 @@ export class UnsupportedEngineError extends Error {
     this.name = "UnsupportedEngineError";
   }
 }
+
+/** The caller supplied an invalid argument (bad range, cursor, timezone...). Message is safe to show. */
+export class InvalidInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidInputError";
+  }
+}

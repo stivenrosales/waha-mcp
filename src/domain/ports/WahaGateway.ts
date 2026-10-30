@@ -3,6 +3,10 @@ export interface WahaGateway {
   getSession(): Promise<{ engine: string; status: string }>;
   listGroups(): Promise<unknown[]>;
   getGroup(groupId: string): Promise<unknown>;
+  /** All chat types (groups, direct, newsletters...); filtering happens in the use case. */
+  listChats(q: { limit: number; offset: number }): Promise<unknown[]>;
+  /** Address-book contacts; `name` is the saved name, `pushname` the self-chosen one. */
+  listContacts(q: { limit: number; offset: number }): Promise<unknown[]>;
   /** `from` / `to` are unix seconds. */
   getMessages(
     chatId: string,

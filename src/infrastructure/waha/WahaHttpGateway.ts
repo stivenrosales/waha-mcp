@@ -93,6 +93,20 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
       return getJson(`/api/${session}/groups/${encodeURIComponent(groupId)}`, "group");
     },
 
+    async listChats(q) {
+      const params = new URLSearchParams({ limit: String(q.limit), offset: String(q.offset) });
+      return asArray(await getJson(`/api/${session}/chats?${params}`, "chats"));
+    },
+
+    async listContacts(q) {
+      const params = new URLSearchParams({
+        session: opts.session,
+        limit: String(q.limit),
+        offset: String(q.offset),
+      });
+      return asArray(await getJson(`/api/contacts/all?${params}`, "contacts"));
+    },
+
     async getMessages(chatId, q) {
       const params = new URLSearchParams({
         limit: String(q.limit),

@@ -391,6 +391,9 @@ describe("GOWS group and chat mappers", () => {
       phone: "51999888777",
       lastActivity: "2026-10-30T16:05:15.000Z",
     });
+    expect(mapper.chatSummary({ id: { _serialized: "51999888777@c.us" } }).id).toBe(
+      "51999888777@c.us",
+    );
     expect(mapper.chatSummary({ id: "5@lid", name: "Ana" })).toEqual({
       id: "5@lid",
       name: "Ana",

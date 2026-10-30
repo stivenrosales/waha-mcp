@@ -141,6 +141,47 @@ describe("WahaHttpGateway", () => {
     expect(q.has("filter.timestamp.lte")).toBe(false);
   });
 
+  it("listChats requests the session chats with limit and offset", async () => {
+    const { fn, calls } = fakeFetch(() => json([{ id: "1@c.us" }]));
+    expect(await make(fn).listChats({ limit: 500, offset: 20 })).toEqual([{ id: "1@c.us" }]);
+    const url = new URL(calls[0]?.url ?? "");
+    expect(url.pathname).toBe("/api/my%20session/chats");
+    expect(url.searchParams.get("limit")).toBe("500");
+    expect(url.searchParams.get("offset")).toBe("20");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.redirect).toBe("error");
+    expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+  });
+
+  it("listContacts passes the session as a query parameter", async () => {
+    const { fn, calls } = fakeFetch(() => json([{ id: "1@c.us" }]));
+    expect(await make(fn).listContacts({ limit: 5000, offset: 0 })).toHaveLength(1);
+    const url = new URL(calls[0]?.url ?? "");
+    expect(url.pathname).toBe("/api/contacts/all");
+    expect(url.searchParams.get("session")).toBe("my session");
+    expect(url.searchParams.get("limit")).toBe("5000");
+    expect(url.searchParams.get("offset")).toBe("0");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.redirect).toBe("error");
+    expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+  });
+
+  it("listChats and listContacts map errors with fixed messages and tolerate non-arrays", async () => {
+    const f401 = fakeFetch(() => new Response("no", { status: 401 }));
+    await expect(make(f401.fn).listChats({ limit: 1, offset: 0 })).rejects.toBeInstanceOf(
+      WahaAuthError,
+    );
+    const f500 = fakeFetch(() => new Response("boom", { status: 500 }));
+    const err = await make(f500.fn)
+      .listContacts({ limit: 1, offset: 0 })
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(WahaUnavailableError);
+    expect((err as Error).message).not.toContain(KEY);
+    expect((err as Error).message).not.toContain("waha-internal");
+    const obj = fakeFetch(() => json({ not: "an array" }));
+    expect(await make(obj.fn).listChats({ limit: 1, offset: 0 })).toEqual([]);
+  });
+
   it("fetchMedia returns null on 404", async () => {
     const { fn } = fakeFetch(() => new Response("gone", { status: 404 }));
     expect(await make(fn).fetchMedia(`${BASE}/api/files/a.jpg`)).toBeNull();

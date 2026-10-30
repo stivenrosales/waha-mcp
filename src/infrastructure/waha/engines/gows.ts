@@ -293,7 +293,7 @@ function groupInfo(rawIn: unknown): GroupInfo {
 
 function chatSummary(rawIn: unknown): ChatSummary {
   const raw = obj(rawIn);
-  const id = str(raw.id) ?? "";
+  const id = str(raw.id) ?? str(obj(raw.id)._serialized) ?? "";
   return {
     id,
     name: str(raw.name),

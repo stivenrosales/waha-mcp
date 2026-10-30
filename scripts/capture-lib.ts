@@ -26,8 +26,27 @@ export type MessageKind = (typeof MESSAGE_KINDS)[number];
 export type MessageBucket = "messages-text" | "messages-media" | "messages-misc";
 
 export interface CaptureArgs {
-  groups: string[];
+  /** Group and direct chat ids, in the order given (1 or 2). */
+  chats: string[];
   out: string;
+}
+
+export type ChatKind = "group" | "direct";
+
+/** `@g.us` is a group; `@lid`, `@c.us` and `@s.whatsapp.net` are direct chats. */
+export function classifyChatId(id: string): ChatKind | undefined {
+  if (id.endsWith("@g.us")) return "group";
+  if (/@(lid|c\.us|s\.whatsapp\.net)$/.test(id)) return "direct";
+  return undefined;
+}
+
+/** Which non-message fixtures apply: group endpoints only exist for groups. */
+export function planStaticFixtures(chats: string[]): {
+  files: string[];
+  groupId: string | undefined;
+} {
+  const groupId = chats.find((c) => classifyChatId(c) === "group");
+  return { files: groupId === undefined ? ["session"] : ["session", "groups", "group"], groupId };
 }
 
 export function parseCaptureArgs(argv: string[]): CaptureArgs {
@@ -37,14 +56,18 @@ export function parseCaptureArgs(argv: string[]): CaptureArgs {
     args,
     options: {
       group: { type: "string", multiple: true },
+      chat: { type: "string", multiple: true },
       out: { type: "string" },
     },
     strict: true,
   });
-  const groups = values.group ?? [];
-  if (groups.length === 0) throw new Error("Pass at least one --group <id>.");
-  if (groups.length > 2) throw new Error("Pass at most 2 --group values.");
-  return { groups, out: values.out ?? DEFAULT_OUT_DIR };
+  const chats = [...(values.group ?? []), ...(values.chat ?? [])];
+  if (chats.length === 0) throw new Error("Pass at least one --group <id> or --chat <id>.");
+  if (chats.length > 2) throw new Error("Pass at most 2 chats in total (--group and --chat).");
+  if (chats.some((c) => classifyChatId(c) === undefined)) {
+    throw new Error("Chat ids must end in @g.us, @lid, @c.us or @s.whatsapp.net.");
+  }
+  return { chats, out: values.out ?? DEFAULT_OUT_DIR };
 }
 
 export function fixtureFileName(name: string, download = false): string {

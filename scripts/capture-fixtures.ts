@@ -1,7 +1,7 @@
 /**
  * Dev-only: captures GOWS payloads from a live WAHA, scrubs them and writes
  * them as test fixtures. Read-only (GET only). Usage:
- *   pnpm capture -- --group <id> [--group <id>] [--out <dir>]
+ *   pnpm capture -- --group <id> | --chat <id> (1-2 in total) [--out <dir>]
  * The WAHA URL and API key are never printed.
  */
 import { mkdir, writeFile } from "node:fs/promises";
@@ -16,6 +16,7 @@ import {
   type MessageBucket,
   parseCaptureArgs,
   planDownloadPages,
+  planStaticFixtures,
   selectMessages,
   sessionFixture,
 } from "./capture-lib.js";
@@ -73,12 +74,16 @@ async function main(args: CaptureArgs): Promise<void> {
   };
 
   await write("session", sessionFixture(await getJson(`/api/sessions/${session}`)));
-  const groups = await gateway.listGroups();
-  await write("groups", groups.slice(0, MAX_GROUPS_SAVED));
-  await write("group", await gateway.getGroup(args.groups[0] as string));
+  // Group endpoints answer 500 for direct chats, so only call them for @g.us ids.
+  const plan = planStaticFixtures(args.chats);
+  if (plan.groupId !== undefined) {
+    const groups = await gateway.listGroups();
+    await write("groups", groups.slice(0, MAX_GROUPS_SAVED));
+    await write("group", await gateway.getGroup(plan.groupId));
+  }
 
   const pages: { chatId: string; offset: number; messages: unknown[] }[] = [];
-  for (const chatId of args.groups) {
+  for (const chatId of args.chats) {
     for (let page = 0; page < MAX_PAGES; page++) {
       const messages = await gateway.getMessages(chatId, {
         limit: PAGE_SIZE,
@@ -119,7 +124,7 @@ async function main(args: CaptureArgs): Promise<void> {
     break;
   }
 
-  console.log(`Captured ${all.length} messages from ${args.groups.length} group(s).`);
+  console.log(`Captured ${all.length} messages from ${args.chats.length} chat(s).`);
   console.log(`Kept ${selection.selected.length} samples (up to ${PER_KIND} per kind).`);
   console.log(`Kinds found:   ${selection.found.join(", ") || "none"}`);
   console.log(`Kinds missing: ${selection.missing.join(", ") || "none"}`);

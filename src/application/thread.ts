@@ -51,8 +51,10 @@ export async function getThread(
   const seen = new Set<string>();
   let anchorAt = -1;
   let cursor: string | undefined;
+  let cacheNote: string | undefined;
   do {
     const page = await getMessages(gw, m, { chatId: q.chatId, limit: PAGE, cursor });
+    cacheNote = page.cacheNote;
     let added = 0;
     for (const msg of page.messages) {
       if (seen.has(msg.id)) continue;
@@ -113,6 +115,7 @@ export async function getThread(
     notes.push("The reply chain stopped because the replies loop back on themselves.");
   if (anchorAt + 1 + before > history.length && cursor !== undefined)
     notes.push(`Older context was cut at the cap of ${deps.statsMaxMessages} messages.`);
+  if (cacheNote) notes.push(cacheNote);
   return {
     chatId: q.chatId,
     anchor,

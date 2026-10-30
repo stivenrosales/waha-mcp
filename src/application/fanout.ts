@@ -23,6 +23,16 @@ export interface ScannedChat {
   isGroup: boolean;
   messages: NormalizedMessage[];
   truncated: boolean;
+  /** Set when the chat was read from the local message cache. */
+  cacheNote?: string;
+}
+
+/** One coverage note for the chats that were read from the local message cache. */
+export function cacheCoverageNote(notes: (string | undefined)[]): string | null {
+  const cached = notes.filter((n): n is string => n !== undefined);
+  if (cached.length === 0) return null;
+  if (cached.length === 1) return cached[0] as string;
+  return `${cached.length} chat(s) were read from the local message cache, synced with WAHA within the last minute; edits and deletions are re-checked only for recent messages of each chat.`;
 }
 
 /** Runs `fn` over `items` with at most `size` in flight; results keep the input order. */
@@ -99,6 +109,8 @@ export async function scanChats(
     notes.push(`${unknownActivity} chat(s) have no activity time in WAHA and were not considered.`);
   if (!namesResolved)
     notes.push("Contact names could not be loaded; direct chats may show only a phone or id.");
+  const cacheNote = cacheCoverageNote(scanned.map((s) => s.cacheNote));
+  if (cacheNote) notes.push(cacheNote);
 
   return {
     scanned,
@@ -177,11 +189,14 @@ export async function collectChats(
       chatsSkipped: 0,
       truncated: range.truncated,
       failedChats: [],
-      notes: range.truncated
-        ? [
-            `The chat hit the cap of ${q.cap} messages: only the newest ones of the range were searched.`,
-          ]
-        : [],
+      notes: [
+        ...(range.truncated
+          ? [
+              `The chat hit the cap of ${q.cap} messages: only the newest ones of the range were searched.`,
+            ]
+          : []),
+        ...(range.cacheNote ? [range.cacheNote] : []),
+      ],
     },
   };
 }

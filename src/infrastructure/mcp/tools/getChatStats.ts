@@ -35,7 +35,7 @@ export const getChatStatsTool: ToolDefinition<typeof inputSchema, typeof chatSta
     const participants = isGroup
       ? (await getGroupInfo(gateway, mapper, input.chat_id)).participants
       : [];
-    const { messages, truncated } = await fetchRange(gateway, mapper, {
+    const { messages, truncated, cacheNote } = await fetchRange(gateway, mapper, {
       chatId: input.chat_id,
       from: input.from,
       to: input.to,
@@ -76,6 +76,7 @@ export const getChatStatsTool: ToolDefinition<typeof inputSchema, typeof chatSta
       isGroup
         ? `Silent members (current participants with no messages): ${stats.silentMembers.length}`
         : "",
+      cacheNote ?? "",
       "These numbers are exact; do not recount them from get_messages.",
     ]
       .filter(Boolean)

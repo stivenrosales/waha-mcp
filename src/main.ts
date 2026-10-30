@@ -1,11 +1,16 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
+import { createCachedGateway } from "./application/cachedMessages.js";
 import { loadConfig } from "./config.js";
 import { bearerGuard } from "./infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "./infrastructure/auth/oauth.js";
 import { createLoginLimiter } from "./infrastructure/auth/rateLimit.js";
 import { createAuthStore } from "./infrastructure/auth/store.js";
+import {
+  createSqliteMessageStore,
+  openCacheDatabase,
+} from "./infrastructure/cache/sqliteMessageStore.js";
 import { createApp } from "./infrastructure/http/app.js";
 import { SERVER_INSTRUCTIONS } from "./infrastructure/mcp/instructions.js";
 import { createMcpServer } from "./infrastructure/mcp/server.js";
@@ -26,13 +31,23 @@ async function main(): Promise<void> {
 
   const logger = { info: (message: string) => console.log(message) };
 
-  const gateway = createWahaHttpGateway({
+  const wahaGateway = createWahaHttpGateway({
     baseUrl: config.wahaApiUrl,
     apiKey: config.wahaApiKey,
     session: config.wahaSession,
   });
   mkdirSync(config.dataDir, { recursive: true });
   const store = createAuthStore(join(config.dataDir, "auth.db"));
+  // The message cache is a copy of conversations at rest; logout does not clear it.
+  const messageStore = config.cacheEnabled
+    ? createSqliteMessageStore(openCacheDatabase(join(config.dataDir, "cache.db")))
+    : null;
+  const gateway = messageStore
+    ? createCachedGateway(wahaGateway, messageStore, {
+        refreshHours: config.cacheRefreshHours,
+        maxAgeDays: config.cacheMaxAgeDays,
+      })
+    : wahaGateway;
   if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");
   const links = createSignedLinks({
     secret: loadOrCreateMediaSecret(config.dataDir),
@@ -75,7 +90,7 @@ async function main(): Promise<void> {
     // WAHA may not be up yet; the engine resolver retries on the first tool call.
   }
   console.log(
-    `waha-mcp listening on :${config.port} | engine: ${engine} | session: ${config.wahaSession} | public URL: ${config.publicBaseUrl} | tools: ${tools.length}`,
+    `waha-mcp listening on :${config.port} | engine: ${engine} | session: ${config.wahaSession} | public URL: ${config.publicBaseUrl} | tools: ${tools.length} | message cache: ${config.cacheEnabled ? "on" : "off"}`,
   );
   if (engine !== "GOWS" && !engine.startsWith("unknown")) {
     console.warn(`Engine ${engine} is not supported (GOWS only); tools will report this.`);
@@ -88,6 +103,7 @@ async function main(): Promise<void> {
     console.log(`${signal} received, shutting down.`);
     const finish = (): void => {
       store.close();
+      messageStore?.close();
       process.exit(0);
     };
     server.close(finish);

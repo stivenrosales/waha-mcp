@@ -50,7 +50,7 @@ flowchart LR
   Client["Client<br/>(Claude / ChatGPT / Gemini CLI)"] -->|"OAuth 2.1 + MCP /mcp"| MCP["waha-mcp"]
   MCP -->|"GET only"| WAHA["WAHA (GOWS)"]
   WAHA --> WA["WhatsApp"]
-  MCP -.-> Data[("/data<br/>auth.db, media secret")]
+  MCP -.-> Data[("/data<br/>auth.db, cache.db, media secret")]
 ```
 
 ## Requirements
@@ -114,19 +114,22 @@ flowchart LR
 
 All configuration is through environment variables.
 
-| Variable                 | Required | Default     | Description                                                       |
-| ------------------------ | -------- | ----------- | ----------------------------------------------------------------- |
-| `WAHA_API_URL`           | yes      |             | Base URL of WAHA (internal URL when deployed next to it).         |
-| `WAHA_API_KEY`           | yes      |             | WAHA API key. Also the OAuth login secret.                        |
-| `PUBLIC_BASE_URL`        | yes      |             | Public HTTPS URL of this server (`http` only for localhost).      |
-| `WAHA_SESSION`           | no       | `default`   | WAHA session name.                                                |
-| `DATA_DIR`               | no       | `/data`     | Where OAuth state (`auth.db`) and the media-link secret are kept. |
-| `PORT`                   | no       | `3000`      | HTTP port.                                                        |
-| `TIMEZONE`               | no       | `UTC`       | IANA time zone for dates and day boundaries (`America/Lima`).     |
-| `STATS_MAX_MESSAGES`     | no       | `5000`      | Per-chat message cap; fan-out tools read up to 100 chats each.    |
-| `MEDIA_LINK_TTL_SECONDS` | no       | `600`       | Lifetime of signed media links.                                   |
-| `MEDIA_INLINE_MAX_BYTES` | no       | `5242880`   | Largest file returned inline (5 MiB); larger ones get a link.     |
-| `MEDIA_MAX_BYTES`        | no       | `104857600` | Largest file served by `/media/:token` (100 MiB).                 |
+| Variable                 | Required | Default     | Description                                                        |
+| ------------------------ | -------- | ----------- | ------------------------------------------------------------------ |
+| `WAHA_API_URL`           | yes      |             | Base URL of WAHA (internal URL when deployed next to it).          |
+| `WAHA_API_KEY`           | yes      |             | WAHA API key. Also the OAuth login secret.                         |
+| `PUBLIC_BASE_URL`        | yes      |             | Public HTTPS URL of this server (`http` only for localhost).       |
+| `WAHA_SESSION`           | no       | `default`   | WAHA session name.                                                 |
+| `DATA_DIR`               | no       | `/data`     | OAuth state (`auth.db`), message cache (`cache.db`), media secret. |
+| `PORT`                   | no       | `3000`      | HTTP port.                                                         |
+| `TIMEZONE`               | no       | `UTC`       | IANA time zone for dates and day boundaries (`America/Lima`).      |
+| `STATS_MAX_MESSAGES`     | no       | `5000`      | Per-chat message cap; fan-out tools read up to 100 chats each.     |
+| `MEDIA_LINK_TTL_SECONDS` | no       | `600`       | Lifetime of signed media links.                                    |
+| `MEDIA_INLINE_MAX_BYTES` | no       | `5242880`   | Largest file returned inline (5 MiB); larger ones get a link.      |
+| `MEDIA_MAX_BYTES`        | no       | `104857600` | Largest file served by `/media/:token` (100 MiB).                  |
+| `CACHE_ENABLED`          | no       | `true`      | Keep a SQLite copy of read messages in `DATA_DIR/cache.db`.        |
+| `CACHE_REFRESH_HOURS`    | no       | `48`        | Each sync re-reads this window before the newest cached message.   |
+| `CACHE_MAX_AGE_DAYS`     | no       | `0`         | Prune cached messages older than N days (`0` keeps them forever).  |
 
 </details>
 
@@ -186,6 +189,7 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 - Direct chats are private data. Use a client you trust with them.
 - The API key and WAHA URL are never logged or returned in errors.
 - Rotating `WAHA_API_KEY` revokes every issued token at the next start: only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
+- The message cache (`cache.db`, `0600`) is a copy of the conversations you read, at rest on the server. A chat is cached the first time a tool reads it; later reads ask WAHA only for messages newer than (newest cached − `CACHE_REFRESH_HOURS`), so edits and deletions older than that window are not picked up. A chat read less than 60 s ago is answered without calling WAHA. Logout does not clear it; delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Media files are never cached.
 - At most 50 OAuth clients can be registered. Clients older than 24 h with no live token are pruned automatically when a new one registers; `<base>/logout` clears them all.
 
 > [!WARNING]

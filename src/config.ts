@@ -18,6 +18,12 @@ export interface Config {
   mediaInlineMaxBytes: number;
   /** Largest file `/media/:token` will stream; bigger files get a 413. */
   mediaMaxBytes: number;
+  /** Keep a SQLite copy of read messages in `DATA_DIR/cache.db`. */
+  cacheEnabled: boolean;
+  /** How far back from the newest cached message every sync re-reads (edits, deletions). */
+  cacheRefreshHours: number;
+  /** Cached messages older than this many days are pruned; 0 keeps them forever. */
+  cacheMaxAgeDays: number;
 }
 
 const stripTrailingSlashes = (value: string): string => value.replace(/\/+$/, "");
@@ -55,6 +61,24 @@ const positiveInt = (name: string, fallback: number) =>
         .refine((n) => n > 0, `${name} must be a positive integer.`),
     );
 
+const nonNegativeInt = (name: string, fallback: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? String(fallback) : v))
+    .pipe(z.string().regex(/^\d+$/, `${name} must be a non-negative integer.`).transform(Number));
+
+const boolean = (name: string, fallback: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? String(fallback) : v.toLowerCase()))
+    .pipe(
+      z
+        .enum(["true", "false"], `${name} must be "true" or "false".`)
+        .transform((v) => v === "true"),
+    );
+
 const envSchema = z.object({
   WAHA_API_URL: required("WAHA_API_URL")
     .refine(isValidUrl, "WAHA_API_URL must be a valid URL.")
@@ -75,6 +99,9 @@ const envSchema = z.object({
   MEDIA_LINK_TTL_SECONDS: positiveInt("MEDIA_LINK_TTL_SECONDS", 600),
   MEDIA_INLINE_MAX_BYTES: positiveInt("MEDIA_INLINE_MAX_BYTES", 5242880),
   MEDIA_MAX_BYTES: positiveInt("MEDIA_MAX_BYTES", 104857600),
+  CACHE_ENABLED: boolean("CACHE_ENABLED", true),
+  CACHE_REFRESH_HOURS: positiveInt("CACHE_REFRESH_HOURS", 48),
+  CACHE_MAX_AGE_DAYS: nonNegativeInt("CACHE_MAX_AGE_DAYS", 0),
 });
 
 /**
@@ -101,5 +128,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     mediaLinkTtlSeconds: v.MEDIA_LINK_TTL_SECONDS,
     mediaInlineMaxBytes: v.MEDIA_INLINE_MAX_BYTES,
     mediaMaxBytes: v.MEDIA_MAX_BYTES,
+    cacheEnabled: v.CACHE_ENABLED,
+    cacheRefreshHours: v.CACHE_REFRESH_HOURS,
+    cacheMaxAgeDays: v.CACHE_MAX_AGE_DAYS,
   };
 }

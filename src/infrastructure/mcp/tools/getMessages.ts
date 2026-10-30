@@ -46,7 +46,7 @@ export const getMessagesTool: ToolDefinition<typeof inputSchema, typeof outputSc
   inputSchema,
   outputSchema,
   async run(input, { gateway, mapper, config }) {
-    const { messages, nextCursor } = await getMessages(gateway, mapper, {
+    const { messages, nextCursor, cacheNote } = await getMessages(gateway, mapper, {
       chatId: input.chat_id,
       from: input.from,
       to: input.to,
@@ -61,6 +61,7 @@ export const getMessagesTool: ToolDefinition<typeof inputSchema, typeof outputSc
     const more = nextCursor
       ? `\n\nMore messages available: call again with cursor="${nextCursor}".`
       : "";
-    return { text: `${body}${more}`, data: { messages, nextCursor } };
+    const cache = cacheNote ? `\n\n${cacheNote}` : "";
+    return { text: `${body}${more}${cache}`, data: { messages, nextCursor } };
   },
 };

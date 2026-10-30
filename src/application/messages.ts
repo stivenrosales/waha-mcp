@@ -66,7 +66,12 @@ export async function getMessages(
     /** IANA zone for bare dates and offsetless date-times (default UTC). */
     timezone?: string;
   },
-): Promise<{ messages: NormalizedMessage[]; nextCursor: string | null }> {
+): Promise<{
+  messages: NormalizedMessage[];
+  nextCursor: string | null;
+  /** Present only when the page was answered from the local message cache. */
+  cacheNote?: string;
+}> {
   const limit = q.limit ?? DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT)
     throw new InvalidInputError(`"limit" must be an integer between 1 and ${MAX_LIMIT}.`);
@@ -94,7 +99,8 @@ export async function getMessages(
           from: q.from ?? null,
           to: q.to ?? null,
         });
-  return { messages: mapAndAttach(m, raws), nextCursor };
+  const cacheNote = gw.cacheNote?.(q.chatId) ?? null;
+  return { messages: mapAndAttach(m, raws), nextCursor, ...(cacheNote ? { cacheNote } : {}) };
 }
 
 /**
@@ -105,16 +111,24 @@ export async function fetchRange(
   gw: WahaGateway,
   m: EngineMapper,
   q: { chatId: string; from?: string; to?: string; cap: number; timezone?: string },
-): Promise<{ messages: NormalizedMessage[]; truncated: boolean }> {
+): Promise<{
+  messages: NormalizedMessage[];
+  truncated: boolean;
+  /** Present only when every page was answered from the local message cache. */
+  cacheNote?: string;
+}> {
   const { from, to } = toUnixRange(q, q.timezone ?? "UTC");
   const raws: unknown[] = [];
   const seen = new Set<string>();
   let fetched = 0;
   let counted = 0;
+  let cacheNote: string | null | undefined;
   // Read until we hold one message more than the cap (proof that the cap cut something) or run out.
   while (counted <= q.cap) {
     const page = await gw.getMessages(q.chatId, { limit: RANGE_PAGE, offset: fetched, from, to });
     fetched += page.length;
+    const note = gw.cacheNote?.(q.chatId) ?? null;
+    cacheNote = cacheNote === undefined || cacheNote !== null ? note : null;
     for (const raw of page) {
       // A message arriving mid-fetch shifts later offsets and repeats events: keep the first copy.
       const id = (raw as { id?: unknown } | null)?.id;
@@ -129,5 +143,9 @@ export async function fetchRange(
   }
   const all = mapAndAttach(m, raws);
   const truncated = all.length > q.cap;
-  return { messages: truncated ? all.slice(0, q.cap) : all, truncated };
+  return {
+    messages: truncated ? all.slice(0, q.cap) : all,
+    truncated,
+    ...(cacheNote ? { cacheNote } : {}),
+  };
 }

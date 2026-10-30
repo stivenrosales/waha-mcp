@@ -30,4 +30,9 @@ export interface WahaGateway {
    * caller must consume or cancel `body`.
    */
   openMedia(url: string): Promise<OpenedFile | null>;
+  /**
+   * Only on a caching gateway: a short coverage note when the last `getMessages` of this chat
+   * was answered from the local cache, `null` when it came straight from WAHA.
+   */
+  cacheNote?(chatId: string): string | null;
 }

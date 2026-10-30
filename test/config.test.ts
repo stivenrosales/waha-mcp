@@ -18,6 +18,36 @@ describe("loadConfig", () => {
     expect(c.mediaLinkTtlSeconds).toBe(600);
     expect(c.mediaInlineMaxBytes).toBe(5242880);
     expect(c.mediaMaxBytes).toBe(104857600);
+    expect(c.cacheEnabled).toBe(true);
+    expect(c.cacheRefreshHours).toBe(48);
+    expect(c.cacheMaxAgeDays).toBe(0);
+  });
+
+  it("reads the cache settings and rejects invalid values", () => {
+    const c = loadConfig({
+      ...minimal,
+      CACHE_ENABLED: "false",
+      CACHE_REFRESH_HOURS: "6",
+      CACHE_MAX_AGE_DAYS: "30",
+    });
+    expect(c.cacheEnabled).toBe(false);
+    expect(c.cacheRefreshHours).toBe(6);
+    expect(c.cacheMaxAgeDays).toBe(30);
+    expect(loadConfig({ ...minimal, CACHE_ENABLED: "true" }).cacheEnabled).toBe(true);
+    expect(loadConfig({ ...minimal, CACHE_ENABLED: "" }).cacheEnabled).toBe(true);
+    expect(() => loadConfig({ ...minimal, CACHE_ENABLED: "yes" })).toThrow(/CACHE_ENABLED/);
+    expect(() => loadConfig({ ...minimal, CACHE_REFRESH_HOURS: "0" })).toThrow(
+      /CACHE_REFRESH_HOURS/,
+    );
+    expect(() => loadConfig({ ...minimal, CACHE_REFRESH_HOURS: "1.5" })).toThrow(
+      /CACHE_REFRESH_HOURS/,
+    );
+    expect(() => loadConfig({ ...minimal, CACHE_MAX_AGE_DAYS: "-1" })).toThrow(
+      /CACHE_MAX_AGE_DAYS/,
+    );
+    expect(() => loadConfig({ ...minimal, CACHE_MAX_AGE_DAYS: "forever" })).toThrow(
+      /CACHE_MAX_AGE_DAYS/,
+    );
   });
 
   it("reads MEDIA_MAX_BYTES and rejects non-positive values", () => {

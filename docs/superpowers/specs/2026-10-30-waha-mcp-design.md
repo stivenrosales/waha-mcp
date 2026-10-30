@@ -61,8 +61,8 @@ Secondary audience: the community — anyone who already runs WAHA.
     default, cappable by env.
     The server must detect the engine at startup (WAHA session info) and report clearly when
     history is unavailable instead of returning an empty list as if the group were silent.
-- **The owner's instance runs GOWS** (`Haiku-serv/CLAUDE.md:557`; `fetchGroups` measured ~5 s for
-  258 groups, `Haiku-serv/src/lib/waha/client.ts:17`). Group listing on GOWS returns `{ JID, Name }`
+- **The owner's instance runs GOWS** (owner's existing integration; `fetchGroups` measured ~5 s for
+  258 groups). Group listing on GOWS returns `{ JID, Name }`
   shapes, other engines `{ id }` / `{ id: { _serialized } }` (`client.ts:199`).
 - **Engine scope for v1 (builder's call, owner may override):** GOWS is the fully supported,
   fixture-tested engine. Normalization lives behind a per-engine mapper; WEBJS and NOWEB mappers

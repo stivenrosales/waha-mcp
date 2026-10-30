@@ -40,7 +40,7 @@ Nothing can be sent, edited or deleted: the WAHA client only issues `GET` reques
 
 - "Who is waiting for my answer since yesterday?"
 - "Summarize what happened in _&lt;group&gt;_ this week."
-- "Find the PDF Robert sent me."
+- "Find the PDF Ana sent me last week."
 - "What does the voice note Ana sent this morning say?" (needs [transcription](#voice-note-transcription-optional))
 - "Turn my pending chats into Todoist tasks."
 

@@ -21,6 +21,14 @@ export class WahaUnavailableError extends Error {
   }
 }
 
+/** WAHA started sending a file and then stopped (no data within the idle timeout). */
+export class MediaStalledError extends WahaUnavailableError {
+  constructor() {
+    super("WAHA did not finish sending the file. Try again later.");
+    this.name = "MediaStalledError";
+  }
+}
+
 export class UnsupportedEngineError extends Error {
   constructor(public readonly engine: string) {
     super(`Unsupported WAHA engine "${engine}". Only GOWS is supported.`);

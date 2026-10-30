@@ -15,6 +15,8 @@ export interface CreateMcpServerOptions {
   gateway: WahaGateway;
   config: Config;
   links: SignedLinks;
+  /** Idle timeout for media bodies (default 30 s); injectable for tests. */
+  mediaIdleTimeoutMs?: number;
   logger?: Logger;
 }
 
@@ -31,12 +33,13 @@ const bearerToken = (req: Request): string =>
  * engine mapper lookup is shared across requests, so `getSession()` runs once.
  */
 export function createMcpServer(options: CreateMcpServerOptions): McpServerHandle {
-  const { tools, instructions, gateway, config, links, logger } = options;
+  const { tools, instructions, gateway, config, links, logger, mediaIdleTimeoutMs } = options;
   const mapper = createEngineResolver(gateway);
 
   const http = createMcpHandler(() => {
     const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions });
-    for (const tool of tools) toMcpTool(server, tool, { gateway, mapper, config, links, logger });
+    for (const tool of tools)
+      toMcpTool(server, tool, { gateway, mapper, config, links, logger, mediaIdleTimeoutMs });
     return server;
   });
 

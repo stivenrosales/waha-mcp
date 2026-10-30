@@ -27,6 +27,8 @@ const WAHA_URL = "http://waha-internal:3000";
 const KEY = "k-very-secret-waha-key";
 const INLINE_MAX = 1000;
 const MAX_BYTES = 5000;
+/** Idle timeout for media bodies; production uses 30 s. */
+const IDLE_MS = 50;
 
 type Raw = Record<string, unknown>;
 const fixture = (path: string): Raw[] =>
@@ -91,6 +93,14 @@ function baseData(): InMemoryData {
       [`${WAHA_URL}/api/files/d-2`]: { bytes: bytes(50, 37), mimetype: "application/pdf" },
       // direct: 4 is a PDF declared above MEDIA_MAX_BYTES
       [`${WAHA_URL}/api/files/d-4`]: { bytes: bytes(MAX_BYTES + 1), mimetype: "application/pdf" },
+      // direct: 5 is an image (link-sized) that sends one chunk and then stalls
+      [`${WAHA_URL}/api/files/d-5`]: {
+        bytes: bytes(3000),
+        mimetype: "image/jpeg",
+        stallAfter: 1024,
+      },
+      // direct: 6 is a small (inline-sized) image that stalls before sending anything
+      [`${WAHA_URL}/api/files/d-6`]: { bytes: bytes(500), mimetype: "image/jpeg", stallAfter: 0 },
       // direct: 7 is audio with no declared length that turns out to exceed MEDIA_MAX_BYTES
       [`${WAHA_URL}/api/files/d-7`]: {
         bytes: bytes(MAX_BYTES + 2000),
@@ -127,6 +137,7 @@ function setup(data: InMemoryData = baseData(), gateway = new InMemoryWahaGatewa
     gateway,
     config,
     links,
+    mediaIdleTimeoutMs: IDLE_MS,
   });
   const app = createApp({
     oauth: createOAuthRoutes({
@@ -137,7 +148,12 @@ function setup(data: InMemoryData = baseData(), gateway = new InMemoryWahaGatewa
     }),
     guard: bearerGuard({ store, publicBaseUrl: BASE }),
     mcpHandler: mcp.handler,
-    media: createMediaHandler({ gateway, links, maxBytes: config.mediaMaxBytes }),
+    media: createMediaHandler({
+      gateway,
+      links,
+      maxBytes: config.mediaMaxBytes,
+      idleTimeoutMs: IDLE_MS,
+    }),
   });
   const { clientId } = store.registerClient({ redirectUris: ["https://claude.ai/cb"] });
   const { accessToken } = store.issueTokens(clientId, "mcp");
@@ -391,6 +407,27 @@ describe("e2e: MCP client against createApp", () => {
     await expect(res.arrayBuffer()).rejects.toThrow();
     // 7000 bytes in 1 KiB chunks: draining it takes 8 pulls; the cap stops earlier.
     expect(s.gateway.bodyReads.get(fileUrl("d-7"))).toBeLessThan(8);
+  });
+
+  it("errors a /media response whose WAHA body stalls, and cancels the upstream body", async () => {
+    const s = setup();
+    const client = await connect(s);
+    const stalled = (await mediaIds(client, DIRECT))[5];
+    const r = await call(client, "get_media", { media_id: stalled });
+    const res = await s.app.fetch(new Request(linkOf(r)));
+    expect(res.status).toBe(200);
+    await expect(res.arrayBuffer()).rejects.toThrow();
+    expect(s.gateway.cancelled.has(fileUrl("d-5"))).toBe(true);
+  });
+
+  it("get_media reports a stalled inline read as an error instead of hanging", async () => {
+    const s = setup();
+    const client = await connect(s);
+    const stalled = (await mediaIds(client, DIRECT))[6];
+    const r = await call(client, "get_media", { media_id: stalled });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe("WAHA did not finish sending the file. Try again later.");
+    expect(s.gateway.cancelled.has(fileUrl("d-6"))).toBe(true);
   });
 
   it("media links answer 404 for tampered tokens and for files gone from WAHA", async () => {

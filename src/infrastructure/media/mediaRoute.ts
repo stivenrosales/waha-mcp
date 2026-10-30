@@ -7,7 +7,13 @@ import {
 } from "../../domain/errors.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import type { Logger } from "../mcp/defineTool.js";
-import { capStream, contentDisposition, openMediaById } from "./resolveMedia.js";
+import {
+  capStream,
+  contentDisposition,
+  MEDIA_IDLE_TIMEOUT_MS,
+  openMediaById,
+  withIdleTimeout,
+} from "./resolveMedia.js";
 import type { SignedLinks } from "./signedLink.js";
 
 const plain = (status: number, text: string) =>
@@ -34,6 +40,8 @@ export function createMediaHandler(deps: {
   gateway: WahaGateway;
   links: SignedLinks;
   maxBytes: number;
+  /** No chunk for this long → abort the response and cancel WAHA's body (default 30 s). */
+  idleTimeoutMs?: number;
   logger?: Logger;
 }): (token: string) => Promise<Response> {
   return async (token) => {
@@ -49,17 +57,26 @@ export function createMediaHandler(deps: {
           `This file is too large to serve (${media.length} bytes; MEDIA_MAX_BYTES is ${deps.maxBytes}).`,
         );
       }
-      const headers: Record<string, string> = {
-        "Content-Type": media.mimetype,
-        "Content-Disposition": contentDisposition(media.mimetype, media.filename),
-        "Cache-Control": "private, no-store",
-        "X-Content-Type-Options": "nosniff",
-        "Content-Security-Policy": "default-src 'none'; sandbox",
-        "Referrer-Policy": "no-referrer",
-      };
-      if (media.length !== null) headers["Content-Length"] = String(media.length);
-      const body = media.body.pipeThrough(capStream(media.length ?? deps.maxBytes));
-      return new Response(body, { status: 200, headers });
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": media.mimetype,
+          "Content-Disposition": contentDisposition(media.mimetype, media.filename),
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Security-Policy": "default-src 'none'; sandbox",
+          "Referrer-Policy": "no-referrer",
+        };
+        if (media.length !== null) headers["Content-Length"] = String(media.length);
+        const body = withIdleTimeout(
+          media.body,
+          deps.idleTimeoutMs ?? MEDIA_IDLE_TIMEOUT_MS,
+        ).pipeThrough(capStream(media.length ?? deps.maxBytes));
+        return new Response(body, { status: 200, headers });
+      } catch (err) {
+        // Never leave WAHA's body open if building the response fails.
+        await media.body.cancel().catch(() => {});
+        throw err;
+      }
     } catch (err) {
       if (err instanceof InvalidInputError) return plain(404, "Not found");
       const name = err instanceof Error ? err.name : "UnknownError";

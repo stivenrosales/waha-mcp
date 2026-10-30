@@ -15,7 +15,16 @@ export interface InMemoryData {
    * declared Content-Length (default: the real size; `null` = not declared), so a
    * test can make WAHA lie about it.
    */
-  media?: Record<string, { bytes: Uint8Array; mimetype: string; length?: number | null }>;
+  media?: Record<
+    string,
+    {
+      bytes: Uint8Array;
+      mimetype: string;
+      length?: number | null;
+      /** Stop sending (pull never settles) once this many bytes were sent. */
+      stallAfter?: number;
+    }
+  >;
   /** Engine reported by `getSession` (default "GOWS"). */
   engine?: string;
   /** When set, every method rejects with this error (simulates WAHA failures). */
@@ -32,6 +41,8 @@ export class InMemoryWahaGateway implements WahaGateway {
   readonly calls: Call[] = [];
   /** How many times each media URL's body was pulled (0 = never read). */
   readonly bodyReads = new Map<string, number>();
+  /** Media URLs whose body was cancelled by the consumer. */
+  readonly cancelled = new Set<string>();
   constructor(private readonly data: InMemoryData = {}) {}
 
   count(method: Call["method"]): number {
@@ -102,9 +113,14 @@ export class InMemoryWahaGateway implements WahaGateway {
       {
         pull: (controller) => {
           this.bodyReads.set(url, (this.bodyReads.get(url) ?? 0) + 1);
+          if (file.stallAfter !== undefined && offset >= file.stallAfter)
+            return new Promise<void>(() => {});
           if (offset >= file.bytes.length) return controller.close();
           controller.enqueue(file.bytes.slice(offset, offset + CHUNK));
           offset += CHUNK;
+        },
+        cancel: () => {
+          this.cancelled.add(url);
         },
       },
       // No eager pull: the body is only read when someone consumes it.

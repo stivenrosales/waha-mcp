@@ -18,7 +18,7 @@ export const getMediaTool: ToolDefinition<typeof inputSchema> = {
   description:
     "Fetches one attachment on demand. Small images and stickers are returned inline as an image; anything else (large images, video, audio, documents) as a short-lived signed download link.",
   inputSchema,
-  async run(input, { gateway, mapper, config, links }) {
+  async run(input, { gateway, mapper, config, links, mediaIdleTimeoutMs }) {
     const media = await openMediaById(gateway, input.media_id, mapper);
     if (!media) return { content: [{ type: "text", text: MEDIA_GONE }] };
     // Decide from the declared size; only a small image of known size is ever read,
@@ -28,7 +28,7 @@ export const getMediaTool: ToolDefinition<typeof inputSchema> = {
       media.size !== null &&
       media.size <= config.mediaInlineMaxBytes
     ) {
-      const bytes = await readCapped(media.body, media.size);
+      const bytes = await readCapped(media.body, media.size, mediaIdleTimeoutMs);
       if (bytes)
         return {
           content: [

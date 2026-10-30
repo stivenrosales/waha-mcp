@@ -1,4 +1,4 @@
-import { InvalidInputError, WahaNotFoundError } from "../../domain/errors.js";
+import { InvalidInputError, MediaStalledError, WahaNotFoundError } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import { decodeMediaId } from "../waha/engines/gows.js";
@@ -59,15 +59,54 @@ export async function openMediaById(
   }
 }
 
+/** No chunk from WAHA for this long → the file transfer is considered stalled. */
+export const MEDIA_IDLE_TIMEOUT_MS = 30_000;
+
 /**
- * Reads at most `max` bytes. Returns `null` (and cancels the source) as soon as
+ * Wraps a WAHA body so that waiting more than `idleMs` for the next chunk errors
+ * the stream with `MediaStalledError` and cancels the upstream body. Pull-based:
+ * nothing is read until the consumer asks.
+ */
+export function withIdleTimeout(
+  body: ReadableStream<Uint8Array>,
+  idleMs: number,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const stalled = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new MediaStalledError()), idleMs);
+        });
+        try {
+          const { done, value } = await Promise.race([reader.read(), stalled]);
+          if (done) controller.close();
+          else controller.enqueue(value);
+        } catch (err) {
+          reader.cancel(err).catch(() => {});
+          controller.error(err);
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      cancel: (reason) => reader.cancel(reason),
+    },
+    { highWaterMark: 0 },
+  );
+}
+
+/**
+ * Reads at most `max` bytes, with the idle timeout. Returns `null` (and cancels the source) as soon as
  * more arrive, so a lying size can never make us buffer more than `max`.
  */
 export async function readCapped(
   body: ReadableStream<Uint8Array>,
   max: number,
+  idleMs: number = MEDIA_IDLE_TIMEOUT_MS,
 ): Promise<Uint8Array | null> {
-  const reader = body.getReader();
+  // A stalled body rejects with MediaStalledError (upstream already cancelled).
+  const reader = withIdleTimeout(body, idleMs).getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {

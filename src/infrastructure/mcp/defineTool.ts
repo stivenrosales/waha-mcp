@@ -9,6 +9,7 @@ import type { z } from "zod";
 import type { Config } from "../../config.js";
 import {
   InvalidInputError,
+  MediaStalledError,
   UnsupportedEngineError,
   WahaAuthError,
   WahaNotFoundError,
@@ -16,6 +17,7 @@ import {
 } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
+import { MEDIA_IDLE_TIMEOUT_MS } from "../media/resolveMedia.js";
 import type { SignedLinks } from "../media/signedLink.js";
 
 export interface ToolRunContext {
@@ -23,6 +25,8 @@ export interface ToolRunContext {
   mapper: EngineMapper;
   config: Config;
   links: SignedLinks;
+  /** Idle timeout for media bodies read by `get_media`. */
+  mediaIdleTimeoutMs: number;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
@@ -60,6 +64,8 @@ export interface ToolDeps {
   mapper: () => Promise<EngineMapper>;
   config: Config;
   links: SignedLinks;
+  /** Default `MEDIA_IDLE_TIMEOUT_MS` (30 s); injectable for tests. */
+  mediaIdleTimeoutMs?: number;
   logger?: Logger;
 }
 
@@ -72,6 +78,9 @@ export const MESSAGES = {
 
 function describeError(error: unknown): { message: string; unexpected: boolean } {
   if (error instanceof WahaAuthError) return { message: MESSAGES.auth, unexpected: false };
+  // Checked before WahaUnavailableError (its parent): a stalled transfer is a failure
+  // worth its own message, not "gone" (the file may still exist on WAHA).
+  if (error instanceof MediaStalledError) return { message: error.message, unexpected: false };
   if (error instanceof WahaUnavailableError)
     return { message: MESSAGES.unavailable, unexpected: false };
   if (error instanceof WahaNotFoundError) return { message: MESSAGES.notFound, unexpected: false };
@@ -100,6 +109,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         mapper,
         config: deps.config,
         links: deps.links,
+        mediaIdleTimeoutMs: deps.mediaIdleTimeoutMs ?? MEDIA_IDLE_TIMEOUT_MS,
       });
       logger.info(`tool=${def.name} ms=${Date.now() - start} result=ok`);
       if ("content" in out) return { content: out.content };

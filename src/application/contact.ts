@@ -7,6 +7,8 @@ import { fold } from "./search.js";
 const MAX_CANDIDATES = 10;
 const MIN_NAME = 2;
 const MIN_DIGITS = 6;
+/** Shortest number matched by its ending (a 9-digit local number is fine, 7 is too loose). */
+const MIN_SUFFIX_DIGITS = 8;
 const MAX_DIGITS = 15;
 
 export interface ContactCard {
@@ -125,7 +127,56 @@ export async function getContact(
       totalCandidates: found.length,
     };
   }
-  return card(gw, m, parseTarget(q), contacts, now);
+  const target = parseTarget(q);
+  if (q.phone === undefined) return card(gw, m, target, contacts, now);
+
+  // Phone: exact digits first, then (8+ digits) a match by ending, so a local number finds
+  // its country-code form. No country code is ever guessed.
+  const world = await loadWorld(gw, m, now);
+  const digits = phoneOf(target.phoneId as string) as string;
+  const known = new Set<string>();
+  const add = (id: string) => {
+    const p = phoneOf(id);
+    if (p) known.add(p);
+  };
+  for (const id of contacts.keys()) add(id);
+  for (const g of world.groups) for (const p of g.members) for (const id of p.ids) add(id);
+  for (const c of world.chats) add(canon(c.id));
+  if (known.has(digits)) return card(gw, m, target, contacts, now, world);
+  const hits =
+    digits.length >= MIN_SUFFIX_DIGITS
+      ? [...known].filter((p) => p.length > digits.length && p.endsWith(digits)).sort()
+      : [];
+  const only = hits.length === 1 ? hits[0] : undefined;
+  if (only) return card(gw, m, { phoneId: `${only}@c.us`, lid: null }, contacts, now, world);
+  return {
+    match: hits.length === 0 ? "none" : "ambiguous",
+    contact: null,
+    candidates: hits.slice(0, MAX_CANDIDATES).map((p) => {
+      const c = contacts.get(`${p}@c.us`);
+      return { id: `${p}@c.us`, phone: p, name: c?.name ?? null, pushname: c?.pushname ?? null };
+    }),
+    totalCandidates: hits.length,
+  };
+}
+
+interface World {
+  groups: { summary: { id: string; name: string }; members: Participant[] }[];
+  chats: { id: string; lastActivity: string | null }[];
+}
+
+/** The group list and the direct chats, each fetched once per call. */
+async function loadWorld(gw: WahaGateway, m: EngineMapper, now: number): Promise<World> {
+  const groups = (await gw.listGroups()).map((raw) => ({
+    summary: m.groupSummary(raw),
+    members: participantsOf(raw),
+  }));
+  // Best effort: a failing chats list must not hide the rest of the card.
+  const chats = await listChats(gw, m, {}, { now: () => now }).then(
+    (r) => r.chats,
+    () => [],
+  );
+  return { groups, chats };
 }
 
 type Target = Identity | { id: string };
@@ -136,6 +187,7 @@ async function card(
   target: Target,
   contacts: Awaited<ReturnType<typeof loadContacts>>,
   now: number,
+  preloaded?: World,
 ): Promise<ContactResult> {
   const start: Identity =
     "id" in target
@@ -154,10 +206,8 @@ async function card(
   }
 
   // Group participants carry both ids: one pass learns the missing id, the next matches.
-  const groups = (await gw.listGroups()).map((raw) => ({
-    summary: m.groupSummary(raw),
-    members: participantsOf(raw),
-  }));
+  const world = preloaded ?? (await loadWorld(gw, m, now));
+  const groups = world.groups;
   const known = () => new Set([phoneId, lid].filter((v): v is string => v !== null));
   for (const g of groups)
     for (const p of g.members)
@@ -176,18 +226,13 @@ async function card(
 
   // The chats list may know the person under either id; keep the most recent activity.
   let lastInteraction: string | null = null;
-  try {
-    const { chats } = await listChats(gw, m, {}, { now: () => now });
-    for (const c of chats)
-      if (
-        ids.has(canon(c.id)) &&
-        c.lastActivity &&
-        (!lastInteraction || c.lastActivity > lastInteraction)
-      )
-        lastInteraction = c.lastActivity;
-  } catch {
-    // Best effort: a failing chats list must not hide the rest of the card.
-  }
+  for (const c of world.chats)
+    if (
+      ids.has(canon(c.id)) &&
+      c.lastActivity &&
+      (!lastInteraction || c.lastActivity > lastInteraction)
+    )
+      lastInteraction = c.lastActivity;
 
   const id = (phoneId ?? lid) as string;
   return {

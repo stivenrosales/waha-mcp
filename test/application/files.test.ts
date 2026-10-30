@@ -37,6 +37,17 @@ describe("extractLinks", () => {
     ).toEqual(["https://a.com/x", "http://b.org/p?q=1", "https://c.io/a_(b)"]);
   });
 
+  it("does not match a scheme inside a word", () => {
+    expect(extractLinks("xhttp://a.com y_https://b.com ok http://c.com")).toEqual(["http://c.com"]);
+  });
+
+  it("stays linear on an adversarial run of closing brackets", () => {
+    const t0 = performance.now();
+    expect(extractLinks(`http://a${")".repeat(60_000)}`)).toEqual([]);
+    expect(extractLinks(`http://a${")".repeat(2_000)}`)).toEqual(["http://a"]);
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+
   it("dedupes within the text and ignores non-links", () => {
     expect(extractLinks("https://a.com https://a.com ftp://x.com www.a.com https://")).toEqual([
       "https://a.com",
@@ -139,6 +150,27 @@ describe("listSharedFiles", () => {
     const one = await run(gw, { chatId: GROUP_A });
     expect(one).toMatchObject({ scope: null });
     expect(one.items).toHaveLength(1);
+  });
+
+  it("bounds item size: long urls are skipped and counted, long filenames truncated", async () => {
+    const long = `https://a.com/${"x".repeat(2100)}`;
+    const gw = gateway({
+      chats: [chat(ANA, nowSec - 10, "Ana")],
+      messages: {
+        [ANA]: [
+          msg("l1", nowSec - 10, `${long} y https://ok.com/a`, { chat: ANA }),
+          media("l2", nowSec - 20, "documentMessage", { fileName: "n".repeat(400) }, ANA),
+        ],
+      },
+    });
+    const r = await run(gw);
+    expect(r.items.filter((i) => i.kind === "link").map((i) => i.url)).toEqual([
+      "https://ok.com/a",
+    ]);
+    expect(r.coverage.notes.join(" ")).toContain("1 link(s) longer than 2048");
+    const doc = r.items.find((i) => i.kind === "document");
+    expect(Array.from(doc?.filename ?? "")).toHaveLength(255);
+    expect(doc?.filename?.endsWith("…")).toBe(true);
   });
 
   it("validates kind, limit and range", async () => {

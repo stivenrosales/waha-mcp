@@ -13,7 +13,9 @@ const inputSchema = z.object({
     .string()
     .min(1)
     .optional()
-    .describe('A phone number in any format, e.g. "+51 987 654 321".'),
+    .describe(
+      'Phone digits in any format, e.g. "+51 987 654 321"; include the country code for exact matches — a local number is matched by its ending.',
+    ),
   name: z
     .string()
     .min(1)

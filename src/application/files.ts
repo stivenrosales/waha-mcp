@@ -46,41 +46,68 @@ export interface SharedFilesResult {
   coverage: Coverage;
 }
 
-const URL_RE = /https?:\/\/[^\s<>"`]+/gi;
+const URL_RE = /(?<![\w])https?:\/\/[^\s<>"`]+/gi;
 const TRAILING = new Set([".", ",", ";", ":", "!", "?", "'"]);
 const PAIRS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+/** Longer URLs are skipped (and counted), never truncated. */
+export const MAX_URL_LENGTH = 2048;
+const MAX_FILENAME_LENGTH = 255;
 
-const count = (s: string, ch: string) => s.split(ch).length - 1;
-
-/** Drops punctuation that ends a sentence, and a closing bracket the URL never opened. */
-function trimUrl(raw: string): string {
-  let url = raw;
-  for (;;) {
-    const last = url.at(-1) ?? "";
-    const open = PAIRS[last];
-    if (TRAILING.has(last) || (open !== undefined && count(url, last) > count(url, open)))
-      url = url.slice(0, -1);
-    else return url;
+/** Drops punctuation that ends a sentence, and closing brackets the URL never opened. One pass. */
+function trimUrl(url: string): string {
+  const open: Record<string, number> = {};
+  for (const ch of url) open[ch] = (open[ch] ?? 0) + 1;
+  let end = url.length;
+  while (end > 0) {
+    const last = url[end - 1] as string;
+    const opener = PAIRS[last];
+    if (TRAILING.has(last) || (opener !== undefined && (open[last] ?? 0) > (open[opener] ?? 0))) {
+      open[last] = (open[last] ?? 0) - 1;
+      end--;
+    } else break;
   }
+  return url.slice(0, end);
+}
+
+/** Links of a text plus how many were skipped for exceeding MAX_URL_LENGTH. */
+function scanLinks(text: string): { urls: string[]; skipped: number } {
+  const out = new Set<string>();
+  let skipped = 0;
+  for (const match of text.matchAll(URL_RE)) {
+    if (match[0].length > MAX_URL_LENGTH) {
+      skipped++;
+      continue;
+    }
+    const url = trimUrl(match[0]);
+    if (/^https?:\/\/[^/?#\s]+/i.test(url)) out.add(url);
+  }
+  return { urls: [...out], skipped };
 }
 
 /** Conservative `http(s)://` links of a text, in order of appearance, without duplicates. */
 export function extractLinks(text: string): string[] {
-  const out = new Set<string>();
-  for (const match of text.matchAll(URL_RE)) {
-    const url = trimUrl(match[0]);
-    if (/^https?:\/\/[^/?#\s]+/i.test(url)) out.add(url);
-  }
-  return [...out];
+  return scanLinks(text).urls;
 }
 
 /** Links of the text and of the caption, deduped per message. */
-function linksOf(m: NormalizedMessage): string[] {
+function linksOf(m: NormalizedMessage): { urls: string[]; skipped: number } {
   const out = new Set<string>();
+  let skipped = 0;
   for (const field of [m.text, m.attachment?.caption])
-    if (field) for (const url of extractLinks(field)) out.add(url);
-  return [...out];
+    if (field) {
+      const r = scanLinks(field);
+      skipped += r.skipped;
+      for (const url of r.urls) out.add(url);
+    }
+  return { urls: [...out], skipped };
 }
+
+const cutName = (name: string | null) =>
+  name === null || Array.from(name).length <= MAX_FILENAME_LENGTH
+    ? name
+    : `${Array.from(name)
+        .slice(0, MAX_FILENAME_LENGTH - 1)
+        .join("")}…`;
 
 /**
  * Documents, media and links shared in chats, newest first. With `chatId` it reads that
@@ -121,6 +148,7 @@ export async function listSharedFiles(
   });
 
   const all: SharedFile[] = [];
+  let skippedLinks = 0;
   for (const c of chats)
     for (const message of c.messages) {
       const base = { chatId: c.id, chatName: c.name, messageId: message.id, at: message.timestamp };
@@ -129,14 +157,16 @@ export async function listSharedFiles(
         all.push({
           ...base,
           kind: a.kind,
-          filename: a.filename,
+          filename: cutName(a.filename),
           mimetype: a.mimetype,
           size: a.size,
           url: null,
           mediaId: a.mediaId,
         });
-      if (q.kind === undefined || q.kind === "link")
-        for (const url of linksOf(message))
+      if (q.kind === undefined || q.kind === "link") {
+        const { urls, skipped } = linksOf(message);
+        skippedLinks += skipped;
+        for (const url of urls)
           all.push({
             ...base,
             kind: "link",
@@ -146,6 +176,7 @@ export async function listSharedFiles(
             url,
             mediaId: null,
           });
+      }
     }
   // Array.sort is stable: items of one message keep attachment-then-links order.
   all.sort(
@@ -154,6 +185,10 @@ export async function listSharedFiles(
       a.chatId.localeCompare(b.chatId) ||
       a.messageId.localeCompare(b.messageId),
   );
+  if (skippedLinks > 0)
+    coverage.notes.push(
+      `${skippedLinks} link(s) longer than ${MAX_URL_LENGTH} characters were skipped.`,
+    );
   const items = all.slice(0, limit);
   if (all.length > items.length)
     coverage.notes.push(

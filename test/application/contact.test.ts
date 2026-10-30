@@ -108,17 +108,42 @@ describe("getContact", () => {
     expect(r.contact).toMatchObject({ id: ANA, phone: "51999000111", name: "Ana Pérez" });
   });
 
-  it("an unknown phone still answers, with no names and no interaction", async () => {
+  it("an unknown phone is an explicit not-found, not an empty card", async () => {
     const r = await run(gateway(data()), { phone: "51000111222" });
+    expect(r).toMatchObject({ match: "none", contact: null, candidates: [], totalCandidates: 0 });
+  });
+
+  it("a local number finds the country-code contact by its ending", async () => {
+    const r = await run(gateway(data()), { phone: "999 000 111" });
     expect(r.match).toBe("unique");
-    expect(r.contact).toMatchObject({
-      id: "51000111222@c.us",
-      lid: null,
-      name: null,
-      pushname: null,
-      groupsInCommon: [],
-      lastInteraction: null,
+    expect(r.contact).toMatchObject({ id: ANA, phone: "51999000111", name: "Ana Pérez" });
+    expect(r.contact?.groupsInCommon).toHaveLength(2);
+  });
+
+  it("several contacts sharing the ending come back as candidates", async () => {
+    const gw = gateway({
+      contacts: [
+        { id: "51999000111@c.us", name: "Ana", pushname: "" },
+        { id: "34999000111@c.us", name: "Ana ES", pushname: "" },
+      ],
     });
+    const r = await run(gw, { phone: "999000111" });
+    expect(r.match).toBe("ambiguous");
+    expect(r.contact).toBeNull();
+    expect(r.candidates.map((c) => c.phone)).toEqual(["34999000111", "51999000111"]);
+    expect(r.candidates[0]?.name).toBe("Ana ES");
+  });
+
+  it("exact digits win over an ending match, and short numbers are never matched by ending", async () => {
+    const gw = gateway({
+      contacts: [
+        { id: "999000111@c.us", name: "Exacto", pushname: "" },
+        { id: "51999000111@c.us", name: "Largo", pushname: "" },
+      ],
+    });
+    expect((await run(gw, { phone: "999000111" })).contact?.name).toBe("Exacto");
+    expect((await run(gw, { phone: "0001119" })).match).toBe("none");
+    expect((await run(gateway(data()), { phone: "000111" })).match).toBe("none");
   });
 
   it("searches by name ignoring case and accents; one hit resolves", async () => {

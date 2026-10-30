@@ -19,7 +19,7 @@ Secondary audience: the community — anyone who already runs WAHA.
 
 ## 2. Goals
 
-- G1. Expose WAHA group data to MCP clients as **structured, normalized JSON** suited for analysis.
+- G1. Expose WAHA group and direct-chat data to MCP clients as **structured, normalized JSON** suited for analysis.
 - G2. Compute deterministic **metrics in code** (counts, activity, reply graph) so the model does
   not count thousands of messages by hand and token usage stays low.
 - G3. Map **every message type**, including attachments and stickers, and let the model actually
@@ -37,8 +37,6 @@ Secondary audience: the community — anyone who already runs WAHA.
   deployment and adds cost for every self-hoster.
 - Own message storage / sync database. v1 queries WAHA live. Storage may come later.
 - Multi-user / multi-tenant access. One owner per deployment.
-- Direct (1:1) chat analysis. Groups only in v1; the data model must not prevent adding 1:1
-  chats later.
 - The Gemini consumer app (no verified MCP support found). Target is Gemini CLI.
 
 ## 4. Anti-goals (failure even if it "works")
@@ -141,15 +139,28 @@ access your MCP".
 
 ### 7.2 Tools (all read-only)
 
-| Tool              | Input                             | Output                                                                |
-| ----------------- | --------------------------------- | --------------------------------------------------------------------- |
-| `list_groups`     | optional name filter              | id, name, participant count, last activity                            |
-| `get_group_info`  | group id                          | description, participants, admins, creation date                      |
-| `get_messages`    | group id, from, to, limit, cursor | normalized messages, next cursor                                      |
-| `get_group_stats` | group id, from, to                | metrics (below)                                                       |
-| `get_media`       | media id                          | image content for images/stickers; signed temporary link for the rest |
+| Tool             | Input                            | Output                                                                |
+| ---------------- | -------------------------------- | --------------------------------------------------------------------- |
+| `list_groups`    | optional name filter             | id, name, participant count, last activity                            |
+| `list_chats`     | optional name filter             | direct (1:1) chats: id, contact name/phone, last activity             |
+| `get_group_info` | group id                         | description, participants, admins, creation date                      |
+| `get_messages`   | chat id, from, to, limit, cursor | normalized messages, next cursor                                      |
+| `get_chat_stats` | chat id, from, to                | metrics (below)                                                       |
+| `get_media`      | media id                         | image content for images/stickers; signed temporary link for the rest |
 
 Every tool is marked read-only in its MCP annotations.
+
+**Direct chats (owner's decision, 2026-10-30, after design approval: "debe también agregar
+chats individuales").** `get_messages`, `get_chat_stats` and `get_media` accept any chat id, group
+(`@g.us`) or direct (`@c.us` / `@s.whatsapp.net` / `@lid`). `get_group_stats` is renamed
+`get_chat_stats`. For a direct chat the "participants" are the two parties, `silentMembers` is
+empty, and `get_group_info` rejects a non-group id with a clear message. Direct chats are more
+sensitive than community groups; the read-only and auth guarantees above are what protect them.
+
+**Known WAHA/GOWS limitations (observed on the owner's instance, 1,000 messages of one group):**
+the messages endpoint returned no reaction events and no polls; mentions live in
+`_data.Message.extendedTextMessage.contextInfo.mentionedJID`. `reactions` stays in the model but
+is documented as "usually empty on GOWS" rather than promised.
 
 ### 7.3 Normalized message
 
@@ -161,7 +172,7 @@ Every tool is marked read-only in its MCP annotations.
   availability. The file itself is never inlined in message lists.
 - Location: lat/long/name inline. Contact: name/phone inline.
 
-### 7.4 Metrics (`get_group_stats`)
+### 7.4 Metrics (`get_chat_stats`)
 
 Computed in code over the requested range. Day and hour buckets use a timezone from the
 `TIMEZONE` env var (IANA name, default `UTC`; the owner sets `America/Lima`), overridable per call

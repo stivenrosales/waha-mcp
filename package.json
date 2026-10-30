@@ -1,0 +1,36 @@
+{
+  "name": "waha-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP server over WAHA, the WhatsApp HTTP API",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "dev": "node --env-file=.env --import tsx src/main.ts",
+    "capture": "node --env-file=.env --import tsx scripts/capture-fixtures.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@modelcontextprotocol/hono": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "hono": "^4.13.7",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^26.5.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  },
+  "license": "MIT"
+}

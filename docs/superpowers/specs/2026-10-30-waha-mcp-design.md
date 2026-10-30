@@ -157,6 +157,32 @@ chats individuales").** `get_messages`, `get_chat_stats` and `get_media` accept 
 empty, and `get_group_info` rejects a non-group id with a clear message. Direct chats are more
 sensitive than community groups; the read-only and auth guarantees above are what protect them.
 
+**Premium package (owner's decision, 2026-10-30: "Dale con todo").** Primary use case, in the
+owner's words: "quiero que revises los chats de tal día y dime si hay pendientes o no, de todos
+los chats, excluyendo grupos o quizá no, … y poder hacer en base a ellos todo lists o análisis".
+Six more read-only tools, one stats extension and three MCP prompts:
+
+| Tool                   | Purpose                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `list_pending_replies` | chats where the other side spoke last and the owner hasn't answered; waiting time; last messages |
+| `get_activity_digest`  | every chat active on a day/range in one call, compact messages, "awaiting reply" flag     |
+| `search_messages`      | text search (case/accent-insensitive) over text, captions and filenames in a range        |
+| `get_thread`           | messages around one message plus its reply chain                                          |
+| `list_shared_files`    | documents, images, video, audio and links shared, filterable by chat, kind and date       |
+| `get_contact`          | who a JID/phone/name is: names, phone, groups in common, last interaction                 |
+
+- Scope for pending/digest/search: `direct` (default), `groups`, `all`. In groups a message is
+  "pending" only when it mentions the owner or replies to an owner's message and the owner has
+  not written in that group afterwards — so large community groups don't drown the result.
+- `get_chat_stats` adds response times per party (median and average delay between a message
+  from one side and the next message from the other side).
+- MCP prompts: `daily-review` (pending of a day, prioritized), `pending-to-todoist` (turn pending
+  items into tasks via the client's own Todoist connector — the MCP itself stays read-only),
+  `group-summary` (topics, decisions, participants).
+- The to-do list is produced by the model, never by the server. Deferred to v2: voice-note
+  transcription (needs an AI service inside the server) and search over months of history
+  (needs own storage).
+
 **Known WAHA/GOWS limitations (observed on the owner's instance, 1,000 messages of one group):**
 the messages endpoint returned no reaction events and no polls; mentions live in
 `_data.Message.extendedTextMessage.contextInfo.mentionedJID`. `reactions` stays in the model but

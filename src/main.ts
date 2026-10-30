@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   try {
     engine = (await gateway.getSession()).engine;
   } catch {
-    // Reported above; WAHA may come up later.
+    // WAHA may not be up yet; the engine resolver retries on the first tool call.
   }
   console.log(
     `waha-mcp listening on :${config.port} | engine: ${engine} | session: ${config.wahaSession} | public URL: ${config.publicBaseUrl} | tools: ${tools.length}`,

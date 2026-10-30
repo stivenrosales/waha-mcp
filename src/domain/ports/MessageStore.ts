@@ -32,6 +32,10 @@ export interface MessageStore {
   deleteMissing(chatId: string, fromTs: number | undefined, keepIds: string[]): number;
   getSyncState(chatId: string): ChatSyncState | null;
   setSyncState(chatId: string, state: ChatSyncState): void;
+  /** The account the cached rows belong to (`<session>|<me.id>`); null when never recorded. */
+  getOwner(): string | null;
+  /** Wipes every cached message and sync state, then records `owner`. */
+  resetForOwner(owner: string): void;
   /** Deletes messages older than `olderThanTs` and narrows coverage accordingly; returns rows deleted. */
   prune(olderThanTs: number): number;
   close(): void;

@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS messages (
   PRIMARY KEY (chat_id, id)
 );
 CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages (chat_id, ts);
+CREATE INDEX IF NOT EXISTS messages_ts ON messages (ts);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS chat_sync (
   chat_id TEXT PRIMARY KEY,
   newest_ts INTEGER,
@@ -137,6 +142,21 @@ export function createSqliteMessageStore(db: DatabaseSync): MessageStore {
          ON CONFLICT (chat_id) DO UPDATE SET newest_ts = excluded.newest_ts,
            oldest_ts = excluded.oldest_ts, last_sync_at = excluded.last_sync_at`,
       ).run(chatId, s.newestTs, s.oldestTs, s.lastSyncAt);
+    },
+
+    getOwner() {
+      const row = db.prepare("SELECT value FROM meta WHERE key = 'owner'").get() as
+        | { value: string }
+        | undefined;
+      return row?.value ?? null;
+    },
+
+    resetForOwner(owner) {
+      transaction(() => {
+        db.exec("DELETE FROM messages");
+        db.exec("DELETE FROM chat_sync");
+        db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('owner', ?)").run(owner);
+      });
     },
 
     prune(olderThanTs) {

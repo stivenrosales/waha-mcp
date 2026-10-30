@@ -46,6 +46,7 @@ async function main(): Promise<void> {
     ? createCachedGateway(wahaGateway, messageStore, {
         refreshHours: config.cacheRefreshHours,
         maxAgeDays: config.cacheMaxAgeDays,
+        session: config.wahaSession,
       })
     : wahaGateway;
   if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");

@@ -162,6 +162,9 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
         limit: String(q.limit),
         offset: String(q.offset),
         downloadMedia: "false",
+        // Newest first, explicitly: the message cache's ordering proof relies on it.
+        sortBy: "timestamp",
+        sortOrder: "desc",
       });
       if (q.from !== undefined) params.set("filter.timestamp.gte", String(q.from));
       if (q.to !== undefined) params.set("filter.timestamp.lte", String(q.to));

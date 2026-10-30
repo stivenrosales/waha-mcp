@@ -31,8 +31,8 @@ export interface WahaGateway {
    */
   openMedia(url: string): Promise<OpenedFile | null>;
   /**
-   * Only on a caching gateway: a short coverage note when the last `getMessages` of this chat
-   * was answered from the local cache, `null` when it came straight from WAHA.
+   * Only on a caching gateway: the coverage note of a page this gateway's `getMessages` returned
+   * (pass the returned array), or `null` when that page came straight from WAHA.
    */
-  cacheNote?(chatId: string): string | null;
+  cacheNote?(page: unknown[]): string | null;
 }

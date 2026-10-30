@@ -39,6 +39,7 @@ function setup(
     refreshHours: o.refreshHours ?? 48,
     maxAgeDays: o.maxAgeDays ?? 0,
     backfillMaxPages: o.backfillMaxPages,
+    session: "default",
     now: () => t,
   });
   const wahaCalls = () =>
@@ -56,6 +57,87 @@ function setup(
     },
   };
 }
+
+/** A WAHA whose `getMe` fails (account unknown) while messages still load. */
+class NoMe extends InMemoryWahaGateway {
+  override async getMe(): Promise<{ id: string; lid: string | null }> {
+    throw new Error("WAHA down for /me");
+  }
+}
+
+describe("cached gateway: account identity", () => {
+  const T = (NEWEST + 60) * 1000;
+  const make = (
+    waha: WahaGateway,
+    store: ReturnType<typeof createSqliteMessageStore>,
+    session = "default",
+  ) => createCachedGateway(waha, store, { refreshHours: 48, maxAgeDays: 0, session, now: () => T });
+  const calls = (w: InMemoryWahaGateway) => w.count("getMessages");
+
+  it("keeps the cache for the same session and account", async () => {
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    const data = { messages: { [CHAT]: history(5) } };
+    await fetchRange(make(new InMemoryWahaGateway(data), store), m, { chatId: CHAT, cap: 10 });
+    const again = new InMemoryWahaGateway(data);
+    const r = await fetchRange(make(again, store), m, { chatId: CHAT, cap: 10 });
+    expect(r.messages).toHaveLength(5);
+    expect(calls(again)).toBe(0);
+  });
+
+  it("wipes the cache when the WAHA session changes", async () => {
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    await fetchRange(
+      make(new InMemoryWahaGateway({ messages: { [CHAT]: history(5) } }), store),
+      m,
+      {
+        chatId: CHAT,
+        cap: 10,
+      },
+    );
+    const other = new InMemoryWahaGateway({ messages: { [CHAT]: history(2) } });
+    const r = await fetchRange(make(other, store, "work"), m, { chatId: CHAT, cap: 10 });
+    expect(r.messages.map((x) => x.text)).toEqual(["msg 2", "msg 1"]);
+    expect(calls(other)).toBe(1);
+  });
+
+  it("wipes the cache when another phone is paired (different me.id)", async () => {
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    await fetchRange(
+      make(new InMemoryWahaGateway({ messages: { [CHAT]: history(5) } }), store),
+      m,
+      {
+        chatId: CHAT,
+        cap: 10,
+      },
+    );
+    const other = new InMemoryWahaGateway({
+      messages: { [CHAT]: history(2) },
+      me: { id: "51999999999@c.us", lid: null },
+    });
+    const r = await fetchRange(make(other, store), m, { chatId: CHAT, cap: 10 });
+    expect(r.messages.map((x) => x.text)).toEqual(["msg 2", "msg 1"]);
+  });
+
+  it("never serves cached rows while the account is unknown", async () => {
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    await fetchRange(
+      make(new InMemoryWahaGateway({ messages: { [CHAT]: history(5) } }), store),
+      m,
+      {
+        chatId: CHAT,
+        cap: 10,
+      },
+    );
+    const unknown = new NoMe({ messages: { [CHAT]: history(2) } });
+    const gw = make(unknown, store);
+    for (let i = 0; i < 2; i++) {
+      const r = await fetchRange(gw, m, { chatId: CHAT, cap: 10 });
+      expect(r.messages.map((x) => x.text)).toEqual(["msg 2", "msg 1"]);
+      expect(r.cacheNote).toBeUndefined();
+    }
+    expect(calls(unknown)).toBe(2);
+  });
+});
 
 describe("cached gateway", () => {
   it("answers a second read of the same range from SQLite within 60 s", async () => {
@@ -231,6 +313,37 @@ describe("cached gateway", () => {
     expect(page.cacheNote).toMatch(/local message cache/);
     const range = await fetchRange(s.gw, m, { chatId: CHAT, cap: 10 });
     expect(range.cacheNote).toMatch(/local message cache/);
+  });
+
+  it("returns the cache note with each result, so concurrent calls cannot swap notes", async () => {
+    const s = setup(history(1000), { backfillMaxPages: 1 });
+    const [cached, direct] = await Promise.all([
+      s.gw.getMessages(CHAT, { limit: 3, offset: 0 }),
+      s.gw.getMessages(CHAT, { limit: 200, offset: 0, to: NEWEST - 900 * 60 }),
+    ]);
+    expect(s.gw.cacheNote?.(cached)).toMatch(/local message cache/);
+    expect(s.gw.cacheNote?.(direct)).toBeNull();
+  });
+
+  it("drops messages gone from WAHA only when the refresh window fit in one page", async () => {
+    const small = setup(history(5));
+    await fetchRange(small.gw, m, { chatId: CHAT, cap: 100 });
+    small.data.messages[CHAT] = (small.data.messages[CHAT] as Raw[]).filter(
+      (x) => !String(x.id).includes("_M3_"),
+    );
+    small.advance(61);
+    const a = await fetchRange(small.gw, m, { chatId: CHAT, cap: 100 });
+    expect(a.messages.map((x) => x.text)).toEqual(["msg 5", "msg 4", "msg 2", "msg 1"]);
+
+    // Two pages: offsets may shift mid-read, so absence is not proof of deletion.
+    const big = setup(history(300));
+    await fetchRange(big.gw, m, { chatId: CHAT, cap: 1000 });
+    big.data.messages[CHAT] = (big.data.messages[CHAT] as Raw[]).filter(
+      (x) => !String(x.id).includes("_M150_"),
+    );
+    big.advance(61);
+    const b = await fetchRange(big.gw, m, { chatId: CHAT, cap: 1000 });
+    expect(b.messages).toHaveLength(300);
   });
 
   it("delegates every other gateway method", async () => {

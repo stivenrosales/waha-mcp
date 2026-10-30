@@ -132,6 +132,9 @@ describe("WahaHttpGateway", () => {
     expect(q.get("filter.timestamp.gte")).toBe("100");
     expect(q.get("filter.timestamp.lte")).toBe("200");
     expect(q.get("downloadMedia")).toBe("false");
+    // Explicit newest-first order: the message cache relies on it, not on WAHA's default.
+    expect(q.get("sortBy")).toBe("timestamp");
+    expect(q.get("sortOrder")).toBe("desc");
   });
 
   it("getMessages omits timestamp filters when not given", async () => {

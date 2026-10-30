@@ -19,6 +19,8 @@ export interface CachedGatewayOptions {
   maxAgeDays: number;
   /** Default 25 pages (5000 events). */
   backfillMaxPages?: number;
+  /** WAHA session name; with `getMe().id` it identifies the account the cache belongs to. */
+  session: string;
   /** Clock in epoch milliseconds (injectable for tests). */
   now?: () => number;
 }
@@ -76,7 +78,11 @@ export function createCachedGateway(
   const windowS = opts.refreshHours * 3600;
   const budget = opts.backfillMaxPages ?? DEFAULT_BACKFILL_MAX_PAGES;
   const locks = new Map<string, Promise<unknown>>();
-  const servedFromCache = new Map<string, boolean>();
+  /** Coverage note of each page answered from the cache, keyed by the returned array. */
+  const notes = new WeakMap<unknown[], string>();
+  /** True once the cache is known to belong to the current account (wiped otherwise). */
+  let ownerChecked = false;
+  let ownerCheck: Promise<boolean> | null = null;
   let lastPrune = Number.NEGATIVE_INFINITY;
 
   const prune = (): void => {
@@ -87,6 +93,27 @@ export function createCachedGateway(
   prune(); // startup
   const maybePrune = (): void => {
     if (now() - lastPrune >= PRUNE_EVERY_MS) prune();
+  };
+
+  /**
+   * Resolves the account (session + `getMe().id`) before anything is served from the cache.
+   * A different or unrecorded owner wipes the cache. While `getMe` fails, the cache is not used.
+   */
+  const ensureOwner = (): Promise<boolean> => {
+    if (ownerChecked) return Promise.resolve(true);
+    ownerCheck ??= gw
+      .getMe()
+      .then((me) => {
+        const owner = `${opts.session}|${me.id}`;
+        if (store.getOwner() !== owner) store.resetForOwner(owner);
+        ownerChecked = true;
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => {
+        ownerCheck = null;
+      });
+    return ownerCheck;
   };
 
   /** Runs `fn` after every earlier call on the same chat settled (success or failure). */
@@ -121,8 +148,9 @@ export function createCachedGateway(
         rows.map((r) => r.ts),
       );
       if (raws.length < PAGE) {
-        // The whole window was read: anything cached in it that WAHA no longer has is gone.
-        store.deleteMissing(chatId, from, ids);
+        // The whole window came in one read: anything cached in it that WAHA no longer has is
+        // gone. Across several offset pages rows may shift between reads, so absence proves nothing.
+        if (page === 0) store.deleteMissing(chatId, from, ids);
         const next: ChatSyncState = {
           newestTs,
           oldestTs: st.oldestTs === null || from === undefined ? null : Math.min(st.oldestTs, from),
@@ -182,6 +210,14 @@ export function createCachedGateway(
     return false;
   }
 
+  const noteFor = (st: ChatSyncState): string => {
+    const recheck =
+      st.newestTs === null
+        ? ""
+        : ` Edits and deletions are re-checked only for messages since ${new Date((st.newestTs - windowS) * 1000).toISOString()}.`;
+    return `Read from the local message cache (last synced with WAHA at ${new Date(st.lastSyncAt).toISOString()}).${recheck}`;
+  };
+
   return {
     getSession: () => gw.getSession(),
     getMe: () => gw.getMe(),
@@ -195,6 +231,7 @@ export function createCachedGateway(
 
     getMessages(chatId, q) {
       return withLock(chatId, async () => {
+        if (!(await ensureOwner())) return gw.getMessages(chatId, q);
         maybePrune();
         let st = store.getSyncState(chatId);
         let usable = true;
@@ -203,30 +240,21 @@ export function createCachedGateway(
           if (refreshed) st = refreshed;
           else usable = false;
         }
-        if (!usable || !(await cover(chatId, st, q))) {
-          servedFromCache.set(chatId, false);
-          return gw.getMessages(chatId, q);
-        }
-        servedFromCache.set(chatId, true);
+        if (!usable || !(await cover(chatId, st, q))) return gw.getMessages(chatId, q);
         const current = store.getSyncState(chatId) as ChatSyncState;
-        return store.readRange(chatId, {
+        const page = store.readRange(chatId, {
           fromTs: readFrom(current, q),
           toTs: q.to,
           limit: q.limit,
           offset: q.offset,
         });
+        notes.set(page, noteFor(current));
+        return page;
       });
     },
 
-    cacheNote(chatId) {
-      if (!servedFromCache.get(chatId)) return null;
-      const st = store.getSyncState(chatId);
-      if (!st) return null;
-      const recheck =
-        st.newestTs === null
-          ? ""
-          : ` Edits and deletions are re-checked only for messages since ${new Date((st.newestTs - windowS) * 1000).toISOString()}.`;
-      return `Read from the local message cache (last synced with WAHA at ${new Date(st.lastSyncAt).toISOString()}).${recheck}`;
+    cacheNote(page) {
+      return notes.get(page) ?? null;
     },
   };
 }

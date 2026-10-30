@@ -85,6 +85,39 @@ describe("sqlite message store", () => {
     ).toEqual(["c", "a"]);
   });
 
+  it("records the owner and wipes messages and sync state when it changes", () => {
+    const store = memory();
+    expect(store.getOwner()).toBeNull();
+    store.upsertRaw(CHAT, [row("a", 10)]);
+    store.setSyncState(CHAT, { newestTs: 10, oldestTs: null, lastSyncAt: 1 });
+    store.resetForOwner("default|51000000002@c.us");
+    expect(store.getOwner()).toBe("default|51000000002@c.us");
+    expect(store.countRange(CHAT, {})).toBe(0);
+    expect(store.getSyncState(CHAT)).toBeNull();
+  });
+
+  it("keeps rows and the owner across a reopen of the same file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-cache-"));
+    dirs.push(dir);
+    const file = path.join(dir, "cache.db");
+    const first = createSqliteMessageStore(openCacheDatabase(file));
+    first.resetForOwner("default|me");
+    first.upsertRaw(CHAT, [row("a", 10)]);
+    first.close();
+    const second = createSqliteMessageStore(openCacheDatabase(file));
+    expect(second.getOwner()).toBe("default|me");
+    expect(second.countRange(CHAT, {})).toBe(1);
+    second.close();
+  });
+
+  it("indexes messages by timestamp for pruning", () => {
+    const db = openCacheDatabase(":memory:");
+    const plan = db.prepare("EXPLAIN QUERY PLAN DELETE FROM messages WHERE ts < 5").all() as {
+      detail: string;
+    }[];
+    expect(plan.map((p) => p.detail).join(" ")).toMatch(/USING (COVERING )?INDEX messages_ts/);
+  });
+
   it("prune removes old rows and narrows the coverage of the chats it touched", () => {
     const store = memory();
     store.upsertRaw(CHAT, [row("c", 300), row("b", 200), row("a", 100)]);

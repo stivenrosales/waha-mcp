@@ -99,7 +99,7 @@ export async function getMessages(
           from: q.from ?? null,
           to: q.to ?? null,
         });
-  const cacheNote = gw.cacheNote?.(q.chatId) ?? null;
+  const cacheNote = gw.cacheNote?.(raws) ?? null;
   return { messages: mapAndAttach(m, raws), nextCursor, ...(cacheNote ? { cacheNote } : {}) };
 }
 
@@ -127,7 +127,7 @@ export async function fetchRange(
   while (counted <= q.cap) {
     const page = await gw.getMessages(q.chatId, { limit: RANGE_PAGE, offset: fetched, from, to });
     fetched += page.length;
-    const note = gw.cacheNote?.(q.chatId) ?? null;
+    const note = gw.cacheNote?.(page) ?? null;
     cacheNote = cacheNote === undefined || cacheNote !== null ? note : null;
     for (const raw of page) {
       // A message arriving mid-fetch shifts later offsets and repeats events: keep the first copy.

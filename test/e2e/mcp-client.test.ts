@@ -134,6 +134,7 @@ function setup(data: InMemoryData = baseData(), gateway = new InMemoryWahaGatewa
     ? createCachedGateway(gateway, createSqliteMessageStore(openCacheDatabase(":memory:")), {
         refreshHours: 48,
         maxAgeDays: 0,
+        session: "default",
       })
     : gateway;
   const config = loadConfig({

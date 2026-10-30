@@ -169,6 +169,37 @@ export const activityDigestSchema = z.object({
   coverage: coverageSchema,
 });
 
+export const searchMessagesSchema = z.object({
+  query: z.string(),
+  from: z.string(),
+  to: z.string().nullable(),
+  scope: z.enum(["direct", "groups", "all"]).nullable(),
+  totalMatches: z.number(),
+  hits: z.array(
+    z.object({
+      chatId: z.string(),
+      chatName: z.string(),
+      isGroup: z.boolean(),
+      message: compactMessageSchema,
+      snippet: z.string(),
+    }),
+  ),
+  coverage: coverageSchema,
+});
+
+export const threadSchema = z.object({
+  chatId: z.string(),
+  anchor: messageSchema,
+  before: z.array(messageSchema),
+  after: z.array(messageSchema),
+  replyChain: z.array(messageSchema),
+  coverage: z.object({
+    messagesRead: z.number(),
+    missingAncestors: z.array(z.string()),
+    notes: z.array(z.string()),
+  }),
+});
+
 /** Shared closing lines of every multi-chat summary. */
 export function coverageText(c: z.infer<typeof coverageSchema>): string {
   const head = `Coverage: ${c.chatsScanned} chats scanned, ${c.chatsSkipped} skipped, ${c.failedChats.length} failed${c.truncated ? " (INCOMPLETE)" : ""}.`;

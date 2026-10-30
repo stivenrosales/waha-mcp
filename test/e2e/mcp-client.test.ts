@@ -196,7 +196,7 @@ async function mediaIds(client: Client, chatId: string): Promise<(string | null)
 }
 
 describe("e2e: MCP client against createApp", () => {
-  it("lists exactly the eight tools, all readOnlyHint true, none named like send/delete/edit", async () => {
+  it("lists exactly the ten tools, all readOnlyHint true, none named like send/delete/edit", async () => {
     const client = await connect(setup());
     expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
     const { tools } = await client.listTools();
@@ -207,9 +207,11 @@ describe("e2e: MCP client against createApp", () => {
         "get_group_info",
         "get_media",
         "get_messages",
+        "get_thread",
         "list_chats",
         "list_groups",
         "list_pending_replies",
+        "search_messages",
       ].sort(),
     );
     for (const t of tools) {
@@ -255,6 +257,70 @@ describe("e2e: MCP client against createApp", () => {
     });
     expect(sc(groups).pending).toEqual([]);
     expect(sc(groups).scope).toBe("groups");
+  });
+
+  it("search_messages finds messages across scope and in one chat, with coverage", async () => {
+    const client = await connect(setup());
+    const range = { from: "2026-10-01T00:00:00Z" };
+    const direct = await call(client, "search_messages", { query: "HOLA", ...range });
+    expect(direct.isError).toBeFalsy();
+    const hits = sc(direct).hits as { chatId: string; chatName: string; snippet: string }[];
+    expect(hits).toEqual([
+      expect.objectContaining({ chatId: "51999000111@c.us", chatName: "Ana", snippet: "hola" }),
+    ]);
+    expect(sc(direct)).toMatchObject({ scope: "direct", totalMatches: 1 });
+    expect(textOf(direct)).toContain("Coverage:");
+    // Fixture group texts are scrubbed placeholders; only scope/chat_id reaches them.
+    expect(
+      sc(await call(client, "search_messages", { query: "redacted-1176", ...range }))
+        .hits as unknown[],
+    ).toEqual([]);
+    const all = await call(client, "search_messages", {
+      query: "redacted-1176",
+      scope: "all",
+      ...range,
+    });
+    expect((sc(all).hits as { chatId: string }[]).map((h) => h.chatId)).toEqual([GROUP]);
+    const one = await call(client, "search_messages", {
+      query: "redacted-1176",
+      chat_id: GROUP,
+      ...range,
+    });
+    expect(sc(one)).toMatchObject({ scope: null, totalMatches: 1 });
+    const short = await call(client, "search_messages", { query: " a " });
+    expect(short.isError).toBe(true);
+    expect(textOf(short)).toContain('"query" must be between 2 and 200');
+  });
+
+  it("get_thread returns the window, the reply chain and a clear not-found error", async () => {
+    const client = await connect(setup());
+    const group = await call(client, "get_messages", { chat_id: GROUP, limit: 200 });
+    const messages = sc(group).messages as { id: string; text: string | null }[];
+    const anchor = messages.find((m) => m.text === "<redacted-1176>");
+    const r = await call(client, "get_thread", {
+      chat_id: GROUP,
+      message_id: anchor?.id,
+      before: 1,
+      after: 1,
+    });
+    expect(r.isError).toBeFalsy();
+    const t = sc(r) as {
+      anchor: { id: string; replyToId: string | null };
+      before: unknown[];
+      after: { id: string }[];
+      coverage: { missingAncestors: string[] };
+    };
+    expect(t.anchor.id).toBe(anchor?.id);
+    expect(t.before).toHaveLength(1);
+    expect(t.after).toHaveLength(1);
+    // Its parent is not in the stored history, so the chain is empty and the gap is reported.
+    expect(sc(r).replyChain).toEqual([]);
+    expect(t.coverage.missingAncestors).toEqual([t.anchor.replyToId]);
+    const missing = await call(client, "get_thread", { chat_id: GROUP, message_id: "nope" });
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toContain("message not found in the recent history");
+    const bad = await call(client, "get_thread", { chat_id: GROUP, message_id: "x", before: 99 });
+    expect(bad.isError).toBe(true);
   });
 
   it("list_pending_replies maps domain errors", async () => {

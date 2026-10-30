@@ -2,6 +2,7 @@ import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import type { Config } from "../../config.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import type { AuthInfo } from "../auth/bearer.js";
+import { ICON_DATA_URI } from "../http/icon.js";
 import type { SignedLinks } from "../media/signedLink.js";
 import { createEngineResolver } from "../waha/engines/index.js";
 import { type Logger, type ToolDefinition, toMcpTool } from "./defineTool.js";
@@ -38,7 +39,14 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
   const mapper = createEngineResolver(gateway);
 
   const http = createMcpHandler(() => {
-    const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions });
+    const server = new McpServer(
+      {
+        name: SERVER_NAME,
+        version: SERVER_VERSION,
+        icons: [{ src: ICON_DATA_URI, mimeType: "image/svg+xml", sizes: ["any"] }],
+      },
+      { instructions },
+    );
     for (const tool of tools)
       toMcpTool(server, tool, { gateway, mapper, config, links, logger, mediaIdleTimeoutMs });
     registerPrompts(server, { timezone: config.timezone });

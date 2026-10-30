@@ -431,6 +431,21 @@ describe("e2e: MCP client against createApp", () => {
     expect(bad.isError).toBe(true);
   });
 
+  it("declares the mascot icon in serverInfo and serves it at /favicon.svg", async () => {
+    const s = setup();
+    const client = await connect(s);
+    const icons = client.getServerVersion()?.icons ?? [];
+    expect(icons).toHaveLength(1);
+    expect(icons[0]?.mimeType).toBe("image/svg+xml");
+    expect(icons[0]?.src.startsWith("data:image/svg+xml;base64,")).toBe(true);
+    for (const path of ["/favicon.svg", "/icon.svg"]) {
+      const res = await s.app.fetch(new Request(`${BASE}${path}`));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("image/svg+xml");
+      expect(await res.text()).toContain("<svg");
+    }
+  });
+
   it("serves /health without auth and rejects /mcp without a token (401)", async () => {
     const { app } = setup();
     expect((await app.fetch(new Request(`${BASE}/health`))).status).toBe(200);

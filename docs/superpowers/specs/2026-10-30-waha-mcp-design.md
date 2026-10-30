@@ -61,8 +61,8 @@ Secondary audience: the community — anyone who already runs WAHA.
     (`gows.storage.messages` / `gows.storage.chats` stay enabled unless explicitly disabled;
     WAHA < 2026.8.1 ignored disabling them, bug #2207). GOWS syncs the full available history by
     default, cappable by env.
-  The server must detect the engine at startup (WAHA session info) and report clearly when
-  history is unavailable instead of returning an empty list as if the group were silent.
+    The server must detect the engine at startup (WAHA session info) and report clearly when
+    history is unavailable instead of returning an empty list as if the group were silent.
 - **The owner's instance runs GOWS** (`Haiku-serv/CLAUDE.md:557`; `fetchGroups` measured ~5 s for
   258 groups, `Haiku-serv/src/lib/waha/client.ts:17`). Group listing on GOWS returns `{ JID, Name }`
   shapes, other engines `{ id }` / `{ id: { _serialized } }` (`client.ts:199`).
@@ -141,13 +141,13 @@ access your MCP".
 
 ### 7.2 Tools (all read-only)
 
-| Tool | Input | Output |
-| --- | --- | --- |
-| `list_groups` | optional name filter | id, name, participant count, last activity |
-| `get_group_info` | group id | description, participants, admins, creation date |
-| `get_messages` | group id, from, to, limit, cursor | normalized messages, next cursor |
-| `get_group_stats` | group id, from, to | metrics (below) |
-| `get_media` | media id | image content for images/stickers; signed temporary link for the rest |
+| Tool              | Input                             | Output                                                                |
+| ----------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `list_groups`     | optional name filter              | id, name, participant count, last activity                            |
+| `get_group_info`  | group id                          | description, participants, admins, creation date                      |
+| `get_messages`    | group id, from, to, limit, cursor | normalized messages, next cursor                                      |
+| `get_group_stats` | group id, from, to                | metrics (below)                                                       |
+| `get_media`       | media id                          | image content for images/stickers; signed temporary link for the rest |
 
 Every tool is marked read-only in its MCP annotations.
 

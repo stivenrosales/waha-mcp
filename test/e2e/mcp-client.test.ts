@@ -619,6 +619,14 @@ for (const cache of [false, true])
       expect(voice.length).toBeGreaterThan(0);
       for (const m of voice) expect(m.transcript).toBeNull();
       expect(s.gateway.count("getMessage")).toBe(0);
+      // The voice note's file: get_media gives the user a link to listen, not "attach it".
+      const audioId = (await mediaIds(client, DIRECT))[7];
+      const media = await call(client, "get_media", { media_id: audioId });
+      expect(textOf(media)).toContain("audio/ogg");
+      expect(textOf(media)).toContain("transcription is not configured on this server");
+      expect(textOf(media)).toContain("so they can listen to it");
+      expect(textOf(media)).not.toContain("attach it");
+      expect(textOf(media)).not.toContain("transcribe_audio");
     });
 
     it("with transcription on, voice notes carry transcripts across tools, paid once", async () => {

@@ -46,10 +46,11 @@ export const getMediaTool: ToolDefinition<typeof inputSchema> = {
     const name = media.filename ? ` "${media.filename}"` : "";
     const size = media.size === null ? "unknown size" : `${media.size} bytes`;
     const isAudio = baseMimetype(media.mimetype).startsWith("audio/");
-    const guidance =
-      isAudio && transcription.enabled
+    const guidance = !isAudio
+      ? "This file cannot be read through the connector. Give the user this link and ask them to download the file and attach it to this chat so you can read it."
+      : transcription.enabled
         ? "This audio cannot be played through the connector. To know what it says, use transcribe_audio with this media_id."
-        : "This file cannot be read through the connector. Give the user this link and ask them to download the file and attach it to this chat so you can read it.";
+        : "This audio cannot be played through the connector, and transcription is not configured on this server. Give the user this link so they can listen to it.";
     const text = `File${name} (${media.mimetype}, ${size}): ${config.publicBaseUrl}/media/${token}\nThe link expires at ${expiresAt}.\n${guidance}`;
     return { content: [{ type: "text", text }] };
   },

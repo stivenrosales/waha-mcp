@@ -30,7 +30,7 @@ export const searchMessagesTool: ToolDefinition<typeof inputSchema, typeof searc
   name: "search_messages",
   title: "Search messages",
   description:
-    'Finds messages containing a text, newest first, with a snippet centered on the match. Case- and accent-insensitive over text, captions and file names. Give chat_id to search one chat of any type; otherwise it searches the chats of `scope` (default "direct") active in the range (default last 30 days). Always read coverage: it states which chats were scanned and what is missing, so no hits does not prove the text was never written. Use get_thread with a hit\'s message id to read the conversation around it.',
+    'Finds messages containing a text, newest first, with a snippet centered on the match. Case- and accent-insensitive ("ano" also matches "año") over text, captions and file names. Give chat_id to search one chat of any type; otherwise it searches the chats of `scope` (default "direct") active in the range (default last 30 days). Always read coverage: it states which chats were scanned and what is missing, so no hits does not prove the text was never written. Use get_thread with a hit\'s message id to read the conversation around it.',
   inputSchema,
   outputSchema: searchMessagesSchema,
   async run(input, { gateway, mapper, config }) {

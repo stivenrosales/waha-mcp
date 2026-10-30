@@ -36,15 +36,18 @@ export interface SearchResult {
 
 const strip = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "");
 
-/** Lowercase, accent-free form of `text`, with each folded char mapped to its source index. */
+/**
+ * Matching ignores case and accents ("ano" also matches "año"). Returns the lowercase,
+ * accent-free form of `text`, with each folded UTF-16 unit mapped to its source code point index.
+ */
 function fold(text: string): { folded: string; map: number[] } {
   let folded = "";
   const map: number[] = [];
   Array.from(text).forEach((ch, i) => {
-    for (const c of Array.from(strip(strip(ch).toLowerCase()))) {
-      folded += c;
-      map.push(i);
-    }
+    const plain = strip(strip(ch).toLowerCase());
+    folded += plain;
+    // One entry per UTF-16 unit: `indexOf` offsets are UTF-16, `i` is a code point index.
+    for (let k = 0; k < plain.length; k++) map.push(i);
   });
   return { folded, map };
 }

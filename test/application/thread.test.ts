@@ -86,6 +86,39 @@ describe("getThread", () => {
     expect(err.message).toContain("not found in the recent history");
   });
 
+  it("stops paging when the cursor does not advance", async () => {
+    const gw = gateway(data(300));
+    const page = await gw.getMessages(ANA, { limit: 200, offset: 0 });
+    gw.getMessages = async () => page;
+    const err = await run(gw, { messageId: "nope" }).catch((e) => e);
+    expect(err).toBeInstanceOf(InvalidInputError);
+  });
+
+  it("caps the reply chain at 10 and says so", async () => {
+    const messages = Array.from({ length: 30 }, (_, i) => {
+      const k = 30 - i;
+      return msg(`c${k}`, 1_000_000 + k, `t${k}`, {
+        chat: ANA,
+        replyTo: k > 1 ? `c${k - 1}` : undefined,
+      });
+    });
+    const gw = gateway({ chats: [chat(ANA, 2_000_000)], messages: { [ANA]: messages } });
+    const r = await run(gw, { messageId: "c30", before: 0, after: 0 });
+    expect(r.replyChain).toHaveLength(10);
+    expect(r.coverage.notes.join(" ")).toContain("cut at 10");
+  });
+
+  it("flags a reply cycle", async () => {
+    const messages = [
+      msg("y2", 1_000_002, "b", { chat: ANA, replyTo: "y1" }),
+      msg("y1", 1_000_001, "a", { chat: ANA, replyTo: "y2" }),
+    ];
+    const gw = gateway({ chats: [chat(ANA, 2_000_000)], messages: { [ANA]: messages } });
+    const r = await run(gw, { messageId: "y2", before: 0, after: 0 });
+    expect(r.replyChain).toHaveLength(1);
+    expect(r.coverage.notes.join(" ")).toContain("loop");
+  });
+
   it("validates before/after (0..50)", async () => {
     const gw = gateway(data());
     for (const q of [{ before: -1 }, { after: 51 }, { before: 1.5 }])

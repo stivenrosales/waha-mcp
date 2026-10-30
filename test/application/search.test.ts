@@ -140,6 +140,25 @@ describe("searchMessages", () => {
     expect(Array.from(snippet).length).toBeGreaterThan(200);
   });
 
+  it("snippets stay correct after emoji before the match", async () => {
+    const text = `${"😀 ".repeat(60)}${"x".repeat(200)} factura`;
+    const gw = gateway({
+      chats: [chat(ANA, nowSec)],
+      messages: { [ANA]: [msg("1", nowSec - 1, text, { chat: ANA })] },
+    });
+    const snippet = (await run(gw)).hits[0]?.snippet ?? "";
+    expect(snippet).toContain("factura");
+    expect(Array.from(snippet).length).toBeLessThanOrEqual(280);
+    expect(snippet).not.toMatch(
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
+    );
+    const accent = gateway({
+      chats: [chat(ANA, nowSec)],
+      messages: { [ANA]: [msg("1", nowSec - 1, "feliz año nuevo", { chat: ANA })] },
+    });
+    expect((await run(accent, { query: "ANO" })).hits).toHaveLength(1);
+  });
+
   it("a failing chat goes to coverage.failedChats and is not fatal", async () => {
     const gw = gateway(data());
     const orig = gw.getMessages.bind(gw);

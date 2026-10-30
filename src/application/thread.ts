@@ -6,7 +6,7 @@ import { getMessages, messageKeys } from "./messages.js";
 const DEFAULT_CONTEXT = 10;
 const MAX_CONTEXT = 50;
 const PAGE = 200;
-const MAX_CHAIN = 50;
+const MAX_CHAIN = 10;
 
 export interface Thread {
   chatId: string;
@@ -53,13 +53,16 @@ export async function getThread(
   let cursor: string | undefined;
   do {
     const page = await getMessages(gw, m, { chatId: q.chatId, limit: PAGE, cursor });
+    let added = 0;
     for (const msg of page.messages) {
       if (seen.has(msg.id)) continue;
       seen.add(msg.id);
       history.push(msg);
+      added++;
     }
     if (anchorAt === -1) anchorAt = history.findIndex(isAnchor);
-    cursor = page.nextCursor ?? undefined;
+    // A page with nothing new means the cursor is not advancing: stop instead of looping.
+    cursor = added === 0 ? undefined : (page.nextCursor ?? undefined);
   } while (
     cursor !== undefined &&
     history.length < deps.statsMaxMessages &&
@@ -77,13 +80,21 @@ export async function getThread(
   const chain: NormalizedMessage[] = [];
   const missingAncestors: string[] = [];
   const visited = new Set([anchor.id]);
+  let chainStop: "cap" | "cycle" | null = null;
   for (let cur = anchor; cur.replyToId !== null; ) {
     const parent = index.get(cur.replyToId);
     if (!parent) {
       missingAncestors.push(cur.replyToId);
       break;
     }
-    if (visited.has(parent.id) || chain.length >= MAX_CHAIN) break;
+    if (visited.has(parent.id)) {
+      chainStop = "cycle";
+      break;
+    }
+    if (chain.length >= MAX_CHAIN) {
+      chainStop = "cap";
+      break;
+    }
     visited.add(parent.id);
     chain.push(parent);
     cur = parent;
@@ -94,6 +105,12 @@ export async function getThread(
     notes.push(
       `Reply ancestor ${missingAncestors.map((id) => `"${id}"`).join(", ")} is not in the fetched history (too old, deleted or not stored by WAHA), so the chain stops there.`,
     );
+  if (chainStop === "cap")
+    notes.push(
+      `The reply chain was cut at ${MAX_CHAIN} ancestors; older ones exist in the history.`,
+    );
+  if (chainStop === "cycle")
+    notes.push("The reply chain stopped because the replies loop back on themselves.");
   if (anchorAt + 1 + before > history.length && cursor !== undefined)
     notes.push(`Older context was cut at the cap of ${deps.statsMaxMessages} messages.`);
   return {

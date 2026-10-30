@@ -28,7 +28,13 @@ const inputSchema = z.object({
 
 function line(m: NormalizedMessage, mark = " "): string {
   const who = m.fromMe ? "me" : m.author.name || m.author.phone || m.author.id || "unknown";
-  const body = m.text ?? (m.attachment ? `[${m.attachment.kind}]` : `[${m.type}]`);
+  const text =
+    m.text === null
+      ? null
+      : Array.from(m.text).length > 280
+        ? `${Array.from(m.text).slice(0, 279).join("")}…`
+        : m.text;
+  const body = text ?? (m.attachment ? `[${m.attachment.kind}]` : `[${m.type}]`);
   return `${mark} [${m.timestamp}] ${who} (id=${m.id}): ${body}${m.replyToId ? ` (reply to ${m.replyToId})` : ""}`;
 }
 
@@ -36,7 +42,7 @@ export const getThreadTool: ToolDefinition<typeof inputSchema, typeof threadSche
   name: "get_thread",
   title: "Message thread",
   description:
-    "Reads the conversation around one message: the message itself, up to 50 messages before and after it (chronological), and its reply chain (the messages it answers, oldest first). Use it after search_messages or get_messages to see the context of a message. If the message is not in the chat's recent history it fails with a clear error. Missing reply ancestors are listed in coverage.",
+    "Reads the conversation around one message: the message itself, up to 50 messages before and after it (chronological), and its reply chain (up to 10 messages it answers, oldest first). Use it after search_messages or get_messages to see the context of a message. If the message is not in the chat's recent history it fails with a clear error. Missing reply ancestors are listed in coverage.",
   inputSchema,
   outputSchema: threadSchema,
   async run(input, { gateway, mapper, config }) {

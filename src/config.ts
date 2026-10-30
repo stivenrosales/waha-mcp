@@ -130,14 +130,21 @@ const envSchema = z
     TRANSCRIPTION_API_URL: z
       .string()
       .optional()
+      .transform((v) => v?.trim())
       .refine((v) => !v || isValidUrl(v), "TRANSCRIPTION_API_URL must be a valid URL.")
       .refine(
         (v) => !v || isSecureOrLocal(v),
         "TRANSCRIPTION_API_URL must use https (http is only allowed for localhost).",
       )
       .transform((v) => (v ? stripTrailingSlashes(v) : undefined)),
-    TRANSCRIPTION_API_KEY: z.string().optional(),
-    TRANSCRIPTION_MODEL: z.string().optional(),
+    TRANSCRIPTION_API_KEY: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim()),
+    TRANSCRIPTION_MODEL: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim()),
     TRANSCRIPTION_LANGUAGE: z.string().optional(),
     TRANSCRIPTION_MAX_SECONDS: positiveInt("TRANSCRIPTION_MAX_SECONDS", 300),
     TRANSCRIPTION_MAX_PER_CALL: nonNegativeInt("TRANSCRIPTION_MAX_PER_CALL", 20),

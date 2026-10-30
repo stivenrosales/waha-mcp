@@ -156,7 +156,7 @@ describe("transcription service: automatic voice notes", () => {
     expect(s.transcriber.calls).toBe(1);
     expect(transcripts(ms)).toEqual([null, "transcript #1 (100 bytes, voice.ogg)"]);
     expect(notes).toEqual([
-      "1 voice note was not transcribed (limit of 0 new transcriptions per call); use transcribe_audio with their media_id.",
+      "Automatic transcription is off (TRANSCRIPTION_MAX_PER_CALL=0); use transcribe_audio for a specific voice note.",
     ]);
   });
 

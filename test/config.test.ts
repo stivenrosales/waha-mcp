@@ -106,6 +106,33 @@ describe("loadConfig", () => {
     ).toThrow(/TRANSCRIPTION_API_KEY/);
   });
 
+  it("treats whitespace-only TRANSCRIPTION_* values as unset and trims the rest", () => {
+    expect(
+      loadConfig({
+        ...minimal,
+        TRANSCRIPTION_API_URL: "  ",
+        TRANSCRIPTION_API_KEY: " ",
+        TRANSCRIPTION_MODEL: "\t",
+      }).transcription,
+    ).toBeNull();
+    expect(() =>
+      loadConfig({
+        ...minimal,
+        TRANSCRIPTION_API_URL: "https://x.example",
+        TRANSCRIPTION_API_KEY: "   ",
+        TRANSCRIPTION_MODEL: "m",
+      }),
+    ).toThrow(/TRANSCRIPTION_API_KEY/);
+    expect(
+      loadConfig({
+        ...minimal,
+        TRANSCRIPTION_API_URL: " https://x.example/v1/ ",
+        TRANSCRIPTION_API_KEY: " k ",
+        TRANSCRIPTION_MODEL: " m ",
+      }).transcription,
+    ).toMatchObject({ apiUrl: "https://x.example/v1", apiKey: "k", model: "m" });
+  });
+
   it("rejects a non-https transcription URL (except localhost) and invalid limits", () => {
     const on = { ...minimal, TRANSCRIPTION_API_KEY: "k", TRANSCRIPTION_MODEL: "m" };
     expect(() => loadConfig({ ...on, TRANSCRIPTION_API_URL: "http://api.example.com/v1" })).toThrow(

@@ -269,7 +269,11 @@ export function createTranscriptionService(o: TranscriptionOptions): Transcripti
       const notes: string[] = [];
       if (failed > 0)
         notes.push(`${count(failed, "voice note", "voice notes")} could not be transcribed.`);
-      if (capped > 0)
+      if (capped > 0 && o.maxPerCall === 0)
+        notes.push(
+          "Automatic transcription is off (TRANSCRIPTION_MAX_PER_CALL=0); use transcribe_audio for a specific voice note.",
+        );
+      else if (capped > 0)
         notes.push(
           `${count(capped, "voice note was", "voice notes were")} not transcribed (limit of ${o.maxPerCall} new transcriptions per call); use transcribe_audio with their media_id.`,
         );

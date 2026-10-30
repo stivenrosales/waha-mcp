@@ -51,10 +51,12 @@ export async function getThread(
   const seen = new Set<string>();
   let anchorAt = -1;
   let cursor: string | undefined;
-  let cacheNote: string | undefined;
+  // Same rule as fetchRange: the note holds only when EVERY page came from the cache.
+  let cacheNote: string | null | undefined;
   do {
     const page = await getMessages(gw, m, { chatId: q.chatId, limit: PAGE, cursor });
-    cacheNote = page.cacheNote;
+    const note = page.cacheNote ?? null;
+    cacheNote = cacheNote === undefined || cacheNote !== null ? note : null;
     let added = 0;
     for (const msg of page.messages) {
       if (seen.has(msg.id)) continue;

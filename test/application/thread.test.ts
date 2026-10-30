@@ -125,4 +125,22 @@ describe("getThread", () => {
       await expect(run(gw, q)).rejects.toBeInstanceOf(InvalidInputError);
     expect((await run(gw, { before: 0, after: 0 })).before).toEqual([]);
   });
+
+  it("keeps the cache note only when every page came from the cache", async () => {
+    const base = gateway(data(300));
+    let page = 0;
+    const fromCache = new WeakSet<unknown[]>();
+    const mixed = Object.assign(Object.create(base) as InMemoryWahaGateway, {
+      async getMessages(chatId: string, q: { limit: number; offset: number }) {
+        const raws = await base.getMessages(chatId, q);
+        if (page++ === 1) fromCache.add(raws); // only the last page is cached
+        return raws;
+      },
+      cacheNote: (p: unknown[]) => (fromCache.has(p) ? "Read from the local message cache." : null),
+    });
+    // m10 is the 291st newest: the anchor needs a second page.
+    const r = await getThread(mixed, gowsMapper, { chatId: ANA, messageId: "m10" }, deps);
+    expect(page).toBe(2);
+    expect(r.coverage.notes.join(" ")).not.toContain("local message cache");
+  });
 });

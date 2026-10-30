@@ -53,12 +53,24 @@ describe("loadConfig", () => {
     expect(() => loadConfig({})).toThrow(/WAHA_API_URL[\s\S]*WAHA_API_KEY[\s\S]*PUBLIC_BASE_URL/);
   });
 
-  it("never echoes the key", () => {
+  it("never echoes the key, even when the key is the offending value of other variables", () => {
+    const key = "super-secret-value";
     try {
-      loadConfig({ WAHA_API_KEY: "super-secret-value", TIMEZONE: "Mars/Base" });
+      loadConfig({
+        WAHA_API_KEY: key,
+        WAHA_API_URL: key,
+        PUBLIC_BASE_URL: `http://${key}.example`,
+        PORT: key,
+        TIMEZONE: key,
+        STATS_MAX_MESSAGES: key,
+        MEDIA_LINK_TTL_SECONDS: key,
+      });
       expect.unreachable();
     } catch (e) {
-      expect((e as Error).message).not.toContain("super-secret-value");
+      const message = (e as Error).message;
+      expect(message).toContain("Invalid configuration");
+      expect(message).toMatch(/WAHA_API_URL[\s\S]*PUBLIC_BASE_URL[\s\S]*PORT[\s\S]*TIMEZONE/);
+      expect(message).not.toContain(key);
     }
   });
 });

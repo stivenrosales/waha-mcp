@@ -72,7 +72,7 @@ export interface ToolDeps {
 export const MESSAGES = {
   auth: "WAHA rejected the server's API key — check WAHA_API_KEY.",
   unavailable: "WAHA is not reachable right now.",
-  notFound: "Group or message not found.",
+  notFound: "Chat or message not found.",
   unexpected: "Unexpected error while talking to WAHA. Try again later.",
 } as const;
 

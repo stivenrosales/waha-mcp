@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   bucketOf,
   classifyMessage,
+  dedupeById,
   fixtureFileName,
   MESSAGE_KINDS,
   parseCaptureArgs,
+  planDownloadPages,
   selectMessages,
+  sessionFixture,
 } from "../../scripts/capture-lib.js";
 
 describe("parseCaptureArgs", () => {
@@ -111,5 +114,42 @@ describe("selectMessages", () => {
     expect(r.byBucket["messages-text"]).toHaveLength(2);
     expect(r.byBucket["messages-media"]).toHaveLength(2);
     expect(r.byBucket["messages-misc"]).toHaveLength(1);
+  });
+});
+
+describe("sessionFixture", () => {
+  it("keeps only name, status and engine, dropping config and me", () => {
+    const out = sessionFixture({
+      name: "default",
+      status: "WORKING",
+      engine: { engine: "GOWS", other: 1 },
+      config: { webhooks: [{ hmac: { key: "secret" } }] },
+      me: { id: "51987654321@c.us" },
+    });
+    expect(out).toEqual({ name: "default", status: "WORKING", engine: { engine: "GOWS" } });
+  });
+});
+
+describe("planDownloadPages", () => {
+  it("requests each page's own offset once", () => {
+    const pages = [
+      { chatId: "a", offset: 0 },
+      { chatId: "a", offset: 100 },
+      { chatId: "a", offset: 200 },
+      { chatId: "b", offset: 0 },
+      { chatId: "a", offset: 100 },
+    ];
+    expect(planDownloadPages(pages)).toEqual([
+      { chatId: "a", offset: 0 },
+      { chatId: "a", offset: 100 },
+      { chatId: "a", offset: 200 },
+      { chatId: "b", offset: 0 },
+    ]);
+  });
+});
+
+describe("dedupeById", () => {
+  it("drops repeated message ids", () => {
+    expect(dedupeById([{ id: "1" }, { id: "2" }, { id: "1" }])).toEqual([{ id: "1" }, { id: "2" }]);
   });
 });

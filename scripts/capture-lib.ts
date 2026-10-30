@@ -183,3 +183,46 @@ export function selectMessages(messages: unknown[], perKind: number): Selection 
   const found = MESSAGE_KINDS.filter((k) => counts.has(k));
   return { selected, byBucket, found, missing: MESSAGE_KINDS.filter((k) => !counts.has(k)) };
 }
+
+/** Keeps only structural session fields; `config` (webhooks, HMAC keys, headers) and `me` are dropped. */
+export function sessionFixture(raw: unknown): unknown {
+  const r = (raw ?? {}) as {
+    name?: unknown;
+    status?: unknown;
+    engine?: { engine?: unknown } | null;
+  };
+  return {
+    name: r.name,
+    status: r.status,
+    engine: { engine: r.engine?.engine },
+  };
+}
+
+export interface PageRef {
+  chatId: string;
+  offset: number;
+}
+
+/** Each fetched page's own (chat, offset), once. */
+export function planDownloadPages(pages: PageRef[]): PageRef[] {
+  const seen = new Set<string>();
+  const out: PageRef[] = [];
+  for (const { chatId, offset } of pages) {
+    const key = `${chatId}\u0000${offset}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ chatId, offset });
+  }
+  return out;
+}
+
+export function dedupeById(messages: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  return messages.filter((m) => {
+    const id = (m as { id?: unknown } | null)?.id;
+    if (typeof id !== "string") return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}

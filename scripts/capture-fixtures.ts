@@ -10,11 +10,14 @@ import { loadConfig } from "../src/config.js";
 import { createWahaHttpGateway } from "../src/infrastructure/waha/WahaHttpGateway.js";
 import {
   type CaptureArgs,
+  dedupeById,
   fixtureFileName,
   MESSAGE_KINDS,
   type MessageBucket,
   parseCaptureArgs,
+  planDownloadPages,
   selectMessages,
+  sessionFixture,
 } from "./capture-lib.js";
 import { scrubFixture } from "./scrub.js";
 
@@ -69,19 +72,19 @@ async function main(args: CaptureArgs): Promise<void> {
     );
   };
 
-  await write("session", await gateway.getSession());
+  await write("session", sessionFixture(await getJson(`/api/sessions/${session}`)));
   const groups = await gateway.listGroups();
   await write("groups", groups.slice(0, MAX_GROUPS_SAVED));
   await write("group", await gateway.getGroup(args.groups[0] as string));
 
-  const pages: { chatId: string; messages: unknown[] }[] = [];
+  const pages: { chatId: string; offset: number; messages: unknown[] }[] = [];
   for (const chatId of args.groups) {
     for (let page = 0; page < MAX_PAGES; page++) {
       const messages = await gateway.getMessages(chatId, {
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       });
-      pages.push({ chatId, messages });
+      pages.push({ chatId, offset: page * PAGE_SIZE, messages });
       if (messages.length < PAGE_SIZE) break;
     }
   }
@@ -93,14 +96,11 @@ async function main(args: CaptureArgs): Promise<void> {
   // Same messages again, but with media downloaded (WAHA fills `media.url`).
   const keptIds = new Set(selection.selected.map(idOf).filter((id) => id !== undefined));
   const downloaded: unknown[] = [];
-  for (const { chatId, messages } of pages) {
-    const offsets = [...new Set(messages.map((_, i) => Math.floor(i / PAGE_SIZE) * PAGE_SIZE))];
-    for (const offset of offsets) {
-      const page = await getJson(messagesPath(chatId, offset));
-      if (Array.isArray(page)) downloaded.push(...page.filter((m) => keptIds.has(idOf(m) ?? "")));
-    }
+  for (const { chatId, offset } of planDownloadPages(pages)) {
+    const page = await getJson(messagesPath(chatId, offset));
+    if (Array.isArray(page)) downloaded.push(...page.filter((m) => keptIds.has(idOf(m) ?? "")));
   }
-  const downloadedSelection = selectMessages(downloaded, Number.POSITIVE_INFINITY);
+  const downloadedSelection = selectMessages(dedupeById(downloaded), Number.POSITIVE_INFINITY);
   for (const bucket of BUCKETS) {
     await write(bucket, downloadedSelection.byBucket[bucket], true);
   }

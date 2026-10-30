@@ -8,6 +8,7 @@ import {
   isConversational,
   toCompact,
 } from "./compact.js";
+import { localMidnight, parseRange, zoneFormatter, zoneParts } from "./dates.js";
 import { type Coverage, scanChats } from "./fanout.js";
 import type { ChatScope } from "./groups.js";
 import type { FanoutDeps } from "./pending.js";
@@ -40,53 +41,6 @@ export interface ActivityDigest {
   coverage: Coverage;
 }
 
-function formatter(timezone: string): Intl.DateTimeFormat {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    });
-  } catch {
-    throw new InvalidInputError(
-      `Invalid timezone "${timezone}". Use an IANA name such as "America/Lima".`,
-    );
-  }
-}
-
-function parts(fmt: Intl.DateTimeFormat, ms: number): Record<string, number> {
-  const p: Record<string, number> = {};
-  for (const part of fmt.formatToParts(new Date(ms))) p[part.type] = Number(part.value);
-  return p;
-}
-
-/** Offset (ms) of `timezone` from UTC at the instant `ms`. */
-function offsetAt(fmt: Intl.DateTimeFormat, ms: number): number {
-  const p = parts(fmt, ms);
-  const asUtc = Date.UTC(
-    p.year ?? 0,
-    (p.month ?? 1) - 1,
-    p.day ?? 1,
-    (p.hour ?? 0) % 24,
-    p.minute,
-    p.second,
-  );
-  return asUtc - Math.floor(ms / 1000) * 1000;
-}
-
-/** The instant at which local midnight of y-m-d happens in the timezone (DST-safe). */
-function localMidnight(fmt: Intl.DateTimeFormat, y: number, mo: number, d: number): number {
-  const guess = Date.UTC(y, mo - 1, d);
-  let ms = guess - offsetAt(fmt, guess);
-  ms = guess - offsetAt(fmt, ms);
-  return ms;
-}
-
 function dayRange(date: string, fmt: Intl.DateTimeFormat): { from: number; to: number } {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   const [y, mo, d] = match ? [Number(match[1]), Number(match[2]), Number(match[3])] : [0, 0, 0];
@@ -106,13 +60,6 @@ function dayRange(date: string, fmt: Intl.DateTimeFormat): { from: number; to: n
   return { from: start, to: end - 1000 };
 }
 
-function isoInput(value: string, label: string): number {
-  const ms = Date.parse(value);
-  if (Number.isNaN(ms))
-    throw new InvalidInputError(`"${label}" must be an ISO 8601 date, got "${value}".`);
-  return ms;
-}
-
 /** Every chat with activity in a day (in `timezone`) or an explicit range, in one call. */
 export async function buildActivityDigest(
   gw: WahaGateway,
@@ -122,16 +69,18 @@ export async function buildActivityDigest(
 ): Promise<ActivityDigest> {
   const now = (deps.now ?? Date.now)();
   const timezone = q.timezone ?? "UTC";
-  const fmt = formatter(timezone);
+  const fmt = zoneFormatter(timezone);
   if (q.date !== undefined && (q.from !== undefined || q.to !== undefined))
     throw new InvalidInputError('Use either "date" or "from"/"to", not both.');
   let from: number;
   let to: number;
   if (q.from !== undefined || q.to !== undefined) {
-    from = q.from !== undefined ? isoInput(q.from, "from") : 0;
-    to = q.to !== undefined ? isoInput(q.to, "to") : now;
+    const range = parseRange({ from: q.from, to: q.to }, timezone);
+    from = range.from ?? 0;
+    to = range.to ?? now;
+    if (from > to) throw new InvalidInputError('"from" must not be later than "to".');
   } else {
-    const p = parts(fmt, now);
+    const p = zoneParts(fmt, now);
     const today = `${String(p.year).padStart(4, "0")}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
     ({ from, to } = dayRange(q.date ?? today, fmt));
   }

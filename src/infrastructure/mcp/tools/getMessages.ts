@@ -45,13 +45,14 @@ export const getMessagesTool: ToolDefinition<typeof inputSchema, typeof outputSc
     "Reads messages of a group or direct chat, NEWEST FIRST, optionally within a date range. Paginate with nextCursor. Attachments carry a media_id for get_media. For counts and rankings use get_chat_stats instead of counting pages.",
   inputSchema,
   outputSchema,
-  async run(input, { gateway, mapper }) {
+  async run(input, { gateway, mapper, config }) {
     const { messages, nextCursor } = await getMessages(gateway, mapper, {
       chatId: input.chat_id,
       from: input.from,
       to: input.to,
       limit: input.limit,
       cursor: input.cursor,
+      timezone: config.timezone,
     });
     const body =
       messages.length === 0

@@ -46,7 +46,7 @@ export const listSharedFilesTool: ToolDefinition<typeof inputSchema, typeof shar
         to: input.to,
         limit: input.limit,
       },
-      { statsMaxMessages: config.statsMaxMessages },
+      { statsMaxMessages: config.statsMaxMessages, timezone: config.timezone },
     );
     const where = r.scope === null ? `chat ${input.chat_id}` : `scope ${r.scope}`;
     const lines = r.items.map((i) =>

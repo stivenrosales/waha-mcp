@@ -40,6 +40,7 @@ export const getChatStatsTool: ToolDefinition<typeof inputSchema, typeof chatSta
       from: input.from,
       to: input.to,
       cap: config.statsMaxMessages,
+      timezone,
     });
     const stats = computeChatStats(messages, participants, {
       chatId: input.chat_id,

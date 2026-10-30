@@ -36,7 +36,7 @@ export const listPendingRepliesTool: ToolDefinition<
       gateway,
       mapper,
       { since: input.since, scope: input.scope, limit: input.limit },
-      { statsMaxMessages: config.statsMaxMessages },
+      { statsMaxMessages: config.statsMaxMessages, timezone: config.timezone },
     );
     const lines = r.pending.map(
       (p) =>

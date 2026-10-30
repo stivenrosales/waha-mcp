@@ -9,6 +9,7 @@ import {
   toCompact,
   type WaitReason,
 } from "./compact.js";
+import { parseRangeBound } from "./dates.js";
 import { type Coverage, scanChats } from "./fanout.js";
 import type { ChatScope } from "./groups.js";
 
@@ -44,6 +45,8 @@ export interface FanoutDeps {
   now?: () => number;
   /** STATS_MAX_MESSAGES: per-chat cap. */
   statsMaxMessages: number;
+  /** TIMEZONE: reads bare dates and offsetless date-times (default UTC). */
+  timezone?: string;
 }
 
 /** Chats where the other side is waiting for the owner, longest wait first. */
@@ -60,10 +63,9 @@ export async function findPendingReplies(
   let since: string;
   if (q.since === undefined) since = new Date(now - DEFAULT_WINDOW_MS).toISOString();
   else {
-    const ms = Date.parse(q.since);
-    if (Number.isNaN(ms))
-      throw new InvalidInputError(`"since" must be an ISO 8601 date, got "${q.since}".`);
-    since = new Date(ms).toISOString();
+    since = new Date(
+      parseRangeBound(q.since, deps.timezone ?? "UTC", "start", "since"),
+    ).toISOString();
   }
   const scope = q.scope ?? "direct";
 

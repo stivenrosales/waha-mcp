@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { parseRangeBound } from "../../application/dates.js";
 
 /**
  * Canned workflows. Prompt arguments always arrive as strings, so every field is a
@@ -59,11 +60,12 @@ export function registerPrompts(server: McpServer, opts: { timezone: string }): 
     async (args) => {
       const timezone = args.timezone ?? opts.timezone;
       const date = args.date ?? todayIn(timezone);
+      const dayStart = new Date(parseRangeBound(date, timezone, "start", "date")).toISOString();
       return user(
         [
           `Review my WhatsApp chats for ${date} (time zone ${timezone}) and tell me what is pending.`,
           `1. Call \`get_activity_digest\` with date "${date}" and timezone "${timezone}" (default scope: direct chats; use scope "all" only if I ask to include groups).`,
-          `2. Call \`list_pending_replies\` with since set to the start of ${date} in ${timezone} (an ISO date-time with that zone's offset; a bare YYYY-MM-DD would be read as UTC midnight) to see who is waiting for my answer.`,
+          `2. Call \`list_pending_replies\` with since "${dayStart}" (the start of ${date} in ${timezone}) to see who is waiting for my answer.`,
           `   Note: \`since\` means chats active since then, so pending reflects the current state of those chats. If a pending item's waiting messages are after ${date}, say so instead of presenting it as that day's.`,
           "3. If a chat's context is missing or unclear, fetch it with `get_thread` (around a message id) or `get_messages` BEFORE concluding anything; do not guess.",
           "4. Present the result in this order:",
@@ -85,7 +87,9 @@ export function registerPrompts(server: McpServer, opts: { timezone: string }): 
       argsSchema: z.object({
         since: dateArg("since")
           .optional()
-          .describe("Only consider chats active since this date (YYYY-MM-DD)."),
+          .describe(
+            "Only consider chats active since this date (YYYY-MM-DD, start of that day in the server TIMEZONE).",
+          ),
       }),
     },
     async (args) =>

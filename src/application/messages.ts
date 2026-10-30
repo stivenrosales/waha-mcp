@@ -2,18 +2,22 @@ import { InvalidInputError } from "../domain/errors.js";
 import type { EngineMapper, NormalizedMessage } from "../domain/message.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
+import { parseRange } from "./dates.js";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 const RANGE_PAGE = 200;
 
-/** ISO string -> unix seconds, or undefined when absent. */
-function toUnix(value: string | undefined, label: string): number | undefined {
-  if (value === undefined) return undefined;
-  const ms = Date.parse(value);
-  if (Number.isNaN(ms))
-    throw new InvalidInputError(`"${label}" must be an ISO 8601 date, got "${value}".`);
-  return Math.floor(ms / 1000);
+/** Range bounds -> unix seconds, read in `timezone`. */
+function toUnixRange(
+  q: { from?: string; to?: string },
+  timezone: string,
+): { from?: number; to?: number } {
+  const r = parseRange(q, timezone);
+  return {
+    from: r.from === undefined ? undefined : Math.floor(r.from / 1000),
+    to: r.to === undefined ? undefined : Math.floor(r.to / 1000),
+  };
 }
 
 /** WAHA ids look like `false_<chat>_<stanzaId>[_<sender>]`; replies and reactions use the bare stanza id. */
@@ -53,13 +57,20 @@ function mapAndAttach(m: EngineMapper, raws: unknown[]): NormalizedMessage[] {
 export async function getMessages(
   gw: WahaGateway,
   m: EngineMapper,
-  q: { chatId: string; from?: string; to?: string; limit?: number; cursor?: string },
+  q: {
+    chatId: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    cursor?: string;
+    /** IANA zone for bare dates and offsetless date-times (default UTC). */
+    timezone?: string;
+  },
 ): Promise<{ messages: NormalizedMessage[]; nextCursor: string | null }> {
   const limit = q.limit ?? DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT)
     throw new InvalidInputError(`"limit" must be an integer between 1 and ${MAX_LIMIT}.`);
-  const from = toUnix(q.from, "from");
-  const to = toUnix(q.to, "to");
+  const { from, to } = toUnixRange(q, q.timezone ?? "UTC");
   let offset = 0;
   if (q.cursor !== undefined) {
     const c = decodeCursor(q.cursor);
@@ -93,10 +104,9 @@ export async function getMessages(
 export async function fetchRange(
   gw: WahaGateway,
   m: EngineMapper,
-  q: { chatId: string; from?: string; to?: string; cap: number },
+  q: { chatId: string; from?: string; to?: string; cap: number; timezone?: string },
 ): Promise<{ messages: NormalizedMessage[]; truncated: boolean }> {
-  const from = toUnix(q.from, "from");
-  const to = toUnix(q.to, "to");
+  const { from, to } = toUnixRange(q, q.timezone ?? "UTC");
   const raws: unknown[] = [];
   const seen = new Set<string>();
   let fetched = 0;

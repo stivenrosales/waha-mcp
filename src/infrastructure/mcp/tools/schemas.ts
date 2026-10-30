@@ -112,7 +112,7 @@ export const isoDate = (what: string) =>
   z
     .string()
     .describe(
-      `${what} as an ISO 8601 date or date-time (e.g. "2026-10-01" or "2026-10-01T08:00:00-05:00").`,
+      `${what} as an ISO 8601 date or date-time (e.g. "2026-10-01" or "2026-10-01T08:00:00-05:00"). A bare date and a date-time without offset are read in the server TIMEZONE; as "to", a bare date includes that whole day.`,
     );
 
 /** One display line for a person or chat: "Name (id)" or just the id. */

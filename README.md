@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero.png" alt="An AI assistant reading WhatsApp-style chat bubbles" width="760">
+  <img src="docs/assets/hero.svg" alt="An AI assistant reading WhatsApp-style chat bubbles" width="760">
 </p>
 
 <h1 align="center">waha-mcp</h1>
@@ -116,8 +116,8 @@ All configuration is through environment variables.
 | `WAHA_SESSION`           | no       | `default`   | WAHA session name.                                                |
 | `DATA_DIR`               | no       | `/data`     | Where OAuth state (`auth.db`) and the media-link secret are kept. |
 | `PORT`                   | no       | `3000`      | HTTP port.                                                        |
-| `TIMEZONE`               | no       | `UTC`       | IANA time zone for day boundaries (for example `America/Lima`).   |
-| `STATS_MAX_MESSAGES`     | no       | `5000`      | Maximum messages read per stats/search/digest request.            |
+| `TIMEZONE`               | no       | `UTC`       | IANA time zone for dates and day boundaries (`America/Lima`).     |
+| `STATS_MAX_MESSAGES`     | no       | `5000`      | Per-chat message cap; fan-out tools read up to 100 chats each.    |
 | `MEDIA_LINK_TTL_SECONDS` | no       | `600`       | Lifetime of signed media links.                                   |
 | `MEDIA_INLINE_MAX_BYTES` | no       | `5242880`   | Largest file returned inline (5 MiB); larger ones get a link.     |
 | `MEDIA_MAX_BYTES`        | no       | `104857600` | Largest file served by `/media/:token` (100 MiB).                 |
@@ -199,7 +199,7 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 > The chats list may omit some active chats; pending-reply and digest results say so in their coverage notes.
 
 - Search and digest work on recent history only (there is no own storage); results report their coverage.
-- A bare date in `since` (for example `2026-10-01`) is read as UTC.
+- Dates are read in `TIMEZONE`: a bare date (for example `2026-10-01`) means that local day (as `to`, through its last second), and a date-time without offset is read in `TIMEZONE`. A date-time with `Z` or an offset is taken as given.
 - Local phone numbers (without country code) are matched by their ending.
 
 ## Development

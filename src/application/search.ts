@@ -2,7 +2,8 @@ import { InvalidInputError } from "../domain/errors.js";
 import type { EngineMapper, NormalizedMessage } from "../domain/message.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
 import { type CompactMessage, identityOf, toCompact } from "./compact.js";
-import { type Coverage, checkLimit, collectChats, parseIso } from "./fanout.js";
+import { parseRange } from "./dates.js";
+import { type Coverage, checkLimit, collectChats } from "./fanout.js";
 import type { ChatScope } from "./groups.js";
 
 const DEFAULT_LIMIT = 50;
@@ -95,7 +96,7 @@ export async function searchMessages(
     to?: string;
     limit?: number;
   },
-  deps: { now?: () => number; statsMaxMessages: number },
+  deps: { now?: () => number; statsMaxMessages: number; timezone?: string },
 ): Promise<SearchResult> {
   const query = q.query.trim();
   const queryLength = Array.from(query).length;
@@ -105,8 +106,9 @@ export async function searchMessages(
     );
   const limit = checkLimit(q.limit, DEFAULT_LIMIT, MAX_LIMIT);
   const now = (deps.now ?? Date.now)();
-  const fromMs = parseIso(q.from, "from") ?? now - DEFAULT_WINDOW_MS;
-  const toMs = parseIso(q.to, "to");
+  const range = parseRange(q, deps.timezone ?? "UTC");
+  const fromMs = range.from ?? now - DEFAULT_WINDOW_MS;
+  const toMs = range.to;
   if (toMs !== undefined && toMs < fromMs)
     throw new InvalidInputError('"from" must not be later than "to".');
   const from = new Date(fromMs).toISOString();

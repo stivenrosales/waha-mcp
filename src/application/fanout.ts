@@ -112,14 +112,6 @@ export async function scanChats(
   };
 }
 
-export function parseIso(value: string | undefined, label: string): number | undefined {
-  if (value === undefined) return undefined;
-  const ms = Date.parse(value);
-  if (Number.isNaN(ms))
-    throw new InvalidInputError(`"${label}" must be an ISO 8601 date, got "${value}".`);
-  return ms;
-}
-
 export function checkLimit(limit: number | undefined, fallback: number, max: number): number {
   const value = limit ?? fallback;
   if (!Number.isInteger(value) || value < 1 || value > max)

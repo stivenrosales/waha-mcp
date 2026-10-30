@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 520" role="img" aria-labelledby="t d">
+  <title id="t">waha-mcp</title>
+  <desc id="d">An AI spark reading WhatsApp-style chat bubbles and turning them into a checklist of pending replies.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141413"/>
+      <stop offset="1" stop-color="#1f1e1b"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#D97757" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#D97757" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="greenGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#25D366" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#25D366" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#ffffff" fill-opacity="0.05"/>
+    </pattern>
+  </defs>
+
+  <!-- background -->
+  <rect width="1280" height="520" rx="28" fill="url(#bg)"/>
+  <rect width="1280" height="520" rx="28" fill="url(#dots)"/>
+
+  <!-- title block -->
+  <g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="88" y="214" fill="#F5F4EE" font-size="92" font-weight="800" letter-spacing="-3">waha-mcp</text>
+    <text x="92" y="268" fill="#B9B6AC" font-size="26" font-weight="500">Let your AI read WhatsApp — and tell you</text>
+    <text x="92" y="304" fill="#B9B6AC" font-size="26" font-weight="500">who is still waiting for your answer.</text>
+    <g transform="translate(92 350)" font-size="17" font-weight="600">
+      <rect width="132" height="36" rx="18" fill="#25D366" fill-opacity="0.14" stroke="#25D366" stroke-opacity="0.5"/>
+      <text x="66" y="24" fill="#5BE38E" text-anchor="middle">read-only</text>
+      <rect x="146" width="120" height="36" rx="18" fill="#D97757" fill-opacity="0.14" stroke="#D97757" stroke-opacity="0.5"/>
+      <text x="206" y="24" fill="#E9A086" text-anchor="middle">12 tools</text>
+      <rect x="280" width="150" height="36" rx="18" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.18"/>
+      <text x="355" y="24" fill="#D9D6CC" text-anchor="middle">OAuth 2.1</text>
+    </g>
+  </g>
+
+  <!-- glows -->
+  <circle cx="930" cy="250" r="240" fill="url(#greenGlow)"/>
+  <circle cx="1010" cy="148" r="150" fill="url(#glow)"/>
+
+  <!-- chat bubbles -->
+  <g filter="url(#soft)">
+    <!-- incoming 1 -->
+    <path d="M700 118 h230 a22 22 0 0 1 22 22 v44 a22 22 0 0 1 -22 22 h-214 l-22 16 v-16 a14 14 0 0 1 -0 0 a22 22 0 0 1 -16 -22 v-44 a22 22 0 0 1 22 -22z" fill="#2A2926"/>
+    <rect x="722" y="142" width="170" height="12" rx="6" fill="#8D8A80"/>
+    <rect x="722" y="166" width="120" height="12" rx="6" fill="#6E6B63"/>
+    <!-- outgoing (green) -->
+    <path d="M820 236 h236 a22 22 0 0 1 22 22 v44 a22 22 0 0 1 -16 21 v17 l-22 -16 h-220 a22 22 0 0 1 -22 -22 v-44 a22 22 0 0 1 22 -22z" fill="#25D366"/>
+    <rect x="842" y="260" width="180" height="12" rx="6" fill="#0B3D20" fill-opacity="0.55"/>
+    <rect x="842" y="284" width="110" height="12" rx="6" fill="#0B3D20" fill-opacity="0.4"/>
+    <!-- incoming 2 (waiting) -->
+    <path d="M690 370 h196 a22 22 0 0 1 22 22 v40 a22 22 0 0 1 -22 22 h-180 l-22 16 v-17 a22 22 0 0 1 -16 -21 v-40 a22 22 0 0 1 22 -22z" fill="#2A2926"/>
+    <rect x="712" y="392" width="140" height="12" rx="6" fill="#8D8A80"/>
+    <rect x="712" y="414" width="96" height="12" rx="6" fill="#6E6B63"/>
+    <!-- "waiting" clock badge -->
+    <circle cx="902" cy="380" r="18" fill="#141413" stroke="#D97757" stroke-width="3"/>
+    <path d="M902 370 v11 l7 5" stroke="#D97757" stroke-width="3" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- AI spark (original asterisk-style burst) -->
+  <g transform="translate(1010 148)">
+    <g fill="#D97757">
+      <rect x="-7" y="-62" width="14" height="124" rx="7"/>
+      <rect x="-7" y="-62" width="14" height="124" rx="7" transform="rotate(30)"/>
+      <rect x="-7" y="-62" width="14" height="124" rx="7" transform="rotate(60)"/>
+      <rect x="-7" y="-62" width="14" height="124" rx="7" transform="rotate(90)"/>
+      <rect x="-7" y="-62" width="14" height="124" rx="7" transform="rotate(120)"/>
+      <rect x="-7" y="-62" width="14" height="124" rx="7" transform="rotate(150)"/>
+    </g>
+    <circle r="16" fill="#141413"/>
+    <circle r="7" fill="#F5F4EE"/>
+  </g>
+
+  <!-- reading beam from spark to bubbles -->
+  <path d="M960 190 Q 900 230 860 236" stroke="#D97757" stroke-width="3" stroke-dasharray="2 10" stroke-linecap="round" fill="none" opacity="0.8"/>
+  <path d="M968 200 Q 930 300 908 372" stroke="#D97757" stroke-width="3" stroke-dasharray="2 10" stroke-linecap="round" fill="none" opacity="0.8"/>
+
+  <!-- checklist card -->
+  <g transform="translate(1000 330)" filter="url(#soft)">
+    <rect width="200" height="150" rx="18" fill="#F5F4EE"/>
+    <text x="20" y="34" fill="#141413" font-family="ui-sans-serif, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="800">Pending</text>
+    <g transform="translate(20 52)">
+      <rect width="20" height="20" rx="6" fill="#25D366"/>
+      <path d="M5 10 l4 4 l7 -8" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="32" y="5" width="120" height="10" rx="5" fill="#C9C6BC"/>
+    </g>
+    <g transform="translate(20 84)">
+      <rect width="20" height="20" rx="6" fill="none" stroke="#D97757" stroke-width="3"/>
+      <rect x="32" y="5" width="100" height="10" rx="5" fill="#C9C6BC"/>
+    </g>
+    <g transform="translate(20 116)">
+      <rect width="20" height="20" rx="6" fill="none" stroke="#D97757" stroke-width="3"/>
+      <rect x="32" y="5" width="136" height="10" rx="5" fill="#C9C6BC"/>
+    </g>
+  </g>
+</svg>

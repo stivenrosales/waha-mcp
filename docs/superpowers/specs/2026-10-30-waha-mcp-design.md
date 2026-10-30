@@ -241,6 +241,49 @@ fixtures. The exact channel, host and credential are authorized explicitly by th
 first use, and the access is closed when fixtures are captured. Fixtures are scrubbed of phone
 numbers, names and message text before being committed.
 
+### 7.8 Amendment A3 — message cache and optional transcription (owner, 2026-10-30)
+
+Owner's words: "me gustaría que se pueda cachear los chats y que opcional si se desea poder hacer
+las transcripciones vía api de Whisper … lo obtengo de OpenRouter, sería el whisper turbo";
+"es una bd sqlite no? … para que no tenga que consultar lo que ya se escribió o registró, solo lo
+nuevo y reciente".
+
+**Message cache (SQLite, incremental).**
+- Stored in `DATA_DIR/cache.db` (`node:sqlite`, WAL, 0600), separate from `auth.db`.
+- Lazy: a chat is cached the first time a tool reads it; nothing syncs in the background.
+- Stores the RAW engine payload per message (so mapper fixes apply to cached data), keyed by
+  chat id + message id, with its timestamp; per chat it records the newest and oldest synced
+  timestamps and the last sync time.
+- On read: fetch from WAHA only messages newer than (newest cached − `CACHE_REFRESH_HOURS`,
+  default 48) — the refresh window re-reads recent messages so edits and deletions are picked
+  up; serve the rest from SQLite. If a request reaches older than the oldest synced timestamp,
+  fetch that older range from WAHA once and store it. A chat synced less than 60 s ago is served
+  from the cache without calling WAHA.
+- Sits under `fetchRange` / `getMessages` (behind a port), so all existing tools benefit without
+  changes to their contracts. Coverage notes say when data came from the cache.
+- `CACHE_ENABLED` (default `true`). `CACHE_MAX_AGE_DAYS` (default `0` = keep forever) prunes
+  messages older than N days. Logout does NOT clear the cache (it is data, not credentials);
+  README documents that the cache is a copy of conversations at rest on the server.
+- Caching is never a source of truth for media files (only metadata); media still streams from
+  WAHA.
+
+**Optional voice-note transcription (OpenAI-compatible API).**
+- Enabled only when `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL`
+  are all set (owner: `https://openrouter.ai/api/v1`, `openai/whisper-large-v3-turbo`). Off by
+  default; the server behaves exactly as before when off.
+- Calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions` as OpenAI-style multipart (`file`,
+  `model`, optional `language` from `TRANSCRIPTION_LANGUAGE`) — accepted by OpenRouter, OpenAI and
+  Groq (verified in OpenRouter's STT docs). Response `{ text }`.
+- Automatic, with limits (builder's call, owner may change): only voice notes; only those ≤
+  `TRANSCRIPTION_MAX_SECONDS` (default 300); at most `TRANSCRIPTION_MAX_PER_CALL` (default 20)
+  NEW transcriptions per tool call; results stored in `cache.db` once per message (never paid
+  twice). Messages gain `transcript: string | null`.
+- New tool `transcribe_audio { media_id }` (read-only from WhatsApp's perspective) transcribes
+  one audio or voice note on demand, any length up to `MEDIA_MAX_BYTES`.
+- `search_messages` also matches stored transcripts.
+- The transcription key is never logged or returned; README states that voice notes are sent to
+  the configured third-party provider when this is enabled.
+
 ## 8. Left to the builder
 
 - Exact GOWS endpoints, query parameters and the normalization mapping (verify against WAHA

@@ -53,18 +53,22 @@ export function createOpenAiCompatibleTranscriber(opts: OpenAiCompatibleOptions)
       }
       if (!res.ok) {
         await res.body?.cancel().catch(() => {});
-        if (res.status === 401 || res.status === 403) throw new TranscriptionError("auth");
-        if (res.status === 429) throw new TranscriptionError("rateLimited");
-        throw new TranscriptionError("failed");
+        const s = res.status;
+        if (s === 401 || s === 403) throw new TranscriptionError("auth", s);
+        if (s === 429) throw new TranscriptionError("rateLimited", s);
+        // Wrong URL or model: retrying will not help.
+        if (s === 400 || s === 404 || s === 405 || s === 422)
+          throw new TranscriptionError("config", s);
+        throw new TranscriptionError("failed", s);
       }
       let body: unknown;
       try {
         body = await res.json();
       } catch {
-        throw new TranscriptionError("failed");
+        throw new TranscriptionError("failed", res.status);
       }
       const text = (body as { text?: unknown } | null)?.text;
-      if (typeof text !== "string") throw new TranscriptionError("failed");
+      if (typeof text !== "string") throw new TranscriptionError("failed", res.status);
       return text.trim();
     },
   };

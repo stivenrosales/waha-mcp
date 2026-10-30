@@ -66,6 +66,7 @@ async function main(): Promise<void> {
           session: config.wahaSession,
           maxSeconds: config.transcription.maxSeconds,
           maxPerCall: config.transcription.maxPerCall,
+          logger,
         })
       : DISABLED_TRANSCRIPTION;
   if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");

@@ -1,4 +1,9 @@
-import { InvalidInputError, TranscriptionError } from "../domain/errors.js";
+import {
+  InvalidInputError,
+  TRANSCRIPTION_MESSAGES,
+  TranscriptionError,
+  type TranscriptionFailure,
+} from "../domain/errors.js";
 import type { EngineMapper, NormalizedMessage } from "../domain/message.js";
 import type { AudioSource } from "../domain/ports/AudioSource.js";
 import type { Transcriber } from "../domain/ports/Transcriber.js";
@@ -18,6 +23,8 @@ const TOO_LARGE =
 
 /** Provider calls running at once within one tool call. */
 const DEFAULT_CONCURRENCY = 3;
+/** No NEW automatic transcription starts after this long within one tool call. */
+export const TRANSCRIPTION_BUDGET_MS = 25_000;
 
 export type TranscribeResult =
   | { status: "ok"; transcript: string; cached: boolean; durationSeconds?: number }
@@ -64,6 +71,12 @@ export interface TranscriptionOptions {
   /** TRANSCRIPTION_MAX_PER_CALL (0 = on demand only). */
   maxPerCall: number;
   concurrency?: number;
+  /** Time after which no new automatic transcription starts in a call (default 25 s). */
+  budgetMs?: number;
+  /** Clock in epoch milliseconds (injectable for tests). */
+  now?: () => number;
+  /** One line per failure: status and kind only, never the body, URL or key. */
+  logger?: { info(message: string): void };
 }
 
 type Key = { chatId: string; messageId: string };
@@ -125,6 +138,18 @@ interface Group {
 
 export function createTranscriptionService(o: TranscriptionOptions): TranscriptionService {
   const concurrency = o.concurrency ?? DEFAULT_CONCURRENCY;
+  const budgetMs = o.budgetMs ?? TRANSCRIPTION_BUDGET_MS;
+  const now = o.now ?? Date.now;
+  const logFailure = (error: unknown) => {
+    const status = error instanceof TranscriptionError ? (error.status ?? "none") : "none";
+    const kind =
+      error instanceof TranscriptionError
+        ? error.kind
+        : error instanceof Unavailable
+          ? error.reason
+          : "unexpected";
+    o.logger?.info(`transcription failed status=${status} kind=${kind}`);
+  };
   /** Per message: the one provider call in progress, shared by every caller. */
   const inFlight = new Map<string, Promise<string>>();
   const idOf = (k: Key) => `${k.chatId}\n${k.messageId}`;
@@ -247,18 +272,30 @@ export function createTranscriptionService(o: TranscriptionOptions): Transcripti
       const capped = eligible.length - run.length;
 
       let failed = 0;
-      // A rejected key or a rate limit will fail every other call too: stop sending this call.
+      let outOfTime = 0;
+      /** The first auth / rate-limit / config failure: worth naming in the note. */
+      let cause: TranscriptionFailure | null = null;
+      // A rejected key, a rate limit or a bad URL/model will fail every other call too: stop sending.
       let stop = false;
+      const started = now();
       const attempt = async (g: Group, isNew: boolean) => {
         if (stop && isNew) {
           failed++;
+          return;
+        }
+        if (isNew && now() - started >= budgetMs) {
+          outOfTime++;
           return;
         }
         try {
           setTranscript(g, await transcribeOnce(g.key, loadAndTranscribe(g.mediaId)));
         } catch (error) {
           failed++;
-          if (error instanceof TranscriptionError && error.kind !== "failed") stop = true;
+          logFailure(error);
+          if (error instanceof TranscriptionError && error.kind !== "failed") {
+            stop = true;
+            cause ??= error.kind;
+          }
         }
       };
       await Promise.all([
@@ -267,8 +304,18 @@ export function createTranscriptionService(o: TranscriptionOptions): Transcripti
       ]);
 
       const notes: string[] = [];
-      if (failed > 0)
-        notes.push(`${count(failed, "voice note", "voice notes")} could not be transcribed.`);
+      if (failed > 0) {
+        // The fixed messages end with a period already.
+        const why =
+          cause === null
+            ? "."
+            : ` (${cause}: ${TRANSCRIPTION_MESSAGES[cause as TranscriptionFailure]})`;
+        notes.push(`${count(failed, "voice note", "voice notes")} could not be transcribed${why}`);
+      }
+      if (outOfTime > 0)
+        notes.push(
+          `${count(outOfTime, "voice note was", "voice notes were")} not transcribed yet (time budget); call again or use transcribe_audio with their media_id.`,
+        );
       if (capped > 0 && o.maxPerCall === 0)
         notes.push(
           "Automatic transcription is off (TRANSCRIPTION_MAX_PER_CALL=0); use transcribe_audio for a specific voice note.",
@@ -307,7 +354,10 @@ export function createTranscriptionService(o: TranscriptionOptions): Transcripti
           ...(seconds === null ? {} : { durationSeconds: seconds }),
         };
       } catch (error) {
-        if (!(error instanceof Unavailable)) throw error;
+        if (!(error instanceof Unavailable)) {
+          logFailure(error);
+          throw error;
+        }
         if (error.reason === "gone") return { status: "gone" };
         throw new InvalidInputError(error.reason === "not-audio" ? NOT_AUDIO : TOO_LARGE);
       }

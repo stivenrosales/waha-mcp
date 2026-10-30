@@ -173,13 +173,54 @@ describe("transcription service: automatic voice notes", () => {
     expect(notes).toEqual(["2 voice notes could not be transcribed."]);
   });
 
-  it("stops calling the provider in this call after it rejects the key", async () => {
+  it("stops calling the provider in this call after it rejects the key, and says why", async () => {
     const raws = voices(6);
-    const s = setup(raws);
-    s.transcriber.error = new TranscriptionError("auth");
+    const lines: string[] = [];
+    const s = setup(raws, { logger: { info: (m) => lines.push(m) } });
+    s.transcriber.error = new TranscriptionError("auth", 401);
     const notes = await s.service.annotate(s.messages());
     expect(s.transcriber.calls).toBeLessThanOrEqual(3);
-    expect(notes).toEqual(["6 voice notes could not be transcribed."]);
+    expect(notes).toEqual([
+      "6 voice notes could not be transcribed (auth: The transcription provider rejected the API key — check TRANSCRIPTION_API_KEY.)",
+    ]);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const l of lines) expect(l).toBe("transcription failed status=401 kind=auth");
+  });
+
+  it("logs each failure with status and kind (never the key) and names config errors", async () => {
+    const raws = voices(1);
+    const lines: string[] = [];
+    const s = setup(raws, { logger: { info: (m) => lines.push(m) } });
+    s.transcriber.error = new TranscriptionError("config", 404);
+    const notes = await s.service.annotate(s.messages());
+    expect(lines).toEqual(["transcription failed status=404 kind=config"]);
+    expect(notes[0]).toContain("(config: The transcription provider rejected the request");
+    const media = filesFor(raws);
+    delete media[URL_OF("v1")];
+    const gone = setup(raws, { logger: { info: (m) => lines.push(m) } }, { media });
+    expect(await gone.service.annotate(gone.messages())).toEqual([
+      "1 voice note could not be transcribed.",
+    ]);
+    expect(lines.at(-1)).toBe("transcription failed status=none kind=gone");
+    expect(lines.join("\n")).not.toMatch(/secret|http/);
+  });
+
+  it("stops starting new transcriptions once the per-call time budget is spent", async () => {
+    const raws = voices(5);
+    let clock = 0;
+    const s = setup(raws, { concurrency: 1, budgetMs: 25_000, now: () => clock });
+    const slow = s.transcriber.transcribe.bind(s.transcriber);
+    s.transcriber.transcribe = async (audio) => {
+      clock += 10_000;
+      return slow(audio);
+    };
+    const ms = s.messages();
+    const notes = await s.service.annotate(ms);
+    expect(s.transcriber.calls).toBe(3);
+    expect(transcripts(ms).map((t) => t !== null)).toEqual([true, true, true, false, false]);
+    expect(notes).toEqual([
+      "2 voice notes were not transcribed yet (time budget); call again or use transcribe_audio with their media_id.",
+    ]);
   });
 
   it("runs at most 3 transcriptions at once", async () => {

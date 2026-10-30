@@ -73,7 +73,10 @@ describe("OpenAI-compatible transcription client", () => {
     [403, TRANSCRIPTION_MESSAGES.auth],
     [429, TRANSCRIPTION_MESSAGES.rateLimited],
     [500, TRANSCRIPTION_MESSAGES.failed],
-    [400, TRANSCRIPTION_MESSAGES.failed],
+    [400, TRANSCRIPTION_MESSAGES.config],
+    [404, TRANSCRIPTION_MESSAGES.config],
+    [405, TRANSCRIPTION_MESSAGES.config],
+    [422, TRANSCRIPTION_MESSAGES.config],
   ])("maps HTTP %i to a fixed message that never contains the key", async (status, message) => {
     const p = fakeProvider(() => json({ error: { message: `bad key ${KEY}` } }, status));
     const t = createOpenAiCompatibleTranscriber({
@@ -86,6 +89,7 @@ describe("OpenAI-compatible transcription client", () => {
     const err = await t.transcribe(audio).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TranscriptionError);
     expect((err as Error).message).toBe(message);
+    expect((err as TranscriptionError).status).toBe(status);
     expect((err as Error).message).not.toContain(KEY);
   });
 
@@ -125,5 +129,12 @@ describe("OpenAI-compatible transcription client", () => {
     });
     const err = await t.transcribe(audio).catch((e: unknown) => e);
     expect((err as Error).message).toBe(TRANSCRIPTION_MESSAGES.failed);
+  });
+
+  it("a 404 is a configuration problem, not a transient one", () => {
+    expect(TRANSCRIPTION_MESSAGES.config).toBe(
+      "The transcription provider rejected the request — check TRANSCRIPTION_API_URL and TRANSCRIPTION_MODEL.",
+    );
+    expect(new TranscriptionError("config", 404).kind).toBe("config");
   });
 });

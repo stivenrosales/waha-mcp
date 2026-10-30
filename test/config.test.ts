@@ -84,6 +84,26 @@ describe("loadConfig", () => {
     expect(tuned).toMatchObject({ language: "es", maxSeconds: 60, maxPerCall: 0 });
   });
 
+  it("trims and validates TRANSCRIPTION_LANGUAGE as an ISO 639 code", () => {
+    const on = {
+      ...minimal,
+      TRANSCRIPTION_API_URL: "https://api.example.com/v1",
+      TRANSCRIPTION_API_KEY: "k",
+      TRANSCRIPTION_MODEL: "m",
+    };
+    expect(loadConfig({ ...on, TRANSCRIPTION_LANGUAGE: "  es " }).transcription?.language).toBe(
+      "es",
+    );
+    expect(loadConfig({ ...on, TRANSCRIPTION_LANGUAGE: "spa" }).transcription?.language).toBe(
+      "spa",
+    );
+    expect(loadConfig({ ...on, TRANSCRIPTION_LANGUAGE: "   " }).transcription?.language).toBeNull();
+    for (const bad of ["es   # optional hint", "spanish", "e", "es-PE", "ES"])
+      expect(() => loadConfig({ ...on, TRANSCRIPTION_LANGUAGE: bad })).toThrow(
+        /TRANSCRIPTION_LANGUAGE must be/,
+      );
+  });
+
   it("rejects a partial transcription config naming the missing variables, never the values", () => {
     const secret = "sk-or-very-secret";
     let message = "";

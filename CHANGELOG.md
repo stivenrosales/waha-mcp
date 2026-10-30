@@ -8,13 +8,16 @@
 - Optional voice-note transcription through an OpenAI-compatible API such as OpenRouter, OpenAI or Groq (`TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_MAX_SECONDS`, `TRANSCRIPTION_MAX_PER_CALL`). Voice notes carry a `transcript`, `search_messages` matches stored transcripts, and transcripts are stored so they are never paid twice.
 - New tool `transcribe_audio` (13 tools in total) to transcribe a specific audio or voice note on demand.
 - Server icon (favicon) advertised to clients.
-- `get_media` tells the model that documents, PDFs, video and large files cannot be read through the connector and to ask the user to download the file and attach it to the chat (audio points to `transcribe_audio` when transcription is on). The server instructions carry the same rule.
+- `get_media` tells the model that documents, PDFs, video and large files cannot be read through the connector and to ask the user to download the file and attach it to the chat (audio points to `transcribe_audio` when transcription is on, and otherwise gives the user the link to listen to it). The server instructions carry the same rule.
 
 ### Fixes
 
 - WAHA message reads now request an explicit sort order instead of relying on the default.
 - `TRANSCRIPTION_MAX_PER_CALL=0` gives one note ("Automatic transcription is off ...") instead of a repeated per-voice-note count.
-- Whitespace-only `TRANSCRIPTION_*` values count as unset, and the rest are trimmed.
+- Whitespace-only `TRANSCRIPTION_*` values count as unset, and the rest are trimmed; `TRANSCRIPTION_LANGUAGE` must be a lowercase ISO 639-1/639-2 code (a trailing comment on the same line is a startup error).
+- Transcription failures are logged (`transcription failed status=<code> kind=<kind>`, no body, URL or key); HTTP 400/404/405/422 are reported as a configuration problem ("check TRANSCRIPTION_API_URL and TRANSCRIPTION_MODEL") instead of "try again later", and the coverage note names the kind.
+- Automatic transcription has a 25 s budget per tool call; voice notes not started in time are reported as "not transcribed yet (time budget)".
+- `get_thread` reports the cache note only when every page it read came from the cache.
 
 ## 0.1.0
 

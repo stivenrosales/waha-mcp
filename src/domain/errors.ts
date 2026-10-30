@@ -48,14 +48,22 @@ export class InvalidInputError extends Error {
 export const TRANSCRIPTION_MESSAGES = {
   auth: "The transcription provider rejected the API key — check TRANSCRIPTION_API_KEY.",
   rateLimited: "The transcription provider is rate-limiting requests. Try again later.",
+  config:
+    "The transcription provider rejected the request — check TRANSCRIPTION_API_URL and TRANSCRIPTION_MODEL.",
   failed: "The transcription provider could not transcribe this audio. Try again later.",
 } as const;
 
 export type TranscriptionFailure = keyof typeof TRANSCRIPTION_MESSAGES;
 
-/** The speech-to-text provider failed; `kind` picks one of the fixed messages. */
+/**
+ * The speech-to-text provider failed; `kind` picks one of the fixed messages. `status` is the
+ * provider's HTTP status (null when no response arrived), for the server log only.
+ */
 export class TranscriptionError extends Error {
-  constructor(public readonly kind: TranscriptionFailure) {
+  constructor(
+    public readonly kind: TranscriptionFailure,
+    public readonly status: number | null = null,
+  ) {
     super(TRANSCRIPTION_MESSAGES[kind]);
     this.name = "TranscriptionError";
   }

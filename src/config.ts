@@ -145,7 +145,14 @@ const envSchema = z
       .string()
       .optional()
       .transform((v) => v?.trim()),
-    TRANSCRIPTION_LANGUAGE: z.string().optional(),
+    TRANSCRIPTION_LANGUAGE: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined)
+      .refine(
+        (v) => v === undefined || /^[a-z]{2,3}$/.test(v),
+        'TRANSCRIPTION_LANGUAGE must be an ISO 639-1 or 639-2 code in lowercase (e.g. "es"), with nothing else on the line.',
+      ),
     TRANSCRIPTION_MAX_SECONDS: positiveInt("TRANSCRIPTION_MAX_SECONDS", 300),
     TRANSCRIPTION_MAX_PER_CALL: nonNegativeInt("TRANSCRIPTION_MAX_PER_CALL", 20),
   })

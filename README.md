@@ -111,8 +111,10 @@ flowchart LR
 
 Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the messages it reads in `DATA_DIR/cache.db`, so repeated questions about a chat do not re-read its whole history from WAHA. A chat is cached the first time a tool reads it. Later reads ask WAHA only for messages newer than (newest cached message minus `CACHE_REFRESH_HOURS`), and a chat read less than 60 s ago is answered without calling WAHA. `CACHE_MAX_AGE_DAYS` prunes old messages (`0` keeps them forever). Media files are never cached. Set `CACHE_ENABLED=false` to turn it off.
 
+Sizing: every message read is kept, so on a busy account `cache.db` grows without limit by default. Set a retention such as `CACHE_MAX_AGE_DAYS=90` there; older messages are simply read from WAHA again when asked for.
+
 > [!WARNING]
-> The cache is a copy of your conversations at rest on the server (`cache.db`, `0600`). It is wiped when the server sees a different WhatsApp account, but logout does not clear it: delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Edits and deletions older than the refresh window are not picked up, so a deleted message can stay cached.
+> The cache is a copy of your conversations at rest on the server (`cache.db`, `0600`). It is wiped when the server sees a different WhatsApp account after the next restart (the account is checked once per process, so restart the server after re-linking WAHA to another number), but logout does not clear it: delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Edits and deletions older than the refresh window are not picked up, so a deleted message can stay cached.
 
 ## Voice-note transcription (optional)
 
@@ -122,17 +124,20 @@ Off by default. Set `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSC
 TRANSCRIPTION_API_URL=https://openrouter.ai/api/v1
 TRANSCRIPTION_API_KEY=sk-or-...
 TRANSCRIPTION_MODEL=openai/whisper-large-v3-turbo
-TRANSCRIPTION_LANGUAGE=es   # optional hint; omit to auto-detect
+# optional language hint (ISO 639 code); omit to auto-detect
+TRANSCRIPTION_LANGUAGE=es
 ```
 
-OpenAI and Groq endpoints also work (the server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions`). When on, voice notes returned by `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` carry a `transcript`, `search_messages` also matches stored transcripts, and `transcribe_audio` transcribes any audio or voice note on demand. Automatic transcription is limited by `TRANSCRIPTION_MAX_SECONDS` and `TRANSCRIPTION_MAX_PER_CALL`; coverage notes say which voice notes were skipped (`TRANSCRIPTION_MAX_PER_CALL=0` leaves everything to `transcribe_audio`). Each transcript is stored in `cache.db`, also when `CACHE_ENABLED=false`, so it is never paid twice.
+OpenAI and Groq endpoints also work (the server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions`). When on, voice notes returned by `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` carry a `transcript`, `search_messages` also matches stored transcripts, and `transcribe_audio` transcribes any audio or voice note on demand. Automatic transcription is limited by `TRANSCRIPTION_MAX_SECONDS` and `TRANSCRIPTION_MAX_PER_CALL`; coverage notes say which voice notes were skipped (`TRANSCRIPTION_MAX_PER_CALL=0` leaves everything to `transcribe_audio`). Each transcript is stored in `cache.db`, also when `CACHE_ENABLED=false`, so it is never paid twice. Transcripts are not pruned by `CACHE_MAX_AGE_DAYS` and stay after their message is deleted in WhatsApp; they are wiped with the rest of `cache.db` when the account changes (after the next restart), or when you delete the file.
+
+New automatic transcriptions stop starting after 25 s within one tool call so answers stay fast; the coverage note lists the ones "not transcribed yet (time budget)", and the next call picks them up. Each failure is logged as one line `transcription failed status=<code> kind=<kind>` (never the audio, the URL or the key). `kind=auth` means the key was rejected, `kind=config` (HTTP 400/404/405/422) a wrong `TRANSCRIPTION_API_URL` or `TRANSCRIPTION_MODEL`, `kind=rateLimited` a provider limit; the coverage note names the same kind.
 
 > [!WARNING]
 > With transcription on, the audio of your voice notes is sent to the configured provider (a third party such as OpenRouter). Check its data policy before enabling it.
 
 ## Files and PDFs
 
-Only small images and stickers come back inline. Claude does not accept PDFs or other binary files from MCP connectors, and the model cannot open the signed link itself. For documents, PDFs, video and large images, `get_media` returns a short-lived link together with an instruction: the model gives you the link and asks you to download the file and attach it to the chat, so it can read it there. The server does not extract text from PDF or Word files.
+Only small images and stickers come back inline. Claude does not accept PDFs or other binary files from MCP connectors, and the model cannot open the signed link itself. For documents, PDFs, video and large images, `get_media` returns a short-lived link together with an instruction: the model gives you the link and asks you to download the file and attach it to the chat, so it can read it there. Audio is different: with transcription on, the model uses `transcribe_audio`; with it off, the model gives you the link so you can listen to it (Claude does not read attached audio). The server does not extract text from PDF or Word files.
 
 ## Configuration
 
@@ -162,7 +167,7 @@ All configuration is through environment variables.
 | `TRANSCRIPTION_API_URL`      | no       |             | OpenAI-compatible speech-to-text base URL (`https://openrouter.ai/api/v1`). |
 | `TRANSCRIPTION_API_KEY`      | no       |             | API key of that provider.                                                   |
 | `TRANSCRIPTION_MODEL`        | no       |             | Model id (`openai/whisper-large-v3-turbo`).                                 |
-| `TRANSCRIPTION_LANGUAGE`     | no       |             | Language hint (ISO 639-1, e.g. `es`); omit to auto-detect.                  |
+| `TRANSCRIPTION_LANGUAGE`     | no       |             | Language hint, lowercase ISO 639-1/639-2 code (e.g. `es`); omit to detect.  |
 | `TRANSCRIPTION_MAX_SECONDS`  | no       | `300`       | Longer voice notes are not transcribed automatically.                       |
 | `TRANSCRIPTION_MAX_PER_CALL` | no       | `20`        | New automatic transcriptions per tool call (`0` = only `transcribe_audio`). |
 

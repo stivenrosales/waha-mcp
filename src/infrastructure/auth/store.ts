@@ -22,6 +22,7 @@ export interface IssuedTokens {
 export interface AuthStore {
   registerClient(c: { redirectUris: string[]; clientName?: string }): { clientId: string };
   getClient(clientId: string): { clientId: string; redirectUris: string[] } | null;
+  countClients(): number;
   /** Returns the raw code. Valid for 60 s. */
   saveCode(c: AuthorizationCodeData): string;
   /** Single use: the code is deleted atomically as it is read. */
@@ -122,6 +123,11 @@ export function createAuthStore(dbPath: string, now: () => number = Date.now): A
         .get(clientId) as { redirect_uris: string } | undefined;
       if (!row) return null;
       return { clientId, redirectUris: JSON.parse(row.redirect_uris) as string[] };
+    },
+
+    countClients() {
+      const row = db.prepare("SELECT COUNT(*) AS n FROM clients").get() as { n: number };
+      return Number(row.n);
     },
 
     saveCode(c) {

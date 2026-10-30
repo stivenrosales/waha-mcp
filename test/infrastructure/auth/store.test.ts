@@ -43,6 +43,15 @@ describe("auth store", () => {
     expect(store.getClient("nope")).toBeNull();
   });
 
+  it("counts registered clients and revokeAll resets the count", () => {
+    const { store } = setup();
+    expect(store.countClients()).toBe(1);
+    store.registerClient({ redirectUris: ["https://other.example/cb"] });
+    expect(store.countClients()).toBe(2);
+    store.revokeAll();
+    expect(store.countClients()).toBe(0);
+  });
+
   it("code is single use", () => {
     const { store, clientId } = setup();
     const code = store.saveCode(codeInput(clientId));

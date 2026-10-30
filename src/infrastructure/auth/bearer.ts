@@ -17,14 +17,16 @@ export function bearerGuard(deps: {
   store: AuthStore;
   publicBaseUrl: string;
 }): MiddlewareHandler<{ Variables: AuthVariables }> {
-  const challenge = `Bearer resource_metadata="${deps.publicBaseUrl}/.well-known/oauth-protected-resource"`;
+  const metadata = `resource_metadata="${deps.publicBaseUrl}/.well-known/oauth-protected-resource"`;
   return async (c, next) => {
     const match = /^Bearer[ ]+([A-Za-z0-9\-._~+/]+=*)\s*$/i.exec(
       c.req.header("authorization") ?? "",
     );
     const auth = match ? deps.store.verifyAccessToken(match[1]) : null;
     if (!auth) {
-      c.header("WWW-Authenticate", challenge);
+      // RFC 6750 §3.1: error="invalid_token" only when a token was presented.
+      const error = match ? 'error="invalid_token", ' : "";
+      c.header("WWW-Authenticate", `Bearer ${error}${metadata}`);
       c.header("Cache-Control", "no-store");
       return c.json({ error: "invalid_token" }, 401);
     }

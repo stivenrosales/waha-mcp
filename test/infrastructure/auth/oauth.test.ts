@@ -3,7 +3,10 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { bearerGuard } from "../../../src/infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "../../../src/infrastructure/auth/oauth.js";
-import { createLoginLimiter } from "../../../src/infrastructure/auth/rateLimit.js";
+import {
+  createLoginLimiter,
+  normalizeClientKey,
+} from "../../../src/infrastructure/auth/rateLimit.js";
 import { createAuthStore } from "../../../src/infrastructure/auth/store.js";
 
 const BASE = "https://mcp.example.com";
@@ -313,7 +316,8 @@ describe("authorization code flow", () => {
       refresh_token: "x",
       client_id: "nope",
     });
-    expect(unknown.status).toBe(401);
+    // Public clients send no credentials, so RFC 6749 §5.2 allows 400 (no WWW-Authenticate needed).
+    expect(unknown.status).toBe(400);
     expect(((await unknown.json()) as { error: string }).error).toBe("invalid_client");
 
     const json = await ctx.request("/token", {
@@ -465,14 +469,91 @@ describe("login rate limit", () => {
   });
 });
 
+describe("limiter hardening", () => {
+  it("normalizes IPv6 to its /64 and IPv4-mapped IPv6 to IPv4", () => {
+    expect(normalizeClientKey("2001:db8:1:2:aaaa::1")).toBe(
+      normalizeClientKey("2001:db8:1:2::ffff"),
+    );
+    expect(normalizeClientKey("2001:db8:1:2::1")).not.toBe(normalizeClientKey("2001:db8:1:3::1"));
+    expect(normalizeClientKey("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(normalizeClientKey("[2001:db8:1:2::1]")).toBe(normalizeClientKey("2001:db8:1:2::9"));
+    expect(normalizeClientKey("203.0.113.7")).toBe("203.0.113.7");
+  });
+
+  it("IPv6 addresses in the same /64 share one counter", async () => {
+    const ctx = setup();
+    const clientId = await registeredClient(ctx);
+    const { challenge } = pkce();
+    const params = authParams(clientId, challenge);
+    for (let i = 1; i <= 5; i++) {
+      await login(ctx, params, "bad", { "x-forwarded-for": `2001:db8:1:2::${i}` });
+    }
+    const res = await login(ctx, params, KEY, { "x-forwarded-for": "2001:db8:1:2:ffff::99" });
+    expect(res.status).toBe(429);
+  });
+
+  it("IPv4-mapped IPv6 shares the IPv4 counter", async () => {
+    const ctx = setup();
+    const clientId = await registeredClient(ctx);
+    const { challenge } = pkce();
+    const params = authParams(clientId, challenge);
+    for (let i = 0; i < 5; i++) {
+      await login(ctx, params, "bad", { "x-forwarded-for": "::ffff:203.0.113.7" });
+    }
+    const res = await login(ctx, params, KEY, { "x-forwarded-for": "203.0.113.7" });
+    expect(res.status).toBe(429);
+  });
+
+  it("51st failure across distinct keys blocks a fresh key, login and logout", async () => {
+    const ctx = setup();
+    const clientId = await registeredClient(ctx);
+    const { challenge } = pkce();
+    const params = authParams(clientId, challenge);
+    for (let i = 0; i < 50; i++) {
+      const res = await login(ctx, params, "bad", { "x-forwarded-for": `198.51.100.${i}` });
+      expect(res.status).toBe(401);
+    }
+    const fresh = { "x-forwarded-for": "192.0.2.200" };
+    expect((await login(ctx, params, KEY, fresh)).status).toBe(429);
+    expect((await ctx.request("/logout", form({ waha_key: KEY }, fresh))).status).toBe(429);
+  });
+
+  it("success does not reset the global budget", () => {
+    const limiter = createLoginLimiter({ globalMaxFailures: 3 });
+    limiter.recordFailure("a");
+    limiter.recordFailure("b");
+    limiter.reset("b");
+    limiter.recordFailure("c");
+    expect(limiter.isBlocked("fresh")).toBe(true);
+  });
+
+  it("eviction flood does not unblock a blocked key", () => {
+    const limiter = createLoginLimiter({
+      maxFailures: 2,
+      globalMaxFailures: Number.POSITIVE_INFINITY,
+      maxTrackedKeys: 3,
+    });
+    limiter.recordFailure("victim-of-own-attack");
+    limiter.recordFailure("victim-of-own-attack");
+    expect(limiter.isBlocked("victim-of-own-attack")).toBe(true);
+    for (let i = 0; i < 100; i++) limiter.recordFailure(`flood-${i}`);
+    expect(limiter.isBlocked("victim-of-own-attack")).toBe(true);
+  });
+});
+
 describe("bearer guard and logout", () => {
   it("missing or invalid token → 401 with resource_metadata", async () => {
     const ctx = setup();
-    for (const headers of [{}, { authorization: "Bearer nope" }, { authorization: "Basic x" }]) {
+    for (const headers of [{}, { authorization: "Basic x" }]) {
       const res = await ctx.request("/mcp", { headers });
       expect(res.status).toBe(401);
       expect(res.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${PRM_URL}"`);
     }
+    const invalid = await ctx.request("/mcp", { headers: { authorization: "Bearer nope" } });
+    expect(invalid.status).toBe(401);
+    expect(invalid.headers.get("www-authenticate")).toBe(
+      `Bearer error="invalid_token", resource_metadata="${PRM_URL}"`,
+    );
   });
 
   it("token used after logout → 401 with WWW-Authenticate resource_metadata", async () => {

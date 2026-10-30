@@ -350,8 +350,7 @@ export function createOAuthRoutes(deps: {
           "code, code_verifier, client_id and redirect_uri are required.",
         );
       }
-      if (!store.getClient(clientId))
-        return oauthError(c, "invalid_client", "Unknown client.", 401);
+      if (!store.getClient(clientId)) return oauthError(c, "invalid_client", "Unknown client.");
       if (!CODE_VERIFIER.test(verifier)) {
         return oauthError(c, "invalid_request", "Malformed code_verifier.");
       }
@@ -373,7 +372,7 @@ export function createOAuthRoutes(deps: {
     if (!refreshToken || !clientId) {
       return oauthError(c, "invalid_request", "refresh_token and client_id are required.");
     }
-    if (!store.getClient(clientId)) return oauthError(c, "invalid_client", "Unknown client.", 401);
+    if (!store.getClient(clientId)) return oauthError(c, "invalid_client", "Unknown client.");
     const rotated = store.rotateRefreshToken(refreshToken, clientId);
     if (!rotated) return oauthError(c, "invalid_grant", "Invalid or expired refresh token.");
     return tokenResponse(rotated);

@@ -240,6 +240,7 @@ export function createOAuthRoutes(deps: {
     ) {
       return oauthError(c, "invalid_client_metadata", "client_name must be a short string.");
     }
+    store.pruneStaleClients();
     if (store.countClients() >= MAX_CLIENTS) {
       return oauthError(
         c,

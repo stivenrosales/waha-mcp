@@ -179,6 +179,8 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 - OAuth 2.1 with PKCE (S256). Tokens are opaque random values stored only as hashes.
 - Direct chats are private data. Use a client you trust with them.
 - The API key and WAHA URL are never logged or returned in errors.
+- Rotating `WAHA_API_KEY` revokes every issued token at the next start: only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
+- At most 50 OAuth clients can be registered. Clients older than 24 h with no live token are pruned automatically when a new one registers; `<base>/logout` clears them all.
 
 > [!WARNING]
 > The login is rate limited per client address (IPv6 grouped by /64) and with a global failure budget. An attacker can therefore lock the owner out temporarily, and logout is also blocked during that window.

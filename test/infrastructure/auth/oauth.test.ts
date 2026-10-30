@@ -16,8 +16,8 @@ const PRM_URL = `${BASE}/.well-known/oauth-protected-resource`;
 
 type Auth = { clientId: string; scope: string };
 
-function setup(opts: { now?: () => number } = {}) {
-  const store = createAuthStore(":memory:");
+function setup(opts: { now?: () => number; storeNow?: () => number } = {}) {
+  const store = createAuthStore(":memory:", opts.storeNow);
   const limiter = createLoginLimiter({ now: opts.now });
   const app = new Hono<{ Variables: { auth: Auth } }>();
   app.route("/", createOAuthRoutes({ store, wahaApiKey: KEY, publicBaseUrl: BASE, limiter }));
@@ -170,6 +170,15 @@ describe("dynamic client registration", () => {
     expect(body.error_description).toMatch(/limit/i);
     expect(body.error_description).toMatch(/logout/i);
     expect(ctx.store.countClients()).toBe(50);
+  });
+
+  it("prunes day-old clients without live tokens before checking the cap", async () => {
+    let t = 1_800_000_000_000;
+    const ctx = setup({ storeNow: () => t });
+    for (let i = 0; i < 50; i++) expect((await register(ctx)).status).toBe(201);
+    t += 25 * 3600 * 1000;
+    expect((await register(ctx)).status).toBe(201);
+    expect(ctx.store.countClients()).toBe(1);
   });
 });
 

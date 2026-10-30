@@ -1,9 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 const CODE_TTL_MS = 60_000;
 const ACCESS_TTL_S = 3600;
 const REFRESH_TTL_S = 30 * 24 * 3600;
+/** A registered client with no live token is dropped after this long. */
+const STALE_CLIENT_MS = 24 * 3600 * 1000;
 
 export interface AuthorizationCodeData {
   clientId: string;
@@ -23,6 +26,13 @@ export interface AuthStore {
   registerClient(c: { redirectUris: string[]; clientName?: string }): { clientId: string };
   getClient(clientId: string): { clientId: string; redirectUris: string[] } | null;
   countClients(): number;
+  /** Deletes clients older than 24 h that hold no live token or pending code; returns how many. */
+  pruneStaleClients(): number;
+  /**
+   * Binds the stored sessions to the current WAHA API key (only its sha256 is kept). When the key
+   * differs from the one seen before, every client, code and token is revoked and `true` is returned.
+   */
+  syncApiKey(apiKey: string): boolean;
   /** Returns the raw code. Valid for 60 s. */
   saveCode(c: AuthorizationCodeData): string;
   /** Single use: the code is deleted atomically as it is read. */
@@ -47,6 +57,10 @@ CREATE TABLE IF NOT EXISTS clients (
   client_name TEXT,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS codes (
   hash TEXT PRIMARY KEY,
   client_id TEXT NOT NULL,
@@ -70,8 +84,14 @@ CREATE TABLE IF NOT EXISTS tokens (
  */
 export function createAuthStore(dbPath: string, now: () => number = Date.now): AuthStore {
   const db = new DatabaseSync(dbPath);
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec(SCHEMA);
+  if (dbPath !== ":memory:") {
+    // The database holds token hashes: keep it, and its WAL side files, private to the owner.
+    for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`])
+      if (existsSync(file)) chmodSync(file, 0o600);
+  }
 
   const transaction = <T>(fn: () => T): T => {
     db.exec("BEGIN IMMEDIATE");
@@ -130,6 +150,35 @@ export function createAuthStore(dbPath: string, now: () => number = Date.now): A
     countClients() {
       const row = db.prepare("SELECT COUNT(*) AS n FROM clients").get() as { n: number };
       return Number(row.n);
+    },
+
+    pruneStaleClients() {
+      const t = now();
+      const result = db
+        .prepare(
+          `DELETE FROM clients
+           WHERE created_at < ?
+             AND client_id NOT IN (SELECT client_id FROM tokens WHERE expires_at > ?)
+             AND client_id NOT IN (SELECT client_id FROM codes WHERE expires_at > ?)`,
+        )
+        .run(t - STALE_CLIENT_MS, t, t);
+      return Number(result.changes);
+    },
+
+    syncApiKey(apiKey) {
+      const hash = sha256(apiKey);
+      return transaction(() => {
+        const row = db.prepare("SELECT value FROM meta WHERE key = 'api_key_hash'").get() as
+          | { value: string }
+          | undefined;
+        if (row?.value === hash) return false;
+        db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('api_key_hash', ?)").run(hash);
+        if (row === undefined) return false; // first run: nothing was issued against another key
+        db.exec("DELETE FROM tokens");
+        db.exec("DELETE FROM codes");
+        db.exec("DELETE FROM clients");
+        return true;
+      });
     },
 
     saveCode(c) {

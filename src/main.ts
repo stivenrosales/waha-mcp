@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { loadConfig } from "./config.js";
@@ -30,7 +31,9 @@ async function main(): Promise<void> {
     apiKey: config.wahaApiKey,
     session: config.wahaSession,
   });
+  mkdirSync(config.dataDir, { recursive: true });
   const store = createAuthStore(join(config.dataDir, "auth.db"));
+  if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");
   const links = createSignedLinks({
     secret: loadOrCreateMediaSecret(config.dataDir),
     ttlSeconds: config.mediaLinkTtlSeconds,

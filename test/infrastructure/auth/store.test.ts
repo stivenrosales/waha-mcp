@@ -153,4 +153,62 @@ describe("auth store", () => {
     expect(b.getClient(clientId)).not.toBeNull();
     expect(b.verifyAccessToken(t.accessToken)).toEqual({ clientId, scope: "mcp" });
   });
+
+  it("keeps tokens when the API key is unchanged and revokes them when it changes", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-auth-"));
+    dirs.push(dir);
+    const file = path.join(dir, "auth.db");
+    const a = createAuthStore(file);
+    expect(a.syncApiKey("key-one")).toBe(false);
+    const { clientId } = a.registerClient({ redirectUris: ["https://app.example/cb"] });
+    const t = a.issueTokens(clientId, "mcp");
+    a.close();
+
+    const same = createAuthStore(file);
+    expect(same.syncApiKey("key-one")).toBe(false);
+    expect(same.verifyAccessToken(t.accessToken)).not.toBeNull();
+    same.close();
+
+    const rotated = createAuthStore(file);
+    expect(rotated.syncApiKey("key-two")).toBe(true);
+    expect(rotated.verifyAccessToken(t.accessToken)).toBeNull();
+    expect(rotated.getClient(clientId)).toBeNull();
+    expect(rotated.syncApiKey("key-two")).toBe(false);
+    rotated.close();
+
+    const db = new DatabaseSync(file);
+    const dump = JSON.stringify(db.prepare("SELECT * FROM meta").all());
+    db.close();
+    expect(dump).not.toContain("key-one");
+    expect(dump).not.toContain("key-two");
+  });
+
+  it("prunes only old clients that hold no live token", () => {
+    let t = T0;
+    const store = createAuthStore(":memory:", () => t);
+    const uris = ["https://app.example/cb"];
+    const idle = store.registerClient({ redirectUris: uris }).clientId;
+    const active = store.registerClient({ redirectUris: uris }).clientId;
+    store.issueTokens(active, "mcp");
+    t += 23 * 3600 * 1000;
+    const fresh = store.registerClient({ redirectUris: uris }).clientId;
+    expect(store.pruneStaleClients()).toBe(0);
+    t += 2 * 3600 * 1000;
+    expect(store.pruneStaleClients()).toBe(1);
+    expect(store.getClient(idle)).toBeNull();
+    expect(store.getClient(active)).not.toBeNull();
+    expect(store.getClient(fresh)).not.toBeNull();
+  });
+
+  it("keeps auth.db and its WAL files private to the owner", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-auth-"));
+    dirs.push(dir);
+    const file = path.join(dir, "auth.db");
+    const store = createAuthStore(file);
+    store.registerClient({ redirectUris: ["https://app.example/cb"] });
+    for (const f of [file, `${file}-wal`, `${file}-shm`])
+      if (fs.existsSync(f)) expect(fs.statSync(f).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    store.close();
+  });
 });

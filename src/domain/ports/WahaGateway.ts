@@ -12,6 +12,8 @@ export interface WahaGateway {
     chatId: string,
     q: { limit: number; offset: number; from?: number; to?: number },
   ): Promise<unknown[]>;
+  /** One message with its media URL resolved (`downloadMedia=true`). 404 → WahaNotFoundError. */
+  getMessage(chatId: string, messageId: string): Promise<unknown>;
   /** `null` means the media is gone (404/410). */
   fetchMedia(url: string): Promise<{ bytes: Uint8Array; mimetype: string } | null>;
 }

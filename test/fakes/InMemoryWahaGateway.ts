@@ -1,3 +1,4 @@
+import { WahaNotFoundError } from "../../src/domain/errors.js";
 import type { WahaGateway } from "../../src/domain/ports/WahaGateway.js";
 
 type Raw = Record<string, unknown>;
@@ -9,10 +10,16 @@ export interface InMemoryData {
   contacts?: unknown[];
   /** Raw messages per chat id, newest first (the order WAHA returns). */
   messages?: Record<string, Raw[]>;
+  /** Bytes served by `fetchMedia`, keyed by the exact media URL. */
+  media?: Record<string, { bytes: Uint8Array; mimetype: string }>;
+  /** Engine reported by `getSession` (default "GOWS"). */
+  engine?: string;
+  /** When set, every method rejects with this error (simulates WAHA failures). */
+  failWith?: Error;
 }
 
 export interface Call {
-  method: "listChats" | "listContacts" | "getMessages";
+  method: "getSession" | "listChats" | "listContacts" | "getMessages" | "getMessage" | "fetchMedia";
   args: unknown[];
 }
 
@@ -25,25 +32,35 @@ export class InMemoryWahaGateway implements WahaGateway {
     return this.calls.filter((c) => c.method === method).length;
   }
 
+  private guard(): void {
+    if (this.data.failWith) throw this.data.failWith;
+  }
+
   async getSession() {
-    return { engine: "GOWS", status: "WORKING" };
+    this.calls.push({ method: "getSession", args: [] });
+    this.guard();
+    return { engine: this.data.engine ?? "GOWS", status: "WORKING" };
   }
 
   async listGroups() {
+    this.guard();
     return this.data.groups ?? [];
   }
 
   async getGroup(groupId: string) {
+    this.guard();
     return this.data.groupDetails?.[groupId] ?? {};
   }
 
   async listChats(q: { limit: number; offset: number }) {
     this.calls.push({ method: "listChats", args: [q] });
+    this.guard();
     return (this.data.chats ?? []).slice(q.offset, q.offset + q.limit);
   }
 
   async listContacts(q: { limit: number; offset: number }) {
     this.calls.push({ method: "listContacts", args: [q] });
+    this.guard();
     return (this.data.contacts ?? []).slice(q.offset, q.offset + q.limit);
   }
 
@@ -52,6 +69,7 @@ export class InMemoryWahaGateway implements WahaGateway {
     q: { limit: number; offset: number; from?: number; to?: number },
   ) {
     this.calls.push({ method: "getMessages", args: [chatId, q] });
+    this.guard();
     const all = (this.data.messages?.[chatId] ?? []).filter((m) => {
       const t = Number(m.timestamp);
       return (q.from === undefined || t >= q.from) && (q.to === undefined || t <= q.to);
@@ -59,8 +77,18 @@ export class InMemoryWahaGateway implements WahaGateway {
     return all.slice(q.offset, q.offset + q.limit);
   }
 
-  async fetchMedia() {
-    return null;
+  async getMessage(chatId: string, messageId: string) {
+    this.calls.push({ method: "getMessage", args: [chatId, messageId] });
+    this.guard();
+    const found = (this.data.messages?.[chatId] ?? []).find((m) => m.id === messageId);
+    if (!found) throw new WahaNotFoundError("message");
+    return found;
+  }
+
+  async fetchMedia(url: string) {
+    this.calls.push({ method: "fetchMedia", args: [url] });
+    this.guard();
+    return this.data.media?.[url] ?? null;
   }
 }
 

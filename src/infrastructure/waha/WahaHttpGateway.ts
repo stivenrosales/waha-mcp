@@ -119,6 +119,11 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
       return asArray(await getJson(path, "chat"));
     },
 
+    async getMessage(chatId, messageId) {
+      const path = `/api/${session}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}?downloadMedia=true`;
+      return getJson(path, "message");
+    },
+
     async fetchMedia(url) {
       let parsed: URL;
       try {

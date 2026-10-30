@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   WahaAuthError,
@@ -217,5 +218,29 @@ describe("WahaHttpGateway", () => {
       await expect(gw.fetchMedia(u)).rejects.toBeInstanceOf(WahaNotFoundError);
     }
     expect(calls).toHaveLength(0);
+  });
+
+  it("getMessage requests one message with downloadMedia=true", async () => {
+    const single = JSON.parse(
+      readFileSync("test/fixtures/gows/message-single-download.json", "utf8"),
+    ) as { id: string };
+    const { fn, calls } = fakeFetch(() => json(single));
+    const out = await make(fn).getMessage("1@g.us", "false_1@g.us_ABC_2@lid");
+    expect(out).toEqual(single);
+    const url = new URL(calls[0]?.url ?? "");
+    expect(url.pathname).toBe(
+      "/api/my%20session/chats/1%40g.us/messages/false_1%40g.us_ABC_2%40lid",
+    );
+    expect(url.searchParams.get("downloadMedia")).toBe("true");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.redirect).toBe("error");
+    expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+  });
+
+  it("getMessage maps 404 to WahaNotFoundError and 401 to WahaAuthError", async () => {
+    const nf = fakeFetch(() => new Response("no", { status: 404 }));
+    await expect(make(nf.fn).getMessage("1@g.us", "x")).rejects.toBeInstanceOf(WahaNotFoundError);
+    const auth = fakeFetch(() => new Response("no", { status: 401 }));
+    await expect(make(auth.fn).getMessage("1@g.us", "x")).rejects.toBeInstanceOf(WahaAuthError);
   });
 });

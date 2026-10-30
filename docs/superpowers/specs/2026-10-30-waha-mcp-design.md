@@ -162,14 +162,14 @@ owner's words: "quiero que revises los chats de tal día y dime si hay pendiente
 los chats, excluyendo grupos o quizá no, … y poder hacer en base a ellos todo lists o análisis".
 Six more read-only tools, one stats extension and three MCP prompts:
 
-| Tool                   | Purpose                                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------------------- |
+| Tool                   | Purpose                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
 | `list_pending_replies` | chats where the other side spoke last and the owner hasn't answered; waiting time; last messages |
-| `get_activity_digest`  | every chat active on a day/range in one call, compact messages, "awaiting reply" flag     |
-| `search_messages`      | text search (case/accent-insensitive) over text, captions and filenames in a range        |
-| `get_thread`           | messages around one message plus its reply chain                                          |
-| `list_shared_files`    | documents, images, video, audio and links shared, filterable by chat, kind and date       |
-| `get_contact`          | who a JID/phone/name is: names, phone, groups in common, last interaction                 |
+| `get_activity_digest`  | every chat active on a day/range in one call, compact messages, "awaiting reply" flag            |
+| `search_messages`      | text search (case/accent-insensitive) over text, captions and filenames in a range               |
+| `get_thread`           | messages around one message plus its reply chain                                                 |
+| `list_shared_files`    | documents, images, video, audio and links shared, filterable by chat, kind and date              |
+| `get_contact`          | who a JID/phone/name is: names, phone, groups in common, last interaction                        |
 
 - Scope for pending/digest/search: `direct` (default), `groups`, `all`. In groups a message is
   "pending" only when it mentions the owner or replies to an owner's message and the owner has

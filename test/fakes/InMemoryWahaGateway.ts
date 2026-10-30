@@ -10,8 +10,12 @@ export interface InMemoryData {
   contacts?: unknown[];
   /** Raw messages per chat id, newest first (the order WAHA returns). */
   messages?: Record<string, Raw[]>;
-  /** Bytes served by `fetchMedia`, keyed by the exact media URL. */
-  media?: Record<string, { bytes: Uint8Array; mimetype: string }>;
+  /**
+   * Files served by `openMedia`, keyed by the exact media URL. `length` is the
+   * declared Content-Length (default: the real size; `null` = not declared), so a
+   * test can make WAHA lie about it.
+   */
+  media?: Record<string, { bytes: Uint8Array; mimetype: string; length?: number | null }>;
   /** Engine reported by `getSession` (default "GOWS"). */
   engine?: string;
   /** When set, every method rejects with this error (simulates WAHA failures). */
@@ -19,13 +23,15 @@ export interface InMemoryData {
 }
 
 export interface Call {
-  method: "getSession" | "listChats" | "listContacts" | "getMessages" | "getMessage" | "fetchMedia";
+  method: "getSession" | "listChats" | "listContacts" | "getMessages" | "getMessage" | "openMedia";
   args: unknown[];
 }
 
 /** WAHA stand-in: honours offset/limit and the unix-second timestamp filters. */
 export class InMemoryWahaGateway implements WahaGateway {
   readonly calls: Call[] = [];
+  /** How many times each media URL's body was pulled (0 = never read). */
+  readonly bodyReads = new Map<string, number>();
   constructor(private readonly data: InMemoryData = {}) {}
 
   count(method: Call["method"]): number {
@@ -85,10 +91,27 @@ export class InMemoryWahaGateway implements WahaGateway {
     return found;
   }
 
-  async fetchMedia(url: string) {
-    this.calls.push({ method: "fetchMedia", args: [url] });
+  async openMedia(url: string) {
+    this.calls.push({ method: "openMedia", args: [url] });
     this.guard();
-    return this.data.media?.[url] ?? null;
+    const file = this.data.media?.[url];
+    if (!file) return null;
+    const CHUNK = 1024;
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull: (controller) => {
+          this.bodyReads.set(url, (this.bodyReads.get(url) ?? 0) + 1);
+          if (offset >= file.bytes.length) return controller.close();
+          controller.enqueue(file.bytes.slice(offset, offset + CHUNK));
+          offset += CHUNK;
+        },
+      },
+      // No eager pull: the body is only read when someone consumes it.
+      { highWaterMark: 0 },
+    );
+    const length = file.length === undefined ? file.bytes.length : file.length;
+    return { body, mimetype: file.mimetype, length };
   }
 }
 

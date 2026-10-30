@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -71,5 +71,32 @@ describe("loadOrCreateMediaSecret", () => {
     const second = loadOrCreateMediaSecret(dir);
     expect(Buffer.from(second).equals(Buffer.from(first))).toBe(true);
     expect(readFileSync(join(dir, "media-secret"))).toHaveLength(32);
+  });
+
+  it("a second load (the EEXIST race path) returns the same secret", () => {
+    const dir = mkdtempSync(join(tmpdir(), "waha-mcp-secret-"));
+    dirs.push(dir);
+    const loads = [loadOrCreateMediaSecret(dir), loadOrCreateMediaSecret(dir)];
+    expect(Buffer.from(loads[0] as Uint8Array).equals(Buffer.from(loads[1] as Uint8Array))).toBe(
+      true,
+    );
+  });
+
+  it("throws on a secret file of the wrong length instead of rotating it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "waha-mcp-secret-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "media-secret"), Buffer.alloc(16, 1));
+    expect(() => loadOrCreateMediaSecret(dir)).toThrow(/media-secret/);
+    expect(readFileSync(join(dir, "media-secret"))).toHaveLength(16);
+  });
+
+  it("tightens an existing secret file to mode 0600 on load", () => {
+    const dir = mkdtempSync(join(tmpdir(), "waha-mcp-secret-"));
+    dirs.push(dir);
+    const file = join(dir, "media-secret");
+    writeFileSync(file, Buffer.alloc(32, 2));
+    chmodSync(file, 0o644);
+    expect(Array.from(loadOrCreateMediaSecret(dir))).toEqual(Array(32).fill(2));
+    expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 });

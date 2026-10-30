@@ -11,7 +11,7 @@ export function getEngineMapper(engine: string): EngineMapper {
 /**
  * Resolves the engine mapper from `getSession()` once per process. Concurrent
  * callers share the pending lookup; a failure (WAHA down, unsupported engine) is
- * not cached, so the next call retries.
+ * not cached, so the next call retries; an unsupported engine is cached.
  */
 export function createEngineResolver(
   gw: Pick<WahaGateway, "getSession">,
@@ -23,7 +23,8 @@ export function createEngineResolver(
         .getSession()
         .then((s) => getEngineMapper(s.engine))
         .catch((err: unknown) => {
-          pending = null;
+          // An unsupported engine is permanent (until restart); anything else may be transient.
+          if (!(err instanceof UnsupportedEngineError)) pending = null;
           throw err;
         });
     }

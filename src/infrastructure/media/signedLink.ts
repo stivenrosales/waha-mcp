@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface SignedLinks {
@@ -61,14 +61,21 @@ export function createSignedLinks(opts: {
  */
 export function loadOrCreateMediaSecret(dataDir: string): Uint8Array {
   const file = join(dataDir, SECRET_FILE);
-  try {
-    const existing = readFileSync(file);
-    if (existing.length === SECRET_BYTES) return new Uint8Array(existing);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
   mkdirSync(dataDir, { recursive: true });
-  const secret = randomBytes(SECRET_BYTES);
-  writeFileSync(file, secret, { mode: 0o600 });
-  return new Uint8Array(secret);
+  try {
+    // "wx" fails if the file exists, so two processes starting together cannot
+    // both write: the loser falls through and reads the winner's secret.
+    const secret = randomBytes(SECRET_BYTES);
+    writeFileSync(file, secret, { mode: 0o600, flag: "wx" });
+    return new Uint8Array(secret);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
+  const existing = readFileSync(file);
+  if (existing.length !== SECRET_BYTES)
+    throw new Error(
+      `${file} must hold exactly ${SECRET_BYTES} bytes; refusing to replace it (delete it to rotate media links).`,
+    );
+  chmodSync(file, 0o600);
+  return new Uint8Array(existing);
 }

@@ -1,3 +1,9 @@
+export interface OpenedFile {
+  body: ReadableStream<Uint8Array>;
+  mimetype: string;
+  length: number | null;
+}
+
 /** Read-only access to WAHA. Payloads are raw engine data; mapping happens elsewhere. */
 export interface WahaGateway {
   getSession(): Promise<{ engine: string; status: string }>;
@@ -14,6 +20,10 @@ export interface WahaGateway {
   ): Promise<unknown[]>;
   /** One message with its media URL resolved (`downloadMedia=true`). 404 → WahaNotFoundError. */
   getMessage(chatId: string, messageId: string): Promise<unknown>;
-  /** `null` means the media is gone (404/410). */
-  fetchMedia(url: string): Promise<{ bytes: Uint8Array; mimetype: string } | null>;
+  /**
+   * Opens a WAHA file without reading it. `null` means the media is gone (404/410).
+   * `length` is the declared Content-Length (`null` when absent or invalid); the
+   * caller must consume or cancel `body`.
+   */
+  openMedia(url: string): Promise<OpenedFile | null>;
 }

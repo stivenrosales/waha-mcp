@@ -1,12 +1,18 @@
 import { InvalidInputError, WahaNotFoundError } from "../../domain/errors.js";
+import type { EngineMapper } from "../../domain/message.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import { decodeMediaId } from "../waha/engines/gows.js";
 
-export interface ResolvedMedia {
-  bytes: Uint8Array;
+export interface OpenedMedia {
+  /** Unread file body: consume it (capped) or cancel it. */
+  body: ReadableStream<Uint8Array>;
   /** The original mimetype reported for the message (falls back to the file response). */
   mimetype: string;
   filename: string | null;
+  /** Content-Length declared by WAHA, or `null`. */
+  length: number | null;
+  /** Best known size: Content-Length, else the message's `fileLength`, else `null`. */
+  size: number | null;
 }
 
 export const MEDIA_GONE = "This file is no longer available on WAHA.";
@@ -17,34 +23,82 @@ const nonEmpty = (v: unknown): string | null =>
   typeof v === "string" && v.trim() !== "" ? v : null;
 
 /**
- * mediaId → message (`downloadMedia=true`) → `media.url` → file bytes.
- * Returns `null` when the message, its media URL or the file is gone.
- * Throws `InvalidInputError` for a malformed id; other WAHA errors propagate.
+ * mediaId → message (`downloadMedia=true`) → `media.url` → opened (unread) file.
+ * Returns `null` when the message, its media URL or the file is gone. Nothing is
+ * buffered here. Throws `InvalidInputError` for a malformed id; other WAHA errors
+ * propagate. With a `mapper`, the message's declared `fileLength` fills `size`.
  */
-export async function resolveMedia(
+export async function openMediaById(
   gw: WahaGateway,
   mediaId: string,
-): Promise<ResolvedMedia | null> {
+  mapper?: EngineMapper,
+): Promise<OpenedMedia | null> {
   const ref = decodeMediaId(mediaId);
   if (!ref)
     throw new InvalidInputError(
       "Invalid media_id. Use the attachment.mediaId returned by get_messages.",
     );
   try {
-    const media = asRecord(asRecord(await gw.getMessage(ref.chatId, ref.messageId)).media);
+    const raw = await gw.getMessage(ref.chatId, ref.messageId);
+    const media = asRecord(asRecord(raw).media);
     const url = nonEmpty(media.url);
     if (!url) return null;
-    const file = await gw.fetchMedia(url);
+    const file = await gw.openMedia(url);
     if (!file) return null;
+    const declared = mapper?.message(raw).attachment?.size ?? null;
     return {
-      bytes: file.bytes,
+      body: file.body,
       mimetype: nonEmpty(media.mimetype) ?? file.mimetype,
       filename: nonEmpty(media.filename),
+      length: file.length,
+      size: file.length ?? declared,
     };
   } catch (err) {
     if (err instanceof WahaNotFoundError) return null;
     throw err;
   }
+}
+
+/**
+ * Reads at most `max` bytes. Returns `null` (and cancels the source) as soon as
+ * more arrive, so a lying size can never make us buffer more than `max`.
+ */
+export async function readCapped(
+  body: ReadableStream<Uint8Array>,
+  max: number,
+): Promise<Uint8Array | null> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+}
+
+/** Passes bytes through and errors the stream (cancelling the source) past `max` bytes. */
+export function capStream(max: number): TransformStream<Uint8Array, Uint8Array> {
+  let total = 0;
+  return new TransformStream({
+    transform(chunk, controller) {
+      total += chunk.byteLength;
+      if (total > max) controller.error(new Error("Media stream exceeded its size limit."));
+      else controller.enqueue(chunk);
+    },
+  });
 }
 
 const INLINE_SAFE = /^(image\/(jpeg|png|gif|webp)|audio\/[\w.+-]+|video\/[\w.+-]+)$/;

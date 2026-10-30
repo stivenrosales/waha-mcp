@@ -72,7 +72,7 @@ describe("WahaHttpGateway", () => {
     );
     const gw = make(fn);
     await expect(gw.listGroups()).rejects.toBeInstanceOf(WahaUnavailableError);
-    await expect(gw.fetchMedia("/api/files/a.jpg")).rejects.toBeInstanceOf(WahaUnavailableError);
+    await expect(gw.openMedia("/api/files/a.jpg")).rejects.toBeInstanceOf(WahaUnavailableError);
     expect(calls).toHaveLength(2);
     expect(calls.every((c) => c.redirect === "error")).toBe(true);
   });
@@ -183,30 +183,82 @@ describe("WahaHttpGateway", () => {
     expect(await make(obj.fn).listChats({ limit: 1, offset: 0 })).toEqual([]);
   });
 
-  it("fetchMedia returns null on 404", async () => {
+  it("openMedia returns null on 404 and 410", async () => {
     const { fn } = fakeFetch(() => new Response("gone", { status: 404 }));
-    expect(await make(fn).fetchMedia(`${BASE}/api/files/a.jpg`)).toBeNull();
+    expect(await make(fn).openMedia(`${BASE}/api/files/a.jpg`)).toBeNull();
     const f410 = fakeFetch(() => new Response("gone", { status: 410 }));
-    expect(await make(f410.fn).fetchMedia("/api/files/a.jpg")).toBeNull();
+    expect(await make(f410.fn).openMedia("/api/files/a.jpg")).toBeNull();
   });
 
-  it("fetchMedia returns bytes and mimetype with the api key", async () => {
-    const { fn, calls } = fakeFetch(
-      () => new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/jpeg" } }),
+  it("openMedia returns an unread stream, mimetype and declared length, with the api key", async () => {
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(c) {
+          pulls++;
+          c.enqueue(new Uint8Array([1, 2, 3]));
+          c.close();
+        },
+      },
+      { highWaterMark: 0 },
     );
-    const media = await make(fn).fetchMedia(`${BASE}/api/files/a.jpg`);
+    const { fn, calls } = fakeFetch(
+      () =>
+        new Response(body, {
+          headers: { "content-type": "image/jpeg; q=1", "content-length": "3" },
+        }),
+    );
+    const media = await make(fn).openMedia(`${BASE}/api/files/a.jpg`);
     expect(media?.mimetype).toBe("image/jpeg");
-    expect(Array.from(media?.bytes ?? [])).toEqual([1, 2, 3]);
+    expect(media?.length).toBe(3);
+    expect(pulls).toBe(0);
+    expect(Array.from(new Uint8Array(await new Response(media?.body).arrayBuffer()))).toEqual([
+      1, 2, 3,
+    ]);
     expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+    expect(calls[0]?.redirect).toBe("error");
   });
 
-  it("fetchMedia fetches baseUrl + path even when the URL has another host", async () => {
+  it("openMedia reports length null when Content-Length is missing or invalid", async () => {
+    const stream = () =>
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array([9]));
+          c.close();
+        },
+      });
+    for (const headers of [{}, { "content-length": "abc" }, { "content-length": "-1" }]) {
+      const { fn } = fakeFetch(() => {
+        const res = new Response(stream());
+        for (const [k, v] of Object.entries(headers)) res.headers.set(k, v as string);
+        return res;
+      });
+      expect((await make(fn).openMedia("/api/files/a.bin"))?.length).toBeNull();
+    }
+  });
+
+  it("openMedia's timeout covers the headers, not the streamed body", async () => {
+    let signal: AbortSignal | undefined;
+    const slowBody = (async (_input: string | URL | Request, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return new Response(new Uint8Array([1]));
+    }) as typeof fetch;
+    await make(slowBody, { timeoutMs: 10 }).openMedia("/api/files/a.bin");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(signal?.aborted).toBe(false);
+    const never = (() => new Promise(() => {})) as unknown as typeof fetch;
+    await expect(
+      make(never, { timeoutMs: 10 }).openMedia("/api/files/a.bin"),
+    ).rejects.toBeInstanceOf(WahaUnavailableError);
+  });
+
+  it("openMedia fetches baseUrl + path even when the URL has another host", async () => {
     const { fn, calls } = fakeFetch(() => new Response(new Uint8Array([9])));
-    await make(fn).fetchMedia("http://localhost:3000/api/files/default/a.jpg?x=1");
+    await make(fn).openMedia("http://localhost:3000/api/files/default/a.jpg?x=1");
     expect(calls[0]?.url).toBe(`${BASE}/api/files/default/a.jpg?x=1`);
   });
 
-  it("fetchMedia refuses paths outside /api/files/", async () => {
+  it("openMedia refuses paths outside /api/files/", async () => {
     const { fn, calls } = fakeFetch(() => new Response("x"));
     const gw = make(fn);
     for (const u of [
@@ -215,7 +267,7 @@ describe("WahaHttpGateway", () => {
       "/api/files/../sessions",
       "not a url at all \u0000",
     ]) {
-      await expect(gw.fetchMedia(u)).rejects.toBeInstanceOf(WahaNotFoundError);
+      await expect(gw.openMedia(u)).rejects.toBeInstanceOf(WahaNotFoundError);
     }
     expect(calls).toHaveLength(0);
   });

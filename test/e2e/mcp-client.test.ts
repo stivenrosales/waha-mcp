@@ -26,6 +26,7 @@ const BASE = "http://localhost:3000";
 const WAHA_URL = "http://waha-internal:3000";
 const KEY = "k-very-secret-waha-key";
 const INLINE_MAX = 1000;
+const MAX_BYTES = 5000;
 
 type Raw = Record<string, unknown>;
 const fixture = (path: string): Raw[] =>
@@ -42,7 +43,18 @@ function withFileUrls(raws: Raw[], prefix: string): Raw[] {
   });
 }
 
-const groupMedia = withFileUrls(fixture("gows/messages-media-download.json"), "g");
+/** Removes `fileLength` so the message itself does not declare a size. */
+function withoutFileLength(raw: Raw): Raw {
+  const copy = structuredClone(raw) as {
+    _data: { Message: Record<string, Record<string, unknown>> };
+  };
+  for (const content of Object.values(copy._data.Message)) delete content.fileLength;
+  return copy as unknown as Raw;
+}
+
+const groupMedia = withFileUrls(fixture("gows/messages-media-download.json"), "g").map((r, i) =>
+  i === 3 ? withoutFileLength(r) : r,
+);
 const directMedia = withFileUrls(fixture("gows-direct/messages-media-download.json"), "d");
 const groupText = fixture("gows/messages-text-download.json");
 
@@ -71,8 +83,20 @@ function baseData(): InMemoryData {
       // group: 0 sticker (small), 1 sticker (gone), 2 image (large), 3 image (small)
       [`${WAHA_URL}/api/files/g-0`]: { bytes: bytes(100), mimetype: "image/webp" },
       [`${WAHA_URL}/api/files/g-2`]: { bytes: bytes(INLINE_MAX + 1), mimetype: "image/jpeg" },
+      // 3: small image whose size nobody declares (no Content-Length, no fileLength)
+      [`${WAHA_URL}/api/files/g-3`]: { bytes: bytes(10), mimetype: "image/jpeg", length: null },
+      // direct: 0 sticker declaring 10 bytes but sending 3000 (lying Content-Length)
+      [`${WAHA_URL}/api/files/d-0`]: { bytes: bytes(3000), mimetype: "image/webp", length: 10 },
       // direct: 2 is a PDF document
       [`${WAHA_URL}/api/files/d-2`]: { bytes: bytes(50, 37), mimetype: "application/pdf" },
+      // direct: 4 is a PDF declared above MEDIA_MAX_BYTES
+      [`${WAHA_URL}/api/files/d-4`]: { bytes: bytes(MAX_BYTES + 1), mimetype: "application/pdf" },
+      // direct: 7 is audio with no declared length that turns out to exceed MEDIA_MAX_BYTES
+      [`${WAHA_URL}/api/files/d-7`]: {
+        bytes: bytes(MAX_BYTES + 2000),
+        mimetype: "audio/ogg; codecs=opus",
+        length: null,
+      },
     },
   };
 }
@@ -90,6 +114,7 @@ function setup(data: InMemoryData = baseData(), gateway = new InMemoryWahaGatewa
     PUBLIC_BASE_URL: BASE,
     TIMEZONE: "America/Lima",
     MEDIA_INLINE_MAX_BYTES: String(INLINE_MAX),
+    MEDIA_MAX_BYTES: String(MAX_BYTES),
   });
   const store = createAuthStore(":memory:");
   const links = createSignedLinks({
@@ -112,7 +137,7 @@ function setup(data: InMemoryData = baseData(), gateway = new InMemoryWahaGatewa
     }),
     guard: bearerGuard({ store, publicBaseUrl: BASE }),
     mcpHandler: mcp.handler,
-    media: createMediaHandler({ gateway, links }),
+    media: createMediaHandler({ gateway, links, maxBytes: config.mediaMaxBytes }),
   });
   const { clientId } = store.registerClient({ redirectUris: ["https://claude.ai/cb"] });
   const { accessToken } = store.issueTokens(clientId, "mcp");
@@ -141,6 +166,9 @@ async function call(client: Client, name: string, args: Record<string, unknown> 
 
 const sc = (r: ToolResult): Record<string, unknown> => r.structuredContent ?? {};
 const textOf = (r: ToolResult) => r.content.map((c) => c.text ?? "").join("\n");
+const linkOf = (r: ToolResult) =>
+  /(http:\/\/localhost:3000\/media\/[A-Za-z0-9_.-]+)/.exec(textOf(r))?.[1] as string;
+const fileUrl = (name: string) => `${WAHA_URL}/api/files/${name}`;
 
 async function mediaIds(client: Client, chatId: string): Promise<(string | null)[]> {
   const r = await call(client, "get_messages", { chat_id: chatId, limit: 200 });
@@ -290,13 +318,15 @@ describe("e2e: MCP client against createApp", () => {
     const client = await connect(s);
     const image = (await mediaIds(client, GROUP))[2];
     const pdf = (await mediaIds(client, DIRECT))[2];
-    for (const [id, mimetype, size] of [
-      [image, "image/jpeg", INLINE_MAX + 1],
-      [pdf, "application/pdf", 50],
+    for (const [id, file, mimetype, size] of [
+      [image, "g-2", "image/jpeg", INLINE_MAX + 1],
+      [pdf, "d-2", "application/pdf", 50],
     ] as const) {
       const r = await call(client, "get_media", { media_id: id });
       expect(r.isError).toBeFalsy();
       expect(r.content.every((c) => c.type === "text")).toBe(true);
+      // Inline vs link is decided from the declared size: the body was never read.
+      expect(s.gateway.bodyReads.get(fileUrl(file)) ?? 0).toBe(0);
       const text = textOf(r);
       const link = /(http:\/\/localhost:3000\/media\/[A-Za-z0-9_.-]+)/.exec(text)?.[1];
       expect(link).toBeDefined();
@@ -309,6 +339,58 @@ describe("e2e: MCP client against createApp", () => {
       expect(res.headers.get("content-disposition")).toBeTruthy();
       expect((await res.arrayBuffer()).byteLength).toBe(size);
     }
+  });
+
+  it("get_media links media of unknown size without reading its body", async () => {
+    const s = setup();
+    const client = await connect(s);
+    const unknown = (await mediaIds(client, GROUP))[3];
+    const r = await call(client, "get_media", { media_id: unknown });
+    expect(r.isError).toBeFalsy();
+    expect(r.content[0]?.type).toBe("text");
+    expect(linkOf(r)).toBeDefined();
+    expect(textOf(r)).toContain("unknown size");
+    expect(s.gateway.bodyReads.get(fileUrl("g-3")) ?? 0).toBe(0);
+  });
+
+  it("refuses with 413 a file declared above MEDIA_MAX_BYTES without reading it", async () => {
+    const s = setup();
+    const client = await connect(s);
+    const big = (await mediaIds(client, DIRECT))[4];
+    const res = await s.app.fetch(
+      new Request(linkOf(await call(client, "get_media", { media_id: big }))),
+    );
+    expect(res.status).toBe(413);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(await res.text()).toMatch(/too large/i);
+    expect(s.gateway.bodyReads.get(fileUrl("d-4")) ?? 0).toBe(0);
+  });
+
+  it("aborts the stream when WAHA sends more than its Content-Length declared", async () => {
+    const s = setup();
+    const client = await connect(s);
+    const liar = (await mediaIds(client, DIRECT))[0];
+    // Declared 10 bytes (would inline), but more arrive: never inlined, served as a link.
+    const r = await call(client, "get_media", { media_id: liar });
+    expect(r.content[0]?.type).toBe("text");
+    const res = await s.app.fetch(new Request(linkOf(r)));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBe("10");
+    await expect(res.arrayBuffer()).rejects.toThrow();
+  });
+
+  it("aborts a stream of unknown length once it exceeds MEDIA_MAX_BYTES", async () => {
+    const s = setup();
+    const client = await connect(s);
+    const audio = (await mediaIds(client, DIRECT))[7];
+    const res = await s.app.fetch(
+      new Request(linkOf(await call(client, "get_media", { media_id: audio }))),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-length")).toBeNull();
+    await expect(res.arrayBuffer()).rejects.toThrow();
+    // 7000 bytes in 1 KiB chunks: draining it takes 8 pulls; the cap stops earlier.
+    expect(s.gateway.bodyReads.get(fileUrl("d-7"))).toBeLessThan(8);
   });
 
   it("media links answer 404 for tampered tokens and for files gone from WAHA", async () => {
@@ -352,6 +434,8 @@ describe("e2e: MCP client against createApp", () => {
       expect(r.isError).toBe(true);
       expect(textOf(r)).toBe('Unsupported WAHA engine "WEBJS". Only GOWS is supported.');
     }
+    // A permanent engine mismatch is cached too.
+    expect(s.gateway.count("getSession")).toBe(1);
     const ok = setup();
     const okClient = await connect(ok);
     await call(okClient, "list_groups");

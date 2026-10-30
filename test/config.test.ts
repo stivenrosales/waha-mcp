@@ -17,6 +17,13 @@ describe("loadConfig", () => {
     expect(c.statsMaxMessages).toBe(5000);
     expect(c.mediaLinkTtlSeconds).toBe(600);
     expect(c.mediaInlineMaxBytes).toBe(5242880);
+    expect(c.mediaMaxBytes).toBe(104857600);
+  });
+
+  it("reads MEDIA_MAX_BYTES and rejects non-positive values", () => {
+    expect(loadConfig({ ...minimal, MEDIA_MAX_BYTES: "2048" }).mediaMaxBytes).toBe(2048);
+    expect(() => loadConfig({ ...minimal, MEDIA_MAX_BYTES: "0" })).toThrow(/MEDIA_MAX_BYTES/);
+    expect(() => loadConfig({ ...minimal, MEDIA_MAX_BYTES: "lots" })).toThrow(/MEDIA_MAX_BYTES/);
   });
 
   it("strips trailing slash from URLs", () => {

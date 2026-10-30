@@ -16,6 +16,8 @@ export interface Config {
   statsMaxMessages: number;
   mediaLinkTtlSeconds: number;
   mediaInlineMaxBytes: number;
+  /** Largest file `/media/:token` will stream; bigger files get a 413. */
+  mediaMaxBytes: number;
 }
 
 const stripTrailingSlashes = (value: string): string => value.replace(/\/+$/, "");
@@ -72,6 +74,7 @@ const envSchema = z.object({
   STATS_MAX_MESSAGES: positiveInt("STATS_MAX_MESSAGES", 5000),
   MEDIA_LINK_TTL_SECONDS: positiveInt("MEDIA_LINK_TTL_SECONDS", 600),
   MEDIA_INLINE_MAX_BYTES: positiveInt("MEDIA_INLINE_MAX_BYTES", 5242880),
+  MEDIA_MAX_BYTES: positiveInt("MEDIA_MAX_BYTES", 104857600),
 });
 
 /**
@@ -97,5 +100,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     statsMaxMessages: v.STATS_MAX_MESSAGES,
     mediaLinkTtlSeconds: v.MEDIA_LINK_TTL_SECONDS,
     mediaInlineMaxBytes: v.MEDIA_INLINE_MAX_BYTES,
+    mediaMaxBytes: v.MEDIA_MAX_BYTES,
   };
 }

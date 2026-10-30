@@ -23,8 +23,15 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const session = encodeURIComponent(opts.session);
 
-  async function get(pathAndQuery: string): Promise<Response> {
-    const signal = AbortSignal.timeout(timeoutMs);
+  /**
+   * `headersOnly`: the timeout stops once the headers arrive, so a large body can
+   * stream for longer (used for media). Otherwise it also covers reading the body.
+   */
+  async function get(pathAndQuery: string, o: { headersOnly?: boolean } = {}): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    timer.unref?.();
+    const signal = controller.signal;
     const aborted = new Promise<never>((_, reject) => {
       signal.addEventListener(
         "abort",
@@ -34,6 +41,7 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
         },
       );
     });
+    aborted.catch(() => {});
     let res: Response;
     try {
       res = await Promise.race([
@@ -47,9 +55,11 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
         aborted,
       ]);
     } catch (err) {
+      clearTimeout(timer);
       if (err instanceof WahaUnavailableError) throw err;
       throw new WahaUnavailableError("Could not reach WAHA.");
     }
+    if (o.headersOnly) clearTimeout(timer);
     return res;
   }
 
@@ -124,7 +134,7 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
       return getJson(path, "message");
     },
 
-    async fetchMedia(url) {
+    async openMedia(url) {
       let parsed: URL;
       try {
         parsed = new URL(url, baseUrl);
@@ -134,17 +144,21 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
       // Only the path matters: WAHA may advertise its own (internal) host, and
       // always fetching from baseUrl also rules out SSRF through foreign hosts.
       if (!parsed.pathname.startsWith(MEDIA_PATH_PREFIX)) throw new WahaNotFoundError("media");
-      const res = await get(`${parsed.pathname}${parsed.search}`);
-      if (res.status === 404 || res.status === 410) return null;
-      assertOk(res, "media");
-      try {
-        const bytes = new Uint8Array(await res.arrayBuffer());
-        const mimetype =
-          res.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
-        return { bytes, mimetype };
-      } catch {
-        throw new WahaUnavailableError("WAHA returned an invalid response body.");
+      const res = await get(`${parsed.pathname}${parsed.search}`, { headersOnly: true });
+      if (res.status === 404 || res.status === 410) {
+        await res.body?.cancel().catch(() => {});
+        return null;
       }
+      if (!res.ok) await res.body?.cancel().catch(() => {});
+      assertOk(res, "media");
+      const declared = res.headers.get("content-length");
+      const length = declared !== null && /^\d+$/.test(declared) ? Number(declared) : null;
+      return {
+        body: res.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() }),
+        mimetype:
+          res.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream",
+        length: length !== null && Number.isSafeInteger(length) ? length : null,
+      };
     },
   };
 }

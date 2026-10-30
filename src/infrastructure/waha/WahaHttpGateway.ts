@@ -39,6 +39,8 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
       res = await Promise.race([
         doFetch(`${baseUrl}${pathAndQuery}`, {
           method: "GET",
+          // Never follow redirects: they could resend X-Api-Key to another origin.
+          redirect: "error",
           headers: { "X-Api-Key": opts.apiKey },
           signal,
         }),

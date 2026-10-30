@@ -13,6 +13,7 @@ interface Recorded {
   url: string;
   method: string;
   headers: Record<string, string>;
+  redirect?: RequestInit["redirect"];
 }
 
 function fakeFetch(respond: (url: string) => Response | Promise<Response>) {
@@ -22,6 +23,7 @@ function fakeFetch(respond: (url: string) => Response | Promise<Response>) {
     calls.push({
       url,
       method: init?.method ?? "GET",
+      redirect: init?.redirect,
       headers: Object.fromEntries(new Headers(init?.headers).entries()),
     });
     return respond(url);
@@ -61,6 +63,17 @@ describe("WahaHttpGateway", () => {
       expect(c.headers["x-api-key"]).toBe(KEY);
       expect(c.url.startsWith(BASE)).toBe(true);
     }
+  });
+
+  it("never follows redirects and maps a 302 to WahaUnavailableError", async () => {
+    const { fn, calls } = fakeFetch(
+      () => new Response(null, { status: 302, headers: { location: "http://evil.example/x" } }),
+    );
+    const gw = make(fn);
+    await expect(gw.listGroups()).rejects.toBeInstanceOf(WahaUnavailableError);
+    await expect(gw.fetchMedia("/api/files/a.jpg")).rejects.toBeInstanceOf(WahaUnavailableError);
+    expect(calls).toHaveLength(2);
+    expect(calls.every((c) => c.redirect === "error")).toBe(true);
   });
 
   it("maps 401 to WahaAuthError", async () => {

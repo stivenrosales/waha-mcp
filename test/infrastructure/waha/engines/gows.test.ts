@@ -53,6 +53,7 @@ describe("GOWS message mapper - real fixtures", () => {
         phone: raw._data.Info.SenderAlt.replace(/:\d+@.*/, ""),
         name: raw._data.Info.PushName,
       },
+      fromMe: false,
       type: "text",
       text: raw._data.Message.conversation,
       replyToId: null,
@@ -416,5 +417,12 @@ describe("mediaId and engine selection", () => {
   it("getEngineMapper('WEBJS') throws UnsupportedEngineError mentioning WEBJS and GOWS", () => {
     expect(() => getEngineMapper("WEBJS")).toThrow(UnsupportedEngineError);
     expect(() => getEngineMapper("WEBJS")).toThrow(/WEBJS.*GOWS/);
+  });
+
+  it("fromMe is true for the owner's messages and false for the rest", () => {
+    expect(directText.some((r) => r.fromMe === true)).toBe(true);
+    for (const raw of [...directText, ...directMedia, ...groupText])
+      expect(mapper.message(raw).fromMe).toBe(raw.fromMe === true);
+    expect(mapper.message({ _data: { Info: { IsFromMe: true }, Message: {} } }).fromMe).toBe(true);
   });
 });

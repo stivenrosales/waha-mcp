@@ -15,6 +15,7 @@ function msg(
     id,
     timestamp: ts,
     author: { id: author ?? "", phone: null, name: author ? author.toUpperCase() : null },
+    fromMe: false,
     type,
     text: type === "text" ? "x" : null,
     replyToId,

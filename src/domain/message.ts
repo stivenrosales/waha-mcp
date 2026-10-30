@@ -41,6 +41,8 @@ export interface NormalizedMessage {
   /** ISO 8601, UTC. */
   timestamp: string;
   author: Author;
+  /** True when the account owner sent it (from any device). */
+  fromMe: boolean;
   type: MessageType;
   rawType?: string;
   text: string | null;

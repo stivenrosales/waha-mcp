@@ -7,6 +7,8 @@ export interface OpenedFile {
 /** Read-only access to WAHA. Payloads are raw engine data; mapping happens elsewhere. */
 export interface WahaGateway {
   getSession(): Promise<{ engine: string; status: string }>;
+  /** The account owner. `id` is the phone JID (`…@c.us`); `lid` the linked id when WAHA reports one. Cached per process. */
+  getMe(): Promise<{ id: string; lid: string | null }>;
   listGroups(): Promise<unknown[]>;
   getGroup(groupId: string): Promise<unknown>;
   /** All chat types (groups, direct, newsletters...); filtering happens in the use case. */

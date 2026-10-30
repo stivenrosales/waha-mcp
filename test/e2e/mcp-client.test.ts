@@ -68,7 +68,7 @@ function baseData(): InMemoryData {
     groupDetails: { [GROUP]: JSON.parse(readFileSync("test/fixtures/gows/group.json", "utf8")) },
     chats: [
       { id: DIRECT, name: null, conversationTimestamp: 1793317814 },
-      { id: "51999000111@c.us", name: null, conversationTimestamp: 1793000000 },
+      { id: "51999000111@c.us", name: null, conversationTimestamp: 1793286000 },
       { id: GROUP, name: "Group", conversationTimestamp: 1793373071 },
       { id: "123@newsletter", name: "News" },
     ],
@@ -196,24 +196,111 @@ async function mediaIds(client: Client, chatId: string): Promise<(string | null)
 }
 
 describe("e2e: MCP client against createApp", () => {
-  it("lists exactly the six tools, all readOnlyHint true, none named like send/delete/edit", async () => {
+  it("lists exactly the eight tools, all readOnlyHint true, none named like send/delete/edit", async () => {
     const client = await connect(setup());
     expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
+        "get_activity_digest",
         "get_chat_stats",
         "get_group_info",
         "get_media",
         "get_messages",
         "list_chats",
         "list_groups",
+        "list_pending_replies",
       ].sort(),
     );
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint).toBe(true);
       expect(t.name).not.toMatch(/send|delete|edit|update|create|write|post|remove|set/i);
     }
+  });
+
+  it("list_pending_replies returns who waits for the owner, with coverage", async () => {
+    const client = await connect(setup());
+    const r = await call(client, "list_pending_replies", { since: "2026-10-01T00:00:00Z" });
+    expect(r.isError).toBeFalsy();
+    const pending = sc(r).pending as {
+      chatId: string;
+      name: string;
+      reason: string;
+      unansweredCount: number;
+      waitingSince: string;
+      lastMessages: { from: string; text: string | null }[];
+    }[];
+    // DIRECT's newest messages are the owner's (answered); Ana's "hola" is waiting.
+    expect(pending.map((p) => p.chatId)).toEqual(["51999000111@c.us"]);
+    expect(pending[0]).toMatchObject({
+      name: "Ana",
+      reason: "last-message-from-them",
+      unansweredCount: 1,
+      waitingSince: "2026-10-29T15:00:00.000Z",
+    });
+    expect(pending[0]?.lastMessages[0]?.text).toBe("hola");
+    const coverage = sc(r).coverage as {
+      chatsScanned: number;
+      failedChats: string[];
+      notes: string[];
+    };
+    expect(coverage.chatsScanned).toBe(2);
+    expect(coverage.failedChats).toEqual([]);
+    expect(textOf(r)).toContain("Coverage: 2 chats scanned");
+    expect(textOf(r)).toContain("51999000111@c.us");
+    // No group chatter unless asked for.
+    const groups = await call(client, "list_pending_replies", {
+      since: "2026-10-01T00:00:00Z",
+      scope: "groups",
+    });
+    expect(sc(groups).pending).toEqual([]);
+    expect(sc(groups).scope).toBe("groups");
+  });
+
+  it("list_pending_replies maps domain errors", async () => {
+    const client = await connect(setup());
+    const bad = await call(client, "list_pending_replies", { since: "ayer" });
+    expect(bad.isError).toBe(true);
+    expect(textOf(bad)).toContain('"since" must be an ISO 8601 date');
+  });
+
+  it("get_activity_digest buckets a day in the server timezone and reports awaiting replies", async () => {
+    const client = await connect(setup());
+    const r = await call(client, "get_activity_digest", { date: "2026-10-29" });
+    expect(r.isError).toBeFalsy();
+    expect(sc(r)).toMatchObject({
+      from: "2026-10-29T05:00:00.000Z",
+      to: "2026-10-30T04:59:59.000Z",
+      timezone: "America/Lima",
+      scope: "direct",
+    });
+    const chats = sc(r).chats as {
+      chatId: string;
+      messageCount: number;
+      lastFrom: string;
+      awaitingReply: boolean;
+      messages: { type: string }[];
+    }[];
+    const direct = chats.find((c) => c.chatId === DIRECT);
+    // 3 messages on the 29th in Lima; the one of the 28th is out.
+    expect(direct).toMatchObject({ messageCount: 3, lastFrom: "me", awaitingReply: false });
+    expect(direct?.messages.map((m) => m.type)).toEqual(["document", "sticker", "sticker"]);
+    expect(chats.find((c) => c.chatId === "51999000111@c.us")).toMatchObject({
+      messageCount: 1,
+      awaitingReply: true,
+    });
+    expect(chats.some((c) => c.chatId === GROUP)).toBe(false);
+    expect(textOf(r)).toContain("AWAITING YOUR REPLY");
+    expect(textOf(r)).toContain("Coverage:");
+    const all = await call(client, "get_activity_digest", { date: "2026-10-29", scope: "all" });
+    const group = (sc(all).chats as { chatId: string; messageCount: number }[]).find(
+      (c) => c.chatId === GROUP,
+    );
+    expect(group?.messageCount).toBe(1);
+    const utc = await call(client, "get_activity_digest", { date: "2026-10-29", timezone: "UTC" });
+    expect(sc(utc).from).toBe("2026-10-29T00:00:00.000Z");
+    const bad = await call(client, "get_activity_digest", { date: "mañana" });
+    expect(bad.isError).toBe(true);
   });
 
   it("serves /health without auth and rejects /mcp without a token (401)", async () => {

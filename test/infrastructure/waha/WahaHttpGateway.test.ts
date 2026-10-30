@@ -295,4 +295,53 @@ describe("WahaHttpGateway", () => {
     const auth = fakeFetch(() => new Response("no", { status: 401 }));
     await expect(make(auth.fn).getMessage("1@g.us", "x")).rejects.toBeInstanceOf(WahaAuthError);
   });
+
+  describe("getMe", () => {
+    it("GETs /me once, parses id and lid, and caches the answer", async () => {
+      const { fn, calls } = fakeFetch(() =>
+        json({ id: "51999@c.us", lid: "100000000000002@lid", pushName: "x" }),
+      );
+      const gw = make(fn);
+      expect(await gw.getMe()).toEqual({ id: "51999@c.us", lid: "100000000000002@lid" });
+      await gw.getMe();
+      expect(calls).toHaveLength(1);
+      expect(new URL(calls[0]?.url ?? "").pathname).toBe("/api/sessions/my%20session/me");
+      expect(calls[0]?.method).toBe("GET");
+      expect(calls[0]?.redirect).toBe("error");
+      expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+    });
+
+    it("lid is null when WAHA does not report one", async () => {
+      const gw = make(fakeFetch(() => json({ id: "51999@c.us" })).fn);
+      expect(await gw.getMe()).toEqual({ id: "51999@c.us", lid: null });
+    });
+
+    it("falls back to the `me` field of the session when /me is 404", async () => {
+      const { fn, calls } = fakeFetch((url) =>
+        url.endsWith("/me")
+          ? json({}, 404)
+          : json({ status: "WORKING", me: { id: "51888@c.us", lid: "7@lid" } }),
+      );
+      const gw = make(fn);
+      expect(await gw.getMe()).toEqual({ id: "51888@c.us", lid: "7@lid" });
+      expect(calls.map((c) => new URL(c.url).pathname)).toEqual([
+        "/api/sessions/my%20session/me",
+        "/api/sessions/my%20session",
+      ]);
+    });
+
+    it("maps failures to fixed domain errors and does not cache them", async () => {
+      let status = 401;
+      const { fn } = fakeFetch(() => (status === 200 ? json({ id: "1@c.us" }) : json({}, status)));
+      const gw = make(fn);
+      await expect(gw.getMe()).rejects.toBeInstanceOf(WahaAuthError);
+      status = 200;
+      expect(await gw.getMe()).toEqual({ id: "1@c.us", lid: null });
+    });
+
+    it("rejects a body without an id with a fixed message", async () => {
+      const gw = make(fakeFetch(() => json({ pushName: "x" })).fn);
+      await expect(gw.getMe()).rejects.toThrow("WAHA returned an invalid response body.");
+    });
+  });
 });

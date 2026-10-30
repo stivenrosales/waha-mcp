@@ -138,6 +138,7 @@ function unknownMessage(raw: unknown, rawType?: string): NormalizedMessage {
     id: str(r.id) ?? "",
     timestamp: iso(r.timestamp) ?? new Date(0).toISOString(),
     author: authorOf(r),
+    fromMe: r.fromMe === true || obj(obj(r._data).Info).IsFromMe === true,
     type: "unknown",
     ...(rawType ? { rawType } : {}),
     text: null,

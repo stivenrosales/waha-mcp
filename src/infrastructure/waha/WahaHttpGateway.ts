@@ -81,6 +81,20 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
     }
   }
 
+  const asRecord = (v: unknown): Record<string, unknown> =>
+    typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+  const idString = (v: unknown): string | null => {
+    const s = typeof v === "string" ? v : asRecord(v)._serialized;
+    return typeof s === "string" && s !== "" ? s : null;
+  };
+  function parseMe(body: unknown): { id: string; lid: string | null } {
+    const o = asRecord(body);
+    const id = idString(o.id);
+    if (!id) throw new WahaUnavailableError("WAHA returned an invalid response body.");
+    return { id, lid: idString(o.lid) };
+  }
+  let me: { id: string; lid: string | null } | undefined;
+
   const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
   return {
@@ -93,6 +107,21 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
         engine: typeof body?.engine?.engine === "string" ? body.engine.engine : "unknown",
         status: typeof body?.status === "string" ? body.status : "unknown",
       };
+    },
+
+    async getMe() {
+      if (me) return me;
+      let body: unknown;
+      try {
+        body = await getJson(`/api/sessions/${session}/me`, "session");
+      } catch (err) {
+        if (!(err instanceof WahaNotFoundError)) throw err;
+        // Older WAHA builds only expose the owner inside the session object.
+        body = asRecord(await getJson(`/api/sessions/${session}`, "session")).me;
+      }
+      // Only successes are cached: a failed lookup is retried on the next call.
+      me = parseMe(body);
+      return me;
     },
 
     async listGroups() {

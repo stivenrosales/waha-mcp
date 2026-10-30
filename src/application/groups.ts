@@ -132,3 +132,24 @@ export async function listChats(
     : named;
   return { chats: byActivityDesc(filtered), namesResolved };
 }
+
+export type ChatScope = "direct" | "groups" | "all";
+
+/** Chats of the requested scope with names resolved where possible. Order is not guaranteed. */
+export async function listChatsByScope(
+  gw: WahaGateway,
+  m: EngineMapper,
+  scope: ChatScope,
+): Promise<{ chats: ChatSummary[]; namesResolved: boolean }> {
+  const direct =
+    scope === "groups"
+      ? { chats: [] as ChatSummary[], namesResolved: true }
+      : await listChats(gw, m, {});
+  const groups =
+    scope === "direct"
+      ? []
+      : (await fetchAllChats(gw))
+          .map((raw) => m.chatSummary(raw))
+          .filter((c) => c.id.endsWith("@g.us"));
+  return { chats: [...direct.chats, ...groups], namesResolved: direct.namesResolved };
+}

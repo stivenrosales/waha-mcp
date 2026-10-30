@@ -1,0 +1,1332 @@
+[
+  {
+    "id": "true_10000000000001@lid_3AA5497D440D5C27343D",
+    "timestamp": 1793317814,
+    "from": "10000000000001@lid",
+    "fromMe": true,
+    "source": "app",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "mimetype": "image/webp"
+    },
+    "ack": 3,
+    "location": null,
+    "vCards": null,
+    "ackName": "READ",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "100000000000002@lid",
+        "IsFromMe": true,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-3>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "3AA5497D440D5C27343D",
+        "ServerID": 0,
+        "Type": "media",
+        "PushName": "<redacted-5>",
+        "Timestamp": "<redacted-27>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "sticker",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": {
+          "DestinationJID": "<redacted-8>",
+          "Phash": "<redacted-4>"
+        }
+      },
+      "Message": {
+        "stickerMessage": {
+          "Audio": null,
+          "URL": "<url>",
+          "fileSHA256": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "mediaKey": "<base64>",
+          "mimetype": "image/webp",
+          "directPath": "<url>",
+          "fileLength": 28644,
+          "mediaKeyTimestamp": 1793216300,
+          "isAnimated": false,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            },
+            "experienceIDs": [
+              13005
+            ]
+          },
+          "stickerSentTS": 1793317813395,
+          "isAvatar": false,
+          "isAiSticker": false,
+          "isLottie": false,
+          "accessibilityLabel": "<redacted-4>",
+          "premium": 0,
+          "emojis": "<redacted-4>",
+          "url": "<url>"
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1793205770,
+            "recipientKeyHash": "<redacted-10>",
+            "recipientTimestamp": 1793274496
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": null,
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "deviceSentMessage": {
+          "destinationJID": "<redacted-8>",
+          "message": {
+            "stickerMessage": {
+              "Audio": null,
+              "URL": "<url>",
+              "fileSHA256": "<base64>",
+              "fileEncSHA256": "<base64>",
+              "mediaKey": "<base64>",
+              "mimetype": "image/webp",
+              "directPath": "<url>",
+              "fileLength": 28644,
+              "mediaKeyTimestamp": 1793216300,
+              "isAnimated": false,
+              "contextInfo": {
+                "disappearingMode": {
+                  "initiator": 0
+                },
+                "experienceIDs": [
+                  13005
+                ]
+              },
+              "stickerSentTS": 1793317813395,
+              "isAvatar": false,
+              "isAiSticker": false,
+              "isLottie": false,
+              "accessibilityLabel": "<redacted-4>",
+              "premium": 0,
+              "emojis": "<redacted-4>"
+            },
+            "messageContextInfo": {
+              "deviceListMetadata": {
+                "senderKeyHash": "<redacted-9>",
+                "senderTimestamp": 1793205770,
+                "recipientKeyHash": "<redacted-10>",
+                "recipientTimestamp": 1793274496
+              },
+              "deviceListMetadataVersion": 2,
+              "messageSecret": "<base64>"
+            }
+          }
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1793205770,
+            "recipientKeyHash": "<redacted-10>",
+            "recipientTimestamp": 1793274496
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 4
+    }
+  },
+  {
+    "id": "true_10000000000001@lid_3A3E1462C1000000005F",
+    "timestamp": 1793295707,
+    "from": "10000000000001@lid",
+    "fromMe": true,
+    "source": "app",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "mimetype": "image/webp"
+    },
+    "ack": 3,
+    "location": null,
+    "vCards": null,
+    "ackName": "READ",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "100000000000002@lid",
+        "IsFromMe": true,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-3>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "3A3E1462C1000000005F",
+        "ServerID": 0,
+        "Type": "media",
+        "PushName": "<redacted-5>",
+        "Timestamp": "<redacted-28>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "sticker",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": {
+          "DestinationJID": "<redacted-8>",
+          "Phash": "<redacted-4>"
+        }
+      },
+      "Message": {
+        "stickerMessage": {
+          "Audio": null,
+          "URL": "<url>",
+          "fileSHA256": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "mediaKey": "<base64>",
+          "mimetype": "image/webp",
+          "directPath": "<url>",
+          "fileLength": 28644,
+          "mediaKeyTimestamp": 1793216300,
+          "isAnimated": false,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            },
+            "experienceIDs": [
+              13005
+            ]
+          },
+          "stickerSentTS": 1793295706176,
+          "isAvatar": false,
+          "isAiSticker": false,
+          "isLottie": false,
+          "accessibilityLabel": "<redacted-4>",
+          "premium": 0,
+          "emojis": "<redacted-4>",
+          "url": "<url>"
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1793205770,
+            "recipientKeyHash": "<redacted-10>",
+            "recipientTimestamp": 1793274496
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": null,
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "deviceSentMessage": {
+          "destinationJID": "<redacted-8>",
+          "message": {
+            "stickerMessage": {
+              "Audio": null,
+              "URL": "<url>",
+              "fileSHA256": "<base64>",
+              "fileEncSHA256": "<base64>",
+              "mediaKey": "<base64>",
+              "mimetype": "image/webp",
+              "directPath": "<url>",
+              "fileLength": 28644,
+              "mediaKeyTimestamp": 1793216300,
+              "isAnimated": false,
+              "contextInfo": {
+                "disappearingMode": {
+                  "initiator": 0
+                },
+                "experienceIDs": [
+                  13005
+                ]
+              },
+              "stickerSentTS": 1793295706176,
+              "isAvatar": false,
+              "isAiSticker": false,
+              "isLottie": false,
+              "accessibilityLabel": "<redacted-4>",
+              "premium": 0,
+              "emojis": "<redacted-4>"
+            },
+            "messageContextInfo": {
+              "deviceListMetadata": {
+                "senderKeyHash": "<redacted-9>",
+                "senderTimestamp": 1793205770,
+                "recipientKeyHash": "<redacted-10>",
+                "recipientTimestamp": 1793274496
+              },
+              "deviceListMetadataVersion": 2,
+              "messageSecret": "<base64>"
+            }
+          }
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1793205770,
+            "recipientKeyHash": "<redacted-10>",
+            "recipientTimestamp": 1793274496
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 4
+    }
+  },
+  {
+    "id": "true_10000000000001@lid_3B184941E2CFE31D395A",
+    "timestamp": 1793290876,
+    "from": "10000000000001@lid",
+    "fromMe": true,
+    "source": "app",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "filename": "<redacted-29>",
+      "mimetype": "application/pdf"
+    },
+    "ack": 3,
+    "location": null,
+    "vCards": null,
+    "ackName": "READ",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "100000000000002:70@lid",
+        "IsFromMe": true,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-3>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "3B184941E2CFE31D395A",
+        "ServerID": 0,
+        "Type": "media",
+        "PushName": "<redacted-5>",
+        "Timestamp": "<redacted-30>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "document",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": {
+          "DestinationJID": "<redacted-8>",
+          "Phash": "<redacted-4>"
+        }
+      },
+      "Message": {
+        "documentMessage": {
+          "URL": "<url>",
+          "mimetype": "application/pdf",
+          "title": "<redacted-31>",
+          "fileSHA256": "<base64>",
+          "fileLength": 201374,
+          "pageCount": 5,
+          "mediaKey": "<base64>",
+          "fileName": "<redacted-29>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1793290875,
+          "contactVcard": false,
+          "JPEGThumbnail": "<base64>",
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            }
+          }
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1792941893,
+            "recipientKeyHash": "<redacted-10>",
+            "recipientTimestamp": 1793226264
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": null,
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "deviceSentMessage": {
+          "destinationJID": "<redacted-8>",
+          "message": {
+            "documentMessage": {
+              "URL": "<url>",
+              "mimetype": "application/pdf",
+              "title": "<redacted-31>",
+              "fileSHA256": "<base64>",
+              "fileLength": 201374,
+              "pageCount": 5,
+              "mediaKey": "<base64>",
+              "fileName": "<redacted-29>",
+              "fileEncSHA256": "<base64>",
+              "directPath": "<url>",
+              "mediaKeyTimestamp": 1793290875,
+              "contactVcard": false,
+              "JPEGThumbnail": "<base64>",
+              "contextInfo": {
+                "disappearingMode": {
+                  "initiator": 0
+                }
+              }
+            },
+            "messageContextInfo": {
+              "deviceListMetadata": {
+                "senderKeyHash": "<redacted-9>",
+                "senderTimestamp": 1792941893,
+                "recipientKeyHash": "<redacted-10>",
+                "recipientTimestamp": 1793226264
+              },
+              "deviceListMetadataVersion": 2,
+              "messageSecret": "<base64>"
+            }
+          }
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1792941893,
+            "recipientKeyHash": "<redacted-10>",
+            "recipientTimestamp": 1793226264
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 4
+    }
+  },
+  {
+    "id": "false_10000000000001@lid_AC37EED81B091366E15282C0D68AB074",
+    "timestamp": 1793226032,
+    "from": "10000000000001@lid",
+    "fromMe": false,
+    "source": "app",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "mimetype": "audio/ogg; codecs=opus"
+    },
+    "ack": 4,
+    "location": null,
+    "vCards": null,
+    "ackName": "PLAYED",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "10000000000001@lid",
+        "IsFromMe": false,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-4>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "AC37EED81B091366E15282C0D68AB074",
+        "ServerID": 0,
+        "Type": "media",
+        "PushName": "<redacted-12>",
+        "Timestamp": "<redacted-32>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "ptt",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": null
+      },
+      "Message": {
+        "audioMessage": {
+          "URL": "<url>",
+          "mimetype": "audio/ogg; codecs=opus",
+          "fileSHA256": "<base64>",
+          "fileLength": 7233,
+          "seconds": 3,
+          "PTT": true,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1793226030,
+          "contextInfo": {
+            "mediaDomainInfo": {
+              "mediaKeyDomain": 1,
+              "e2EeMediaKey": "<base64>"
+            }
+          },
+          "waveform": "<base64>"
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderTimestamp": 1792780710,
+            "recipientKeyHash": "<redacted-9>",
+            "recipientTimestamp": 1793205770
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": null,
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "audioMessage": {
+          "URL": "<url>",
+          "mimetype": "audio/ogg; codecs=opus",
+          "fileSHA256": "<base64>",
+          "fileLength": 7233,
+          "seconds": 3,
+          "PTT": true,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1793226030,
+          "contextInfo": {
+            "mediaDomainInfo": {
+              "mediaKeyDomain": 1,
+              "e2EeMediaKey": "<base64>"
+            }
+          },
+          "waveform": "<base64>"
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderTimestamp": 1792780710,
+            "recipientKeyHash": "<redacted-9>",
+            "recipientTimestamp": 1793205770
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 5
+    }
+  },
+  {
+    "id": "true_10000000000001@lid_3B65314E64A3BCD01C44",
+    "timestamp": 1793156252,
+    "from": "10000000000001@lid",
+    "fromMe": true,
+    "source": "app",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "filename": "<redacted-33>",
+      "mimetype": "application/pdf"
+    },
+    "ack": 3,
+    "location": null,
+    "vCards": null,
+    "ackName": "READ",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "100000000000002:70@lid",
+        "IsFromMe": true,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-3>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "3B65314E64A3BCD01C44",
+        "ServerID": 0,
+        "Type": "media",
+        "PushName": "<redacted-5>",
+        "Timestamp": "<redacted-34>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "document",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": {
+          "DestinationJID": "<redacted-8>",
+          "Phash": "<redacted-4>"
+        }
+      },
+      "Message": {
+        "documentMessage": {
+          "URL": "<url>",
+          "mimetype": "application/pdf",
+          "title": "<redacted-35>",
+          "fileSHA256": "<base64>",
+          "fileLength": 498119,
+          "pageCount": 2,
+          "mediaKey": "<base64>",
+          "fileName": "<redacted-33>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1793156251,
+          "contactVcard": false,
+          "JPEGThumbnail": "<base64>",
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            }
+          }
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1792941893,
+            "recipientKeyHash": "<redacted-36>",
+            "recipientTimestamp": 1792780710
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": null,
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "deviceSentMessage": {
+          "destinationJID": "<redacted-8>",
+          "message": {
+            "documentMessage": {
+              "URL": "<url>",
+              "mimetype": "application/pdf",
+              "title": "<redacted-35>",
+              "fileSHA256": "<base64>",
+              "fileLength": 498119,
+              "pageCount": 2,
+              "mediaKey": "<base64>",
+              "fileName": "<redacted-33>",
+              "fileEncSHA256": "<base64>",
+              "directPath": "<url>",
+              "mediaKeyTimestamp": 1793156251,
+              "contactVcard": false,
+              "JPEGThumbnail": "<base64>",
+              "contextInfo": {
+                "disappearingMode": {
+                  "initiator": 0
+                }
+              }
+            },
+            "messageContextInfo": {
+              "deviceListMetadata": {
+                "senderKeyHash": "<redacted-9>",
+                "senderTimestamp": 1792941893,
+                "recipientKeyHash": "<redacted-36>",
+                "recipientTimestamp": 1792780710
+              },
+              "deviceListMetadataVersion": 2,
+              "messageSecret": "<base64>"
+            }
+          }
+        },
+        "messageContextInfo": {
+          "deviceListMetadata": {
+            "senderKeyHash": "<redacted-9>",
+            "senderTimestamp": 1792941893,
+            "recipientKeyHash": "<redacted-36>",
+            "recipientTimestamp": 1792780710
+          },
+          "deviceListMetadataVersion": 2,
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 4
+    }
+  },
+  {
+    "id": "true_10000000000001@lid_3AE3371D45E76B7C18D0",
+    "timestamp": 1792751551,
+    "from": "10000000000001@lid",
+    "fromMe": true,
+    "source": "app",
+    "body": "<redacted-37>",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "mimetype": "image/jpeg"
+    },
+    "ack": 3,
+    "location": null,
+    "vCards": null,
+    "ackName": "READ",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "100000000000002@lid",
+        "IsFromMe": true,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-4>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "3AE3371D45E76B7C18D0",
+        "ServerID": 0,
+        "Type": "",
+        "PushName": "<redacted-4>",
+        "Timestamp": "<redacted-38>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": null
+      },
+      "Message": {
+        "imageMessage": {
+          "URL": "<url>",
+          "mimetype": "image/jpeg",
+          "caption": "<redacted-37>",
+          "fileSHA256": "<base64>",
+          "fileLength": 71249,
+          "height": 1280,
+          "width": 590,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1792751551,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            },
+            "statusSourceType": 0
+          },
+          "firstScanSidecar": "<redacted-39>",
+          "firstScanLength": 5912,
+          "scansSidecar": "<base64>",
+          "scanLengths": [
+            5912,
+            35105,
+            15200,
+            15030
+          ],
+          "midQualityFileSHA256": "<base64>",
+          "imageSourceType": 0
+        },
+        "messageContextInfo": {
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": {
+        "key": {
+          "remoteJID": "10000000000001@lid",
+          "fromMe": true,
+          "ID": "3AE3371D45E76B7C18D0"
+        },
+        "message": {
+          "imageMessage": {
+            "URL": "<url>",
+            "mimetype": "image/jpeg",
+            "caption": "<redacted-37>",
+            "fileSHA256": "<base64>",
+            "fileLength": 71249,
+            "height": 1280,
+            "width": 590,
+            "mediaKey": "<base64>",
+            "fileEncSHA256": "<base64>",
+            "directPath": "<url>",
+            "mediaKeyTimestamp": 1792751551,
+            "contextInfo": {
+              "disappearingMode": {
+                "initiator": 0
+              },
+              "statusSourceType": 0
+            },
+            "firstScanSidecar": "<redacted-39>",
+            "firstScanLength": 5912,
+            "scansSidecar": "<base64>",
+            "scanLengths": [
+              5912,
+              35105,
+              15200,
+              15030
+            ],
+            "midQualityFileSHA256": "<base64>",
+            "imageSourceType": 0
+          },
+          "messageContextInfo": {
+            "messageSecret": "<base64>"
+          }
+        },
+        "messageTimestamp": 1792751551,
+        "status": 4,
+        "messageC2STimestamp": 1792751551,
+        "userReceipt": [
+          {
+            "userJID": "<redacted-40>",
+            "receiptTimestamp": 1792754905,
+            "readTimestamp": 0,
+            "playedTimestamp": 0,
+            "deliveredDeviceJID": [
+              "<redacted-41>"
+            ]
+          },
+          {
+            "userJID": "<redacted-8>",
+            "receiptTimestamp": 1792751552,
+            "readTimestamp": 1792754515,
+            "playedTimestamp": 0,
+            "deliveredDeviceJID": [
+              "<redacted-42>"
+            ]
+          }
+        ],
+        "messageSecret": "<base64>",
+        "originalSelfAuthorUserJIDString": "<redacted-40>",
+        "interactiveMessageAdditionalMetadata": {
+          "isGalaxyFlowCompleted": false
+        }
+      },
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "imageMessage": {
+          "URL": "<url>",
+          "mimetype": "image/jpeg",
+          "caption": "<redacted-37>",
+          "fileSHA256": "<base64>",
+          "fileLength": 71249,
+          "height": 1280,
+          "width": 590,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1792751551,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            },
+            "statusSourceType": 0
+          },
+          "firstScanSidecar": "<redacted-39>",
+          "firstScanLength": 5912,
+          "scansSidecar": "<base64>",
+          "scanLengths": [
+            5912,
+            35105,
+            15200,
+            15030
+          ],
+          "midQualityFileSHA256": "<base64>",
+          "imageSourceType": 0
+        },
+        "messageContextInfo": {
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 4
+    }
+  },
+  {
+    "id": "false_10000000000001@lid_AC92A10000006CB633BBEF32A033A78A",
+    "timestamp": 1792748583,
+    "from": "10000000000001@lid",
+    "fromMe": false,
+    "source": "app",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "mimetype": "image/jpeg"
+    },
+    "ack": null,
+    "location": null,
+    "vCards": null,
+    "ackName": "UNKNOWN",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "10000000000001@lid",
+        "IsFromMe": false,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-4>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "AC92A10000006CB633BBEF32A033A78A",
+        "ServerID": 0,
+        "Type": "",
+        "PushName": "<redacted-4>",
+        "Timestamp": "<redacted-43>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": null
+      },
+      "Message": {
+        "imageMessage": {
+          "URL": "<url>",
+          "mimetype": "image/jpeg",
+          "fileSHA256": "<base64>",
+          "fileLength": 53464,
+          "height": 1386,
+          "width": 640,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1792748582,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            },
+            "pairedMediaType": 0
+          },
+          "scansSidecar": "<base64>",
+          "scanLengths": [
+            5091,
+            27427,
+            9965,
+            10981
+          ],
+          "midQualityFileSHA256": "<base64>",
+          "imageSourceType": 0
+        },
+        "messageContextInfo": {
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": {
+        "key": {
+          "remoteJID": "10000000000001@lid",
+          "fromMe": false,
+          "ID": "AC92A10000006CB633BBEF32A033A78A"
+        },
+        "message": {
+          "imageMessage": {
+            "URL": "<url>",
+            "mimetype": "image/jpeg",
+            "fileSHA256": "<base64>",
+            "fileLength": 53464,
+            "height": 1386,
+            "width": 640,
+            "mediaKey": "<base64>",
+            "fileEncSHA256": "<base64>",
+            "directPath": "<url>",
+            "mediaKeyTimestamp": 1792748582,
+            "contextInfo": {
+              "disappearingMode": {
+                "initiator": 0
+              },
+              "pairedMediaType": 0
+            },
+            "scansSidecar": "<base64>",
+            "scanLengths": [
+              5091,
+              27427,
+              9965,
+              10981
+            ],
+            "midQualityFileSHA256": "<base64>",
+            "imageSourceType": 0
+          },
+          "messageContextInfo": {
+            "messageSecret": "<base64>"
+          }
+        },
+        "messageTimestamp": 1792748583,
+        "messageSecret": "<base64>",
+        "reportingTokenInfo": {
+          "reportingTag": "<redacted-44>"
+        },
+        "interactiveMessageAdditionalMetadata": {
+          "isGalaxyFlowCompleted": false
+        }
+      },
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "imageMessage": {
+          "URL": "<url>",
+          "mimetype": "image/jpeg",
+          "fileSHA256": "<base64>",
+          "fileLength": 53464,
+          "height": 1386,
+          "width": 640,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1792748582,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            },
+            "pairedMediaType": 0
+          },
+          "scansSidecar": "<base64>",
+          "scanLengths": [
+            5091,
+            27427,
+            9965,
+            10981
+          ],
+          "midQualityFileSHA256": "<base64>",
+          "imageSourceType": 0
+        },
+        "messageContextInfo": {
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 0
+    }
+  },
+  {
+    "id": "false_10000000000001@lid_AC1BF094B077F453EC3286D741D6A863",
+    "timestamp": 1792157770,
+    "from": "10000000000001@lid",
+    "fromMe": false,
+    "source": "app",
+    "to": null,
+    "participant": null,
+    "hasMedia": true,
+    "media": {
+      "url": "<url>",
+      "mimetype": "audio/ogg; codecs=opus"
+    },
+    "ack": 4,
+    "location": null,
+    "vCards": null,
+    "ackName": "PLAYED",
+    "replyTo": null,
+    "_data": {
+      "Info": {
+        "Chat": "10000000000001@lid",
+        "Sender": "10000000000001@lid",
+        "IsFromMe": false,
+        "IsGroup": false,
+        "AddressingMode": "",
+        "SenderAlt": "",
+        "RecipientAlt": "<redacted-4>",
+        "BroadcastListOwner": "<redacted-4>",
+        "BroadcastRecipients": null,
+        "ID": "AC1BF094B077F453EC3286D741D6A863",
+        "ServerID": 0,
+        "Type": "",
+        "PushName": "<redacted-4>",
+        "Timestamp": "<redacted-45>",
+        "Category": "",
+        "Multicast": false,
+        "MediaType": "",
+        "Edit": "<redacted-4>",
+        "MsgBotInfo": {
+          "EditType": "<redacted-4>",
+          "EditTargetID": "<redacted-4>",
+          "EditSenderTimestampMS": "<redacted-7>",
+          "ClientThreadID": "<redacted-4>"
+        },
+        "MsgMetaInfo": {
+          "TargetID": "<redacted-4>",
+          "TargetSender": "<redacted-4>",
+          "TargetChat": "<redacted-4>",
+          "DeprecatedLIDSession": null,
+          "ThreadMessageID": "<redacted-4>",
+          "ThreadMessageSenderJID": "<redacted-4>"
+        },
+        "IsNewsletterStatus": false,
+        "VerifiedName": null,
+        "DeviceSentMeta": null
+      },
+      "Message": {
+        "audioMessage": {
+          "URL": "<url>",
+          "mimetype": "audio/ogg; codecs=opus",
+          "fileSHA256": "<base64>",
+          "fileLength": 54537,
+          "seconds": 23,
+          "PTT": true,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1792157748,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            }
+          },
+          "waveform": "<base64>"
+        },
+        "messageContextInfo": {
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsEphemeral": false,
+      "IsViewOnce": false,
+      "IsViewOnceV2": false,
+      "IsViewOnceV2Extension": false,
+      "IsDocumentWithCaption": false,
+      "IsLottieSticker": false,
+      "IsBotInvoke": false,
+      "IsEdit": false,
+      "SourceWebMsg": {
+        "key": {
+          "remoteJID": "10000000000001@lid",
+          "fromMe": false,
+          "ID": "AC1BF094B077F453EC3286D741D6A863"
+        },
+        "message": {
+          "audioMessage": {
+            "URL": "<url>",
+            "mimetype": "audio/ogg; codecs=opus",
+            "fileSHA256": "<base64>",
+            "fileLength": 54537,
+            "seconds": 23,
+            "PTT": true,
+            "mediaKey": "<base64>",
+            "fileEncSHA256": "<base64>",
+            "directPath": "<url>",
+            "mediaKeyTimestamp": 1792157748,
+            "contextInfo": {
+              "disappearingMode": {
+                "initiator": 0
+              }
+            },
+            "waveform": "<base64>"
+          },
+          "messageContextInfo": {
+            "messageSecret": "<base64>"
+          }
+        },
+        "messageTimestamp": 1792157770,
+        "status": 5,
+        "messageSecret": "<base64>",
+        "reportingTokenInfo": {
+          "reportingTag": "<redacted-46>"
+        },
+        "interactiveMessageAdditionalMetadata": {
+          "isGalaxyFlowCompleted": false
+        }
+      },
+      "UnavailableRequestID": "<redacted-4>",
+      "RetryCount": 0,
+      "NewsletterMeta": null,
+      "RawMessage": {
+        "audioMessage": {
+          "URL": "<url>",
+          "mimetype": "audio/ogg; codecs=opus",
+          "fileSHA256": "<base64>",
+          "fileLength": 54537,
+          "seconds": 23,
+          "PTT": true,
+          "mediaKey": "<base64>",
+          "fileEncSHA256": "<base64>",
+          "directPath": "<url>",
+          "mediaKeyTimestamp": 1792157748,
+          "contextInfo": {
+            "disappearingMode": {
+              "initiator": 0
+            }
+          },
+          "waveform": "<base64>"
+        },
+        "messageContextInfo": {
+          "messageSecret": "<base64>"
+        }
+      },
+      "IsReal": true,
+      "Status": 5
+    }
+  }
+]

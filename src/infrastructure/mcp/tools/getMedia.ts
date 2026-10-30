@@ -18,7 +18,7 @@ export const getMediaTool: ToolDefinition<typeof inputSchema> = {
   description:
     "Fetches one attachment on demand. Small images and stickers are returned inline as an image; anything else (large images, video, audio, documents) as a short-lived signed download link.",
   inputSchema,
-  async run(input, { gateway, mapper, config, links, mediaIdleTimeoutMs }) {
+  async run(input, { gateway, mapper, config, links, mediaIdleTimeoutMs, transcription }) {
     const media = await openMediaById(gateway, input.media_id, mapper);
     if (!media) return { content: [{ type: "text", text: MEDIA_GONE }] };
     // Decide from the declared size; only a small image of known size is ever read,
@@ -45,7 +45,12 @@ export const getMediaTool: ToolDefinition<typeof inputSchema> = {
     const { token, expiresAt } = links.issue(input.media_id);
     const name = media.filename ? ` "${media.filename}"` : "";
     const size = media.size === null ? "unknown size" : `${media.size} bytes`;
-    const text = `File${name} (${media.mimetype}, ${size}): ${config.publicBaseUrl}/media/${token}\nThe link expires at ${expiresAt}.`;
+    const isAudio = baseMimetype(media.mimetype).startsWith("audio/");
+    const guidance =
+      isAudio && transcription.enabled
+        ? "This audio cannot be played through the connector. To know what it says, use transcribe_audio with this media_id."
+        : "This file cannot be read through the connector. Give the user this link and ask them to download the file and attach it to this chat so you can read it.";
+    const text = `File${name} (${media.mimetype}, ${size}): ${config.publicBaseUrl}/media/${token}\nThe link expires at ${expiresAt}.\n${guidance}`;
     return { content: [{ type: "text", text }] };
   },
 };

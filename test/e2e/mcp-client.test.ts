@@ -698,6 +698,10 @@ for (const cache of [false, true])
       const onDemand = await call(client, "transcribe_audio", { media_id: voiceId });
       expect(onDemand.isError).toBeFalsy();
       expect(sc(onDemand)).toEqual({ transcript: SPOKEN, cached: true });
+
+      const media = await call(client, "get_media", { media_id: voiceId });
+      expect(textOf(media)).toContain("use transcribe_audio with this media_id");
+      expect(textOf(media)).not.toContain("download the file and attach it");
       expect(textOf(onDemand)).toContain(SPOKEN);
 
       expect(providerCalls).toHaveLength(1);
@@ -765,6 +769,8 @@ for (const cache of [false, true])
         data: Buffer.from(bytes(100)).toString("base64"),
         mimeType: "image/webp",
       });
+      expect(r.content).toHaveLength(1);
+      expect(textOf(r)).not.toContain("cannot be read through the connector");
     });
 
     it("get_media returns a signed link for a large image and a document; the link serves the bytes", async () => {
@@ -785,6 +791,10 @@ for (const cache of [false, true])
         const link = /(http:\/\/localhost:3000\/media\/[A-Za-z0-9_.-]+)/.exec(text)?.[1];
         expect(link).toBeDefined();
         expect(text).toMatch(/expires/i);
+        expect(text).toContain(
+          "This file cannot be read through the connector. Give the user this link and ask them to download the file and attach it to this chat so you can read it.",
+        );
+        expect(text).not.toContain("transcribe_audio");
         const res = await s.app.fetch(new Request(link as string));
         expect(res.status).toBe(200);
         expect(res.headers.get("content-type")).toBe(mimetype);

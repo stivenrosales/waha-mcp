@@ -26,7 +26,7 @@ export const getChatStatsTool: ToolDefinition<typeof inputSchema, typeof chatSta
   name: "get_chat_stats",
   title: "Chat statistics",
   description:
-    "Computes exact activity metrics for a group or direct chat over a date range: totals, messages per participant and type, per day, per hour, who replies to whom and (groups only) silent members. Always read coverage.note: it says whether history was complete, truncated or unavailable.",
+    "Computes exact activity metrics for a group or direct chat over a date range: totals, messages per participant and type, per day, per hour, who replies to whom, response times per party and (groups only) silent members. Always read coverage.note: it says whether history was complete, truncated or unavailable.",
   inputSchema,
   outputSchema: chatStatsSchema,
   async run(input, { gateway, mapper, config }) {
@@ -61,6 +61,16 @@ export const getChatStatsTool: ToolDefinition<typeof inputSchema, typeof chatSta
         : "",
       stats.totalMessages > 0 && busiestHour
         ? `Busiest hour: ${String(busiestHour.hour).padStart(2, "0")}:00 (${busiestHour.messages} messages)`
+        : "",
+      stats.responseTimes.some((r) => r.replies > 0)
+        ? `Response times (minutes, median / average):\n${stats.responseTimes
+            .filter((r) => r.replies > 0)
+            .slice(0, TOP)
+            .map(
+              (r) =>
+                `- ${r.party}: ${r.medianMinutes} / ${r.averageMinutes} (${r.replies} replies)`,
+            )
+            .join("\n")}`
         : "",
       isGroup
         ? `Silent members (current participants with no messages): ${stats.silentMembers.length}`

@@ -532,6 +532,60 @@ describe("e2e: MCP client against createApp", () => {
     expect((sc(group).silentMembers as unknown[]).length).toBeGreaterThan(900);
   });
 
+  it("get_chat_stats exposes responseTimes and coverage.ignoredGaps", async () => {
+    const client = await connect(setup());
+    const r = await call(client, "get_chat_stats", { chat_id: "51999000111@c.us" });
+    expect(Array.isArray(sc(r).responseTimes)).toBe(true);
+    expect(typeof (sc(r).coverage as { ignoredGaps: number }).ignoredGaps).toBe("number");
+  });
+
+  it("lists the three prompts and each names the tools to call", async () => {
+    const client = await connect(setup());
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((p) => p.name).sort()).toEqual([
+      "daily-review",
+      "group-summary",
+      "pending-to-todoist",
+    ]);
+    const text = async (name: string, args: Record<string, string>) => {
+      const r = await client.getPrompt({ name, arguments: args });
+      return r.messages.map((m) => (m.content.type === "text" ? m.content.text : "")).join("\n");
+    };
+    const daily = await text("daily-review", { date: "2026-10-29" });
+    expect(daily).toContain("2026-10-29");
+    expect(daily.indexOf("get_activity_digest")).toBeGreaterThan(-1);
+    expect(daily.indexOf("list_pending_replies")).toBeGreaterThan(
+      daily.indexOf("get_activity_digest"),
+    );
+    expect(daily).toContain("get_thread");
+    expect(await text("daily-review", {})).toMatch(/\d{4}-\d{2}-\d{2}/);
+    const todo = await text("pending-to-todoist", { since: "2026-10-01" });
+    expect(todo).toContain("list_pending_replies");
+    expect(todo).toContain("2026-10-01");
+    expect(todo).toContain("Todoist tools available in this client");
+    const group = await text("group-summary", { group_id: GROUP });
+    for (const tool of ["get_group_info", "get_chat_stats", "get_messages"])
+      expect(group).toContain(tool);
+    expect(group).toContain(GROUP);
+  });
+
+  it("rejects invalid prompt arguments", async () => {
+    const client = await connect(setup());
+    await expect(
+      client.getPrompt({ name: "daily-review", arguments: { date: "30/10/2026" } }),
+    ).rejects.toThrow();
+    await expect(
+      client.getPrompt({ name: "daily-review", arguments: { timezone: "Mars/Base" } }),
+    ).rejects.toThrow();
+    await expect(client.getPrompt({ name: "group-summary", arguments: {} })).rejects.toThrow();
+    await expect(
+      client.getPrompt({ name: "group-summary", arguments: { group_id: "ana@c.us" } }),
+    ).rejects.toThrow();
+    await expect(
+      client.getPrompt({ name: "pending-to-todoist", arguments: { since: "yesterday" } }),
+    ).rejects.toThrow();
+  });
+
   it("get_media inlines a small sticker as image content", async () => {
     const client = await connect(setup());
     const [sticker] = await mediaIds(client, GROUP);

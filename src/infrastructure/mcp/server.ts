@@ -5,6 +5,7 @@ import type { AuthInfo } from "../auth/bearer.js";
 import type { SignedLinks } from "../media/signedLink.js";
 import { createEngineResolver } from "../waha/engines/index.js";
 import { type Logger, type ToolDefinition, toMcpTool } from "./defineTool.js";
+import { registerPrompts } from "./prompts.js";
 
 const SERVER_NAME = "waha-mcp";
 const SERVER_VERSION = "0.1.0";
@@ -40,6 +41,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
     const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions });
     for (const tool of tools)
       toMcpTool(server, tool, { gateway, mapper, config, links, logger, mediaIdleTimeoutMs });
+    registerPrompts(server, { timezone: config.timezone });
     return server;
   });
 

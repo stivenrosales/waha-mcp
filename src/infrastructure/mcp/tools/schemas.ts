@@ -85,12 +85,25 @@ export const chatStatsSchema = z.object({
   perHour: z.array(z.object({ hour: z.number(), messages: z.number() })),
   replies: z.array(z.object({ from: z.string(), to: z.string(), count: z.number() })),
   silentMembers: z.array(z.string()),
+  responseTimes: z
+    .array(
+      z.object({
+        party: z.string(),
+        replies: z.number(),
+        medianMinutes: z.number().nullable(),
+        averageMinutes: z.number().nullable(),
+      }),
+    )
+    .describe(
+      'Minutes each party takes to answer someone else (owner = "me"); gaps over 72 h are ignored.',
+    ),
   coverage: z.object({
     requestedFrom: isoOrNull,
     requestedTo: isoOrNull,
     firstMessageAt: isoOrNull,
     lastMessageAt: isoOrNull,
     truncated: z.boolean(),
+    ignoredGaps: z.number().describe("Reply gaps over 72 h left out of responseTimes."),
     note: z.string(),
   }),
 });

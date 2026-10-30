@@ -1,5 +1,6 @@
 import { InvalidInputError } from "../domain/errors.js";
 import type { GroupInfo, MessageType, NormalizedMessage } from "../domain/message.js";
+import { isConversational } from "./compact.js";
 import { messageKeys } from "./messages.js";
 
 export interface ChatStats {
@@ -14,12 +15,21 @@ export interface ChatStats {
   perHour: { hour: number; messages: number }[];
   replies: { from: string; to: string; count: number }[];
   silentMembers: string[];
+  /** Per party: how long they take to answer someone else (minutes). Owner is "me". */
+  responseTimes: {
+    party: string;
+    replies: number;
+    medianMinutes: number | null;
+    averageMinutes: number | null;
+  }[];
   coverage: {
     requestedFrom: string | null;
     requestedTo: string | null;
     firstMessageAt: string | null;
     lastMessageAt: string | null;
     truncated: boolean;
+    /** Reply gaps longer than 72 h that were left out of responseTimes. */
+    ignoredGaps: number;
     note: string;
   };
 }
@@ -59,13 +69,79 @@ function bucketer(timezone: string): (d: Date) => { date: string; hour: number }
   };
 }
 
-function coverageNote(o: StatsOptions, total: number, first: string | null, last: string | null) {
+function coverageNote(
+  o: StatsOptions,
+  total: number,
+  first: string | null,
+  last: string | null,
+  ignoredGaps: number,
+) {
   if (total === 0)
     return "No messages returned for this chat and range. WAHA may have no stored history for it (message storage disabled or chat joined recently); this does NOT mean the chat was silent.";
   const span = `${total} messages from ${first} to ${last}.`;
+  const gaps =
+    ignoredGaps > 0
+      ? ` Response times ignore ${ignoredGaps} gap${ignoredGaps === 1 ? "" : "s"} longer than 72 h (the conversation restarted).`
+      : "";
   if (o.truncated)
-    return `Partial coverage: only the ${o.cap ?? total} newest messages of the range were analysed (STATS_MAX_MESSAGES cap); older ones are not counted. ${span}`;
-  return `Complete for the stored history: ${span}`;
+    return `Partial coverage: only the ${o.cap ?? total} newest messages of the range were analysed (STATS_MAX_MESSAGES cap); older ones are not counted. ${span}${gaps}`;
+  return `Complete for the stored history: ${span}${gaps}`;
+}
+
+const MAX_REPLY_GAP_MS = 72 * 3_600_000;
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/**
+ * A reply is the first message of party B after a message of a party A ≠ B; it is timed from
+ * the latest message of A. Only conversational messages count; gaps over 72 h are ignored.
+ */
+function computeResponseTimes(messages: NormalizedMessage[]) {
+  const timed = messages
+    .filter(
+      (m) => isConversational(m) && m.author.id !== "" && !Number.isNaN(Date.parse(m.timestamp)),
+    )
+    .map((m) => ({ m, at: Date.parse(m.timestamp) }))
+    .sort((a, b) => a.at - b.at);
+  const parties = new Map<string, { label: string; labelAt: number; gaps: number[] }>();
+  const keyOf = (m: NormalizedMessage) => (m.fromMe ? "me" : m.author.id);
+  let ignoredGaps = 0;
+  let prev: { key: string; at: number } | null = null;
+  for (const { m, at } of timed) {
+    const key = keyOf(m);
+    let party = parties.get(key);
+    if (!party) {
+      party = {
+        label: m.fromMe ? "me" : (m.author.name ?? m.author.id),
+        labelAt: -Infinity,
+        gaps: [],
+      };
+      parties.set(key, party);
+    }
+    if (!m.fromMe && m.author.name !== null && at >= party.labelAt) {
+      party.label = m.author.name;
+      party.labelAt = at;
+    }
+    if (prev && prev.key !== key) {
+      const gap = at - prev.at;
+      if (gap > MAX_REPLY_GAP_MS) ignoredGaps++;
+      else party.gaps.push(gap / 60_000);
+    }
+    prev = { key, at };
+  }
+  const median = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? (s[mid] as number) : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
+  };
+  const responseTimes = [...parties.values()]
+    .map(({ label, gaps }) => ({
+      party: label,
+      replies: gaps.length,
+      medianMinutes: gaps.length ? round1(median(gaps)) : null,
+      averageMinutes: gaps.length ? round1(gaps.reduce((a, b) => a + b, 0) / gaps.length) : null,
+    }))
+    .sort((a, b) => b.replies - a.replies || a.party.localeCompare(b.party));
+  return { responseTimes, ignoredGaps };
 }
 
 /**
@@ -143,6 +219,7 @@ export function computeChatStats(
       .map((p) => p.id);
   }
 
+  const { responseTimes, ignoredGaps } = computeResponseTimes(messages);
   const firstIso = first === null ? null : new Date(first).toISOString();
   const lastIso = last === null ? null : new Date(last).toISOString();
   return {
@@ -156,13 +233,15 @@ export function computeChatStats(
     perHour: hours,
     replies: [...replyCounts.values()].sort((a, b) => b.count - a.count),
     silentMembers,
+    responseTimes,
     coverage: {
       requestedFrom: opts.requestedFrom,
       requestedTo: opts.requestedTo,
       firstMessageAt: firstIso,
       lastMessageAt: lastIso,
       truncated: opts.truncated,
-      note: coverageNote(opts, messages.length, firstIso, lastIso),
+      ignoredGaps,
+      note: coverageNote(opts, messages.length, firstIso, lastIso, ignoredGaps),
     },
   };
 }

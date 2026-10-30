@@ -174,3 +174,76 @@ describe("computeChatStats", () => {
     ]);
   });
 });
+
+describe("computeChatStats response times", () => {
+  const DIRECT = "ana@c.us";
+  const dm = (id: string, ts: string, fromMe: boolean, type: MessageType = "text") => ({
+    ...msg(id, ts, fromMe ? "owner@c.us" : "ana", type),
+    fromMe,
+  });
+  const run = (messages: NormalizedMessage[], chatId = DIRECT) =>
+    computeChatStats(messages, [], opts({ chatId }));
+
+  it("measures replies per party in minutes with median and average", () => {
+    const stats = run([
+      dm("1", "2026-10-30T10:00:00Z", false),
+      dm("2", "2026-10-30T10:10:00Z", true), // me replies in 10
+      dm("3", "2026-10-30T10:20:00Z", false),
+      dm("4", "2026-10-30T10:50:00Z", true), // me replies in 30
+      dm("5", "2026-10-30T11:00:00Z", false), // follow-up of the same turn is not a reply
+      dm("6", "2026-10-30T11:05:00Z", false),
+      dm("7", "2026-10-30T11:15:00Z", true), // me replies in 10 after the last ana message (10)
+    ]);
+    const me = stats.responseTimes.find((r) => r.party === "me");
+    expect(me).toEqual({ party: "me", replies: 3, medianMinutes: 10, averageMinutes: 16.7 });
+    const ana = stats.responseTimes.find((r) => r.party === "ANA");
+    expect(ana).toEqual({ party: "ANA", replies: 2, medianMinutes: 10, averageMinutes: 10 });
+    expect(stats.coverage.ignoredGaps).toBe(0);
+  });
+
+  it("ignores gaps over 72 h and counts them in coverage", () => {
+    const stats = run([
+      dm("1", "2026-10-25T10:00:00Z", false),
+      dm("2", "2026-10-29T10:00:00Z", true), // 4 days: ignored
+      dm("3", "2026-10-29T10:30:00Z", false),
+      dm("4", "2026-10-29T10:45:00Z", true), // 15 min
+    ]);
+    const me = stats.responseTimes.find((r) => r.party === "me");
+    expect(me).toMatchObject({ replies: 1, medianMinutes: 15, averageMinutes: 15 });
+    expect(stats.responseTimes.find((r) => r.party === "ANA")).toMatchObject({ replies: 1 });
+    expect(stats.coverage.ignoredGaps).toBe(1);
+    expect(stats.coverage.note).toContain("1 gap");
+  });
+
+  it("handles a group with three parties and skips non-conversational messages", () => {
+    const stats = run(
+      [
+        msg("1", "2026-10-30T10:00:00Z", "ana"),
+        msg("2", "2026-10-30T10:05:00Z", "system-user", "system"),
+        msg("3", "2026-10-30T10:10:00Z", "bob"),
+        msg("4", "2026-10-30T10:30:00Z", "cy"),
+        msg("5", "2026-10-30T10:31:00Z", "ana", "deleted"),
+        msg("6", "2026-10-30T11:00:00Z", "ana"),
+      ],
+      GROUP,
+    );
+    const by = Object.fromEntries(stats.responseTimes.map((r) => [r.party, r]));
+    expect(by.BOB).toMatchObject({ replies: 1, medianMinutes: 10 });
+    expect(by.CY).toMatchObject({ replies: 1, medianMinutes: 20 });
+    expect(by.ANA).toMatchObject({ replies: 1, medianMinutes: 30 });
+    expect(by["SYSTEM-USER"]).toBeUndefined();
+  });
+
+  it("reports null median and average for a party that never replied", () => {
+    const stats = run([dm("1", "2026-10-30T10:00:00Z", false)]);
+    expect(stats.responseTimes).toEqual([
+      { party: "ANA", replies: 0, medianMinutes: null, averageMinutes: null },
+    ]);
+  });
+
+  it("returns no response times for an empty chat", () => {
+    const stats = run([]);
+    expect(stats.responseTimes).toEqual([]);
+    expect(stats.coverage.ignoredGaps).toBe(0);
+  });
+});

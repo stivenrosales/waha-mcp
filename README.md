@@ -41,6 +41,7 @@ Nothing can be sent, edited or deleted: the WAHA client only issues `GET` reques
 - "Who is waiting for my answer since yesterday?"
 - "Summarize what happened in _&lt;group&gt;_ this week."
 - "Find the PDF Robert sent me."
+- "What does the voice note Ana sent this morning say?" (needs [transcription](#voice-note-transcription-optional))
 - "Turn my pending chats into Todoist tasks."
 
 ## How it works
@@ -105,6 +106,33 @@ flowchart LR
 | `daily-review`       | Reviews the day's pending chats.        |
 | `pending-to-todoist` | Turns pending replies into to-do tasks. |
 | `group-summary`      | Summarizes a group.                     |
+
+## Message cache
+
+Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the messages it reads in `DATA_DIR/cache.db`, so repeated questions about a chat do not re-read its whole history from WAHA. A chat is cached the first time a tool reads it. Later reads ask WAHA only for messages newer than (newest cached message minus `CACHE_REFRESH_HOURS`), and a chat read less than 60 s ago is answered without calling WAHA. `CACHE_MAX_AGE_DAYS` prunes old messages (`0` keeps them forever). Media files are never cached. Set `CACHE_ENABLED=false` to turn it off.
+
+> [!WARNING]
+> The cache is a copy of your conversations at rest on the server (`cache.db`, `0600`). It is wiped when the server sees a different WhatsApp account, but logout does not clear it: delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Edits and deletions older than the refresh window are not picked up, so a deleted message can stay cached.
+
+## Voice-note transcription (optional)
+
+Off by default. Set `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL` together (setting only some of them is a startup error) and any OpenAI-compatible speech-to-text API works. For example, with [OpenRouter](https://openrouter.ai):
+
+```env
+TRANSCRIPTION_API_URL=https://openrouter.ai/api/v1
+TRANSCRIPTION_API_KEY=sk-or-...
+TRANSCRIPTION_MODEL=openai/whisper-large-v3-turbo
+TRANSCRIPTION_LANGUAGE=es   # optional hint; omit to auto-detect
+```
+
+OpenAI and Groq endpoints also work (the server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions`). When on, voice notes returned by `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` carry a `transcript`, `search_messages` also matches stored transcripts, and `transcribe_audio` transcribes any audio or voice note on demand. Automatic transcription is limited by `TRANSCRIPTION_MAX_SECONDS` and `TRANSCRIPTION_MAX_PER_CALL`; coverage notes say which voice notes were skipped (`TRANSCRIPTION_MAX_PER_CALL=0` leaves everything to `transcribe_audio`). Each transcript is stored in `cache.db`, also when `CACHE_ENABLED=false`, so it is never paid twice.
+
+> [!WARNING]
+> With transcription on, the audio of your voice notes is sent to the configured provider (a third party such as OpenRouter). Check its data policy before enabling it.
+
+## Files and PDFs
+
+Only small images and stickers come back inline. Claude does not accept PDFs or other binary files from MCP connectors, and the model cannot open the signed link itself. For documents, PDFs, video and large images, `get_media` returns a short-lived link together with an instruction: the model gives you the link and asks you to download the file and attach it to the chat, so it can read it there. The server does not extract text from PDF or Word files.
 
 ## Configuration
 
@@ -198,8 +226,8 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 - Direct chats are private data. Use a client you trust with them.
 - The API key and WAHA URL are never logged or returned in errors.
 - Rotating `WAHA_API_KEY` revokes every issued token at the next start: only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
-- The message cache (`cache.db`, `0600`) is a copy of the conversations you read, at rest on the server. A chat is cached the first time a tool reads it; later reads ask WAHA only for messages newer than (newest cached − `CACHE_REFRESH_HOURS`), so edits and deletions older than that window are not picked up. A chat read less than 60 s ago is answered without calling WAHA. Logout does not clear it; delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Media files are never cached.
-- Transcription (off by default): when configured, voice notes are sent to the configured provider (a third party such as OpenRouter) to be transcribed, and their transcripts are stored in `cache.db` (also when `CACHE_ENABLED=false`). A different WhatsApp account wipes them together with the message cache. `TRANSCRIPTION_API_KEY` is never logged or returned; provider errors are reported with fixed messages.
+- The message cache is a copy of the conversations you read: see [Message cache](#message-cache).
+- Transcription is off by default; when on, voice notes go to the configured provider: see [Voice-note transcription](#voice-note-transcription-optional). `TRANSCRIPTION_API_KEY` is never logged or returned; provider errors are reported with fixed messages.
 - At most 50 OAuth clients can be registered. Clients older than 24 h with no live token are pruned automatically when a new one registers; `<base>/logout` clears them all.
 
 > [!WARNING]
@@ -220,7 +248,7 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 >
 > The chats list may omit some active chats; pending-reply and digest results say so in their coverage notes.
 
-- Search and digest work on recent history only (there is no own storage); results report their coverage.
+- Search and digest work on the history WAHA still returns and the cache has already read; results report their coverage.
 - Dates are read in `TIMEZONE`: a bare date (for example `2026-10-01`) means that local day (as `to`, through its last second), and a date-time without offset is read in `TIMEZONE`. A date-time with `Z` or an offset is taken as given.
 - Local phone numbers (without country code) are matched by their ending.
 

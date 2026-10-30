@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+### Features
+
+- Message cache: a SQLite copy of read messages in `DATA_DIR/cache.db` (`CACHE_ENABLED`, `CACHE_REFRESH_HOURS`, `CACHE_MAX_AGE_DAYS`). Later reads fetch only newer messages from WAHA; the cache is keyed to the WhatsApp account and wiped when the account changes.
+- Optional voice-note transcription through an OpenAI-compatible API such as OpenRouter, OpenAI or Groq (`TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_MAX_SECONDS`, `TRANSCRIPTION_MAX_PER_CALL`). Voice notes carry a `transcript`, `search_messages` matches stored transcripts, and transcripts are stored so they are never paid twice.
+- New tool `transcribe_audio` (13 tools in total) to transcribe a specific audio or voice note on demand.
+- Server icon (favicon) advertised to clients.
+- `get_media` tells the model that documents, PDFs, video and large files cannot be read through the connector and to ask the user to download the file and attach it to the chat (audio points to `transcribe_audio` when transcription is on). The server instructions carry the same rule.
+
+### Fixes
+
+- WAHA message reads now request an explicit sort order instead of relying on the default.
+- `TRANSCRIPTION_MAX_PER_CALL=0` gives one note ("Automatic transcription is off ...") instead of a repeated per-voice-note count.
+- Whitespace-only `TRANSCRIPTION_*` values count as unset, and the rest are trimmed.
+
 ## 0.1.0
 
 First release.

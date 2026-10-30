@@ -1,6 +1,6 @@
 {
   "name": "waha-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Read-only MCP server over WAHA, the WhatsApp HTTP API",
   "private": false,
   "type": "module",

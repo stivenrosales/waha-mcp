@@ -10,7 +10,7 @@ import { type Logger, type ToolDefinition, toMcpTool } from "./defineTool.js";
 import { registerPrompts } from "./prompts.js";
 
 const SERVER_NAME = "waha-mcp";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.2.0";
 
 export interface CreateMcpServerOptions {
   tools: ReadonlyArray<ToolDefinition>;

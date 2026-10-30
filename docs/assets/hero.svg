@@ -35,7 +35,7 @@
       <rect width="132" height="36" rx="18" fill="#25D366" fill-opacity="0.14" stroke="#25D366" stroke-opacity="0.5"/>
       <text x="66" y="24" fill="#5BE38E" text-anchor="middle">read-only</text>
       <rect x="146" width="120" height="36" rx="18" fill="#D97757" fill-opacity="0.14" stroke="#D97757" stroke-opacity="0.5"/>
-      <text x="206" y="24" fill="#E9A086" text-anchor="middle">12 tools</text>
+      <text x="206" y="24" fill="#E9A086" text-anchor="middle">13 tools</text>
       <rect x="280" width="150" height="36" rx="18" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.18"/>
       <text x="355" y="24" fill="#D9D6CC" text-anchor="middle">OAuth 2.1</text>
     </g>

@@ -241,6 +241,23 @@ describe("computeChatStats response times", () => {
     ]);
   });
 
+  it("counts own replies when fromMe messages have no author id", () => {
+    const own = (id: string, ts: string) => ({
+      ...dm(id, ts, true),
+      author: { id: "", phone: null, name: null },
+    });
+    const stats = run([
+      dm("1", "2026-10-30T10:00:00Z", false),
+      own("2", "2026-10-30T10:10:00Z"),
+      dm("3", "2026-10-30T10:20:00Z", false),
+      own("4", "2026-10-30T10:50:00Z"),
+    ]);
+    expect(stats.responseTimes.find((r) => r.party === "me")).toMatchObject({
+      replies: 2,
+      medianMinutes: 20,
+    });
+  });
+
   it("returns no response times for an empty chat", () => {
     const stats = run([]);
     expect(stats.responseTimes).toEqual([]);

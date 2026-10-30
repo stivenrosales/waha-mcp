@@ -98,7 +98,10 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 function computeResponseTimes(messages: NormalizedMessage[]) {
   const timed = messages
     .filter(
-      (m) => isConversational(m) && m.author.id !== "" && !Number.isNaN(Date.parse(m.timestamp)),
+      (m) =>
+        isConversational(m) &&
+        (m.fromMe || m.author.id !== "") &&
+        !Number.isNaN(Date.parse(m.timestamp)),
     )
     .map((m) => ({ m, at: Date.parse(m.timestamp) }))
     .sort((a, b) => a.at - b.at);

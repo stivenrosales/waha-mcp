@@ -563,6 +563,8 @@ describe("e2e: MCP client against createApp", () => {
     expect(todo).toContain("list_pending_replies");
     expect(todo).toContain("2026-10-01");
     expect(todo).toContain("Todoist tools available in this client");
+    expect(todo).toContain("ASK me to confirm");
+    expect(todo).toContain("Do not create anything before I answer");
     const group = await text("group-summary", { group_id: GROUP });
     for (const tool of ["get_group_info", "get_chat_stats", "get_messages"])
       expect(group).toContain(tool);

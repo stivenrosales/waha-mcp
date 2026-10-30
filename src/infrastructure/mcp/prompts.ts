@@ -63,7 +63,8 @@ export function registerPrompts(server: McpServer, opts: { timezone: string }): 
         [
           `Review my WhatsApp chats for ${date} (time zone ${timezone}) and tell me what is pending.`,
           `1. Call \`get_activity_digest\` with date "${date}" and timezone "${timezone}" (default scope: direct chats; use scope "all" only if I ask to include groups).`,
-          `2. Call \`list_pending_replies\` with since set to the start of ${date} in ${timezone} (an ISO date-time with that zone's offset) to see who is waiting for my answer.`,
+          `2. Call \`list_pending_replies\` with since set to the start of ${date} in ${timezone} (an ISO date-time with that zone's offset; a bare YYYY-MM-DD would be read as UTC midnight) to see who is waiting for my answer.`,
+          `   Note: \`since\` means chats active since then, so pending reflects the current state of those chats. If a pending item's waiting messages are after ${date}, say so instead of presenting it as that day's.`,
           "3. If a chat's context is missing or unclear, fetch it with `get_thread` (around a message id) or `get_messages` BEFORE concluding anything; do not guess.",
           "4. Present the result in this order:",
           "   - Pending first: for each item say who, since when, and what they asked.",
@@ -84,7 +85,7 @@ export function registerPrompts(server: McpServer, opts: { timezone: string }): 
       argsSchema: z.object({
         since: dateArg("since")
           .optional()
-          .describe("Only consider messages from this date (YYYY-MM-DD) on."),
+          .describe("Only consider chats active since this date (YYYY-MM-DD)."),
       }),
     },
     async (args) =>
@@ -109,7 +110,7 @@ export function registerPrompts(server: McpServer, opts: { timezone: string }): 
       argsSchema: z.object({
         group_id: z
           .string()
-          .regex(/^\S+@g\.us$/, "group_id must be a group id ending in @g.us (see list_groups)")
+          .regex(/^[\w.-]+@g\.us$/, "group_id must be a group id ending in @g.us (see list_groups)")
           .describe("Group id (…@g.us) from list_groups."),
         from: dateArg("from").optional().describe("Start date, YYYY-MM-DD."),
         to: dateArg("to").optional().describe("End date, YYYY-MM-DD."),

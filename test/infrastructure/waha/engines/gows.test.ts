@@ -134,7 +134,7 @@ describe("GOWS message mapper - real fixtures", () => {
     expect(mapper.message(raw).author.id).toBe(raw.from);
   });
 
-  it("every fixture message maps without throwing and with ISO UTC timestamps", () => {
+  it("every plain fixture message maps to a known type with an ISO UTC timestamp", () => {
     for (const raw of [...groupText, ...groupMedia, ...directText, ...directMedia]) {
       const out = mapper.message(raw);
       expect(out.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -220,6 +220,84 @@ describe("GOWS message mapper - synthetic kinds", () => {
     const out = mapper.message(synth({ fancyNewMessage: { a: 1 } }));
     expect(out.type).toBe("unknown");
     expect(out.rawType).toBe("fancyNewMessage");
+  });
+
+  it("unwraps ephemeral-wrapped text", () => {
+    const out = mapper.message(
+      synth({ ephemeralMessage: { message: { extendedTextMessage: { text: "vanish" } } } }),
+    );
+    expect(out.type).toBe("text");
+    expect(out.text).toBe("vanish");
+  });
+
+  it("unwraps viewOnce and viewOnceV2 images keeping the caption", () => {
+    for (const wrap of ["viewOnceMessage", "viewOnceMessageV2"]) {
+      const out = mapper.message(
+        synth({
+          [wrap]: {
+            message: { imageMessage: { mimetype: "image/jpeg", caption: "peek", fileLength: 5 } },
+          },
+        }),
+      );
+      expect(out.type).toBe("image");
+      expect(out.text).toBe("peek");
+      expect(out.attachment?.caption).toBe("peek");
+    }
+  });
+
+  it("unwraps documentWithCaptionMessage keeping caption and filename", () => {
+    const out = mapper.message(
+      synth({
+        documentWithCaptionMessage: {
+          message: {
+            documentMessage: { fileName: "a.pdf", caption: "see", mimetype: "application/pdf" },
+          },
+        },
+      }),
+    );
+    expect(out.type).toBe("document");
+    expect(out.attachment?.filename).toBe("a.pdf");
+    expect(out.attachment?.caption).toBe("see");
+  });
+
+  it("treats edited content as the current text", () => {
+    const wrapped = mapper.message(
+      synth({ editedMessage: { message: { conversation: "fixed" } } }),
+    );
+    expect(wrapped.text).toBe("fixed");
+    const proto = mapper.message(
+      synth({
+        protocolMessage: { type: "MESSAGE_EDIT", editedMessage: { conversation: "fixed2" } },
+      }),
+    );
+    expect(proto.type).toBe("text");
+    expect(proto.text).toBe("fixed2");
+  });
+
+  it("stops safely on over-nested containers", () => {
+    const deep = {
+      ephemeralMessage: {
+        message: {
+          viewOnceMessage: {
+            message: {
+              ephemeralMessage: {
+                message: { ephemeralMessage: { message: { conversation: "x" } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    const out = mapper.message(synth(deep));
+    expect(out.type).toBe("unknown");
+  });
+
+  it("does not treat prototype keys as media kinds", () => {
+    for (const k of ["constructor", "toString"]) {
+      const out = mapper.message(synth({ [k]: {} }));
+      expect(out.type).toBe("unknown");
+      expect(out.rawType).toBe(k);
+    }
   });
 
   it("never throws on garbage input", () => {

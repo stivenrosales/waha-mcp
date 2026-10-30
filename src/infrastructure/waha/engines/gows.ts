@@ -77,6 +77,38 @@ const MEDIA_KINDS = {
   audioMessage: "audio",
 } as const;
 
+const CONTAINERS = new Set([
+  "ephemeralmessage",
+  "viewoncemessage",
+  "viewoncemessagev2",
+  "viewoncemessagev2extension",
+  "documentwithcaptionmessage",
+  "editedmessage",
+]);
+const MAX_UNWRAP_DEPTH = 3;
+
+function ciGet(o: Obj, name: string): unknown {
+  const k = Object.keys(o).find((x) => x.toLowerCase() === name);
+  return k === undefined ? undefined : o[k];
+}
+
+/** Descends through container kinds (ephemeral, view-once, edits) up to a bounded depth. */
+function unwrap(message: Obj): Obj {
+  let current = message;
+  for (let i = 0; i < MAX_UNWRAP_DEPTH; i++) {
+    const key = contentKey(current);
+    if (key === null) break;
+    const content = obj(current[key]);
+    let inner: Obj | null = null;
+    if (CONTAINERS.has(key.toLowerCase())) inner = obj(ciGet(content, "message"));
+    else if (key === "protocolMessage" && content.editedMessage !== undefined)
+      inner = obj(content.editedMessage);
+    if (inner === null || Object.keys(inner).length === 0) break;
+    current = inner;
+  }
+  return current;
+}
+
 function contentKey(message: Obj): string | null {
   const keys = Object.keys(message);
   if (keys.length === 0) return null;
@@ -111,6 +143,8 @@ function unknownMessage(raw: unknown, rawType?: string): NormalizedMessage {
     text: null,
     replyToId: null,
     mentions: [],
+    // Deliberately empty: GOWS returns no reaction events on the messages endpoint;
+    // reaction() maps them if they ever appear.
     reactions: [],
     attachment: null,
     location: null,
@@ -134,7 +168,7 @@ function mapMessage(rawIn: unknown): NormalizedMessage {
   if (typeof obj(raw._data).Message !== "object" || obj(raw._data).Message === null) {
     return unknownMessage(raw, "malformed");
   }
-  const message = obj(obj(raw._data).Message);
+  const message = unwrap(obj(obj(raw._data).Message));
   const key = contentKey(message);
   const base = unknownMessage(raw);
   const out: NormalizedMessage = { ...base };
@@ -161,7 +195,7 @@ function mapMessage(rawIn: unknown): NormalizedMessage {
     out.text = str(content.text);
     return out;
   }
-  if (key in MEDIA_KINDS) {
+  if (Object.hasOwn(MEDIA_KINDS, key)) {
     const baseKind = MEDIA_KINDS[key as keyof typeof MEDIA_KINDS];
     const kind: Attachment["kind"] =
       baseKind === "audio" && (content.PTT === true || content.ptt === true) ? "voice" : baseKind;

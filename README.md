@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="An AI assistant reading WhatsApp-style chat bubbles" width="760">
+  <img src="docs/assets/hero-pixel.svg" alt="waha-mcp pixel-art mascot: a green chat bubble holding a magnifying glass next to a checklist of pending replies" width="760">
 </p>
 
 <h1 align="center">waha-mcp</h1>
@@ -22,7 +22,13 @@
   <img alt="MCP" src="https://img.shields.io/badge/MCP-server-blueviolet">
   <img alt="Read-only" src="https://img.shields.io/badge/access-read--only-informational">
   <img alt="WAHA GOWS" src="https://img.shields.io/badge/WAHA-GOWS-25D366">
+  <br>
+  <img alt="Works with WAHA" src="https://img.shields.io/badge/works%20with-WAHA-25D366">
+  <img alt="For Claude, ChatGPT and Gemini CLI" src="https://img.shields.io/badge/for-Claude%20%C2%B7%20ChatGPT%20%C2%B7%20Gemini%20CLI-D97757">
+  <img alt="Unofficial" src="https://img.shields.io/badge/status-unofficial%20community%20project-lightgrey">
 </p>
+
+<p align="center"><sub>Unofficial community project. Not affiliated with, endorsed by or sponsored by WhatsApp, Meta, WAHA (devlike.pro), Anthropic, OpenAI or Google. All trademarks belong to their respective owners.</sub></p>
 
 ---
 

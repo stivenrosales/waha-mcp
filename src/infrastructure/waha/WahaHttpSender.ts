@@ -19,6 +19,14 @@ export interface WahaHttpSenderOptions {
 // Media goes up as base64 in the body, so allow for slow uploads.
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_REASON_CHARS = 200;
+/** Connection errors that happen before any byte of the request leaves the server. */
+const NEVER_SENT = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+]);
 
 type Json = Record<string, unknown>;
 
@@ -74,8 +82,12 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
         aborted,
       ]);
       text = await Promise.race([res.text(), aborted]);
-    } catch {
-      // The request may have reached WAHA: the outcome is unknown, not a failure.
+    } catch (err) {
+      // No connection at all: nothing reached WAHA, so this is a plain failure.
+      const code = asRecord(asRecord(err).cause).code;
+      if (typeof code === "string" && NEVER_SENT.has(code))
+        throw new WahaUnavailableError("Could not reach WAHA; nothing was sent.");
+      // Otherwise the request may have reached WAHA: the outcome is unknown.
       throw new SendOutcomeUnknownError();
     } finally {
       clearTimeout(timer);
@@ -94,7 +106,7 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
 
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) throw new WahaAuthError();
-      if (media && (res.status === 422 || res.status === 501 || /\bplus\b/i.test(reason)))
+      if (media && (res.status === 501 || /\bplus\b/i.test(reason)))
         throw new MediaSendUnsupportedError();
       if (res.status === 404) throw new WahaNotFoundError("chat");
       if (res.status === 400 || res.status === 422)

@@ -26,6 +26,12 @@ export interface UploadStore {
   ): Promise<WriteResult>;
   /** `null` unless the slot exists, is uploaded and has not expired. */
   read(id: string): Promise<OutgoingFile | null>;
+  /**
+   * Like `read`, but takes the file exclusively for sending: a second claim gets `null`
+   * until `release` (send failed) or `remove` (send confirmed).
+   */
+  claim(id: string): Promise<OutgoingFile | null>;
+  release(id: string): void;
   remove(id: string): void;
   /** Deletes expired slots and their files; returns how many slots were removed. */
   sweep(): number;

@@ -194,6 +194,31 @@ describe("WahaHttpSender", () => {
     await expect(bad).rejects.toThrow("WAHA rejected the message: chatId is invalid");
   });
 
+  it("reports a refused connection as unreachable, since nothing was sent", async () => {
+    const refused = (async () => {
+      throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+    }) as unknown as typeof fetch;
+    const err = await make(refused)
+      .sendText({ chatId: "1@c.us", text: "x" })
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(WahaUnavailableError);
+    expect(err).not.toBeInstanceOf(SendOutcomeUnknownError);
+  });
+
+  it("treats other 422s on media as a rejected message, not as an old WAHA", async () => {
+    const { fn } = fakeFetch(() =>
+      json(
+        { message: "Session status is not as expected. Try again later or restart the session" },
+        422,
+      ),
+    );
+    const err = await make(fn)
+      .sendImage({ chatId: "1@c.us", file: FILE })
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(InvalidInputError);
+    expect((err as Error).message).toContain("Session status is not as expected");
+  });
+
   it("reports media sending as unsupported on WAHA builds without it", async () => {
     for (const res of [
       json({ message: "Available in WAHA Plus" }, 422),

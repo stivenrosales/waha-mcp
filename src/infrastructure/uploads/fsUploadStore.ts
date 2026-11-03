@@ -91,7 +91,7 @@ export function createFsUploadStore(opts: {
   const toSlot = ({ contentType: _ignored, ...slot }: Meta): UploadSlot => slot;
 
   function removeFiles(id: string): void {
-    for (const ext of ["bin", "part", "json"]) rmSync(path(id, ext), { force: true });
+    for (const ext of ["bin", "sending", "part", "json"]) rmSync(path(id, ext), { force: true });
   }
 
   return {
@@ -128,9 +128,10 @@ export function createFsUploadStore(opts: {
       try {
         // "wx": a concurrent upload to the same slot loses instead of interleaving.
         handle = await open(path(id, "part"), "wx", 0o600);
-      } catch {
+      } catch (err) {
         await body.cancel().catch(() => {});
-        return "already_uploaded";
+        if ((err as NodeJS.ErrnoException).code === "EEXIST") return "already_uploaded";
+        throw err;
       }
       let size = 0;
       const reader = body.getReader();
@@ -175,6 +176,28 @@ export function createFsUploadStore(opts: {
       };
     },
 
+    async claim(id) {
+      const m = live(id);
+      if (!m?.uploaded) return null;
+      try {
+        // rename is atomic: of two concurrent claims, only one finds `.bin`.
+        renameSync(path(id, "bin"), path(id, "sending"));
+      } catch {
+        return null;
+      }
+      const data = new Uint8Array(await readFile(path(id, "sending")));
+      return { data, filename: m.filename, mimetype: resolveMimetype(m) };
+    },
+
+    release(id) {
+      if (!ID.test(id)) return;
+      try {
+        renameSync(path(id, "sending"), path(id, "bin"));
+      } catch {
+        // Already released or removed.
+      }
+    },
+
     remove(id) {
       if (ID.test(id)) removeFiles(id);
     },
@@ -182,7 +205,7 @@ export function createFsUploadStore(opts: {
     sweep() {
       const ids = new Set(
         readdirSync(opts.dir)
-          .map((f) => f.replace(/\.(json|bin|part)$/, ""))
+          .map((f) => f.replace(/\.(json|bin|sending|part)$/, ""))
           .filter((id) => ID.test(id)),
       );
       let removed = 0;

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { toWhatsAppText } from "../../src/application/whatsappFormat.js";
 
 describe("toWhatsAppText", () => {
-  it("turns Markdown bold into WhatsApp bold", () => {
-    expect(toWhatsAppText("**hola** y __mundo__")).toBe("*hola* y *mundo*");
+  it("turns Markdown bold into WhatsApp bold, leaving __x__ alone", () => {
+    expect(toWhatsAppText("**hola** y __mundo__")).toBe("*hola* y __mundo__");
   });
 
   it("turns Markdown strikethrough into WhatsApp strikethrough", () => {
@@ -18,6 +18,7 @@ describe("toWhatsAppText", () => {
     expect(toWhatsAppText("## Resumen\ntexto")).toBe("*Resumen*\ntexto");
     expect(toWhatsAppText("# Uno\n###### Seis")).toBe("*Uno*\n*Seis*");
     expect(toWhatsAppText("## **Ya negrita**")).toBe("*Ya negrita*");
+    expect(toWhatsAppText("#  ")).toBe("#");
   });
 
   it("turns Markdown links into text and bare URL", () => {
@@ -53,6 +54,23 @@ describe("toWhatsAppText", () => {
 
   it("keeps accents, ñ and emoji intact", () => {
     expect(toWhatsAppText("Cotización ñandú 🎉 *_ok_*")).toBe("Cotización ñandú 🎉 *_ok_*");
+  });
+
+  it("leaves identifiers, URLs and math with double markers alone", () => {
+    const url = "See https://docs.python.org/3/reference/datamodel.html#object.__init__";
+    expect(toWhatsAppText(url)).toBe(url);
+    expect(toWhatsAppText("Override __init__ and __repr__")).toBe("Override __init__ and __repr__");
+    expect(toWhatsAppText("Rename it to report__final__v2.pdf")).toBe(
+      "Rename it to report__final__v2.pdf",
+    );
+    expect(toWhatsAppText("a**2 + b**2 = c**2")).toBe("a**2 + b**2 = c**2");
+    expect(toWhatsAppText("https://a.io/~~x~~/**y**")).toBe("https://a.io/~~x~~/**y**");
+    expect(toWhatsAppText("(**ojo**), ~~no~~.")).toBe("(*ojo*), ~no~.");
+  });
+
+  it("keeps the space before inline monospace", () => {
+    const text = "Run ```npm install``` then ```npm test``` please";
+    expect(toWhatsAppText(text)).toBe(text);
   });
 
   it("is idempotent", () => {

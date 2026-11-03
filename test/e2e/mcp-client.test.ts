@@ -494,6 +494,22 @@ for (const cache of [false, true])
       expect(s.sender.calls).toHaveLength(1);
     });
 
+    it("send_media sends an upload once even when called twice at the same time", async () => {
+      const s = setup();
+      const client = await connect(s);
+      const d = sc(await call(client, "create_upload_link", { filename: "a.pdf" })) as {
+        upload_id: string;
+        upload_url: string;
+      };
+      await s.app.fetch(new Request(d.upload_url, { method: "PUT", body: "x" }));
+      const results = await Promise.all([
+        call(client, "send_media", { chat_id: "1@c.us", upload_id: d.upload_id }),
+        call(client, "send_media", { chat_id: "1@c.us", upload_id: d.upload_id }),
+      ]);
+      expect(results.filter((r) => r.isError)).toHaveLength(1);
+      expect(s.sender.calls).toHaveLength(1);
+    });
+
     it("send_media forwards an attachment already in WhatsApp, within MEDIA_MAX_BYTES", async () => {
       const s = setup();
       const client = await connect(s);
@@ -535,6 +551,12 @@ for (const cache of [false, true])
         chat_id: "1@c.us",
         url: "http://10.0.0.1/a.pdf",
       });
+      const encoded = await call(client, "send_media", {
+        chat_id: "1@c.us",
+        url: "https://x.io/a%E0.pdf",
+      });
+      expect(encoded.isError).toBeFalsy();
+      expect(s.sender.calls[1]?.args).toMatchObject({ file: { filename: "a%E0.pdf" } });
       expect(textOf(http)).toBe("url must be a public https URL.");
       const voice = await call(client, "send_media", {
         chat_id: "1@c.us",
@@ -542,7 +564,7 @@ for (const cache of [false, true])
         caption: "hola",
       });
       expect(textOf(voice)).toBe("Voice notes cannot have a caption.");
-      expect(s.sender.calls).toHaveLength(1);
+      expect(s.sender.calls).toHaveLength(2);
     });
 
     it("send_location and send_contact send what they were given", async () => {

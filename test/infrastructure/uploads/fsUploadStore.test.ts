@@ -94,6 +94,19 @@ describe("createFsUploadStore", () => {
     expect(new TextDecoder().decode((await store().read(id))?.data)).toBe("hi");
   });
 
+  it("lets only one caller claim an uploaded file, and releases it on failure", async () => {
+    const s = store();
+    const { id } = s.create({ filename: "a.txt", mimetype: null });
+    expect(await s.claim(id)).toBeNull();
+    await s.write(id, stream("hi"), null);
+    const [a, b] = await Promise.all([s.claim(id), s.claim(id)]);
+    expect([a, b].filter((f) => f !== null)).toHaveLength(1);
+    s.release(id);
+    expect(new TextDecoder().decode((await s.claim(id))?.data)).toBe("hi");
+    s.remove(id);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
   it("returns null for pending slots and removes slots on demand", async () => {
     const s = store();
     const { id } = s.create({ filename: "a.txt", mimetype: null });

@@ -39,6 +39,14 @@ const ONE_SOURCE = "Pass exactly one of upload_id, media_id or url.";
 const UPLOAD_GONE = "This upload was already sent or has expired. Create a new upload link.";
 const TOO_LARGE = "This file is too large to forward.";
 
+const safeDecode = (path: string): string => {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+};
+
 async function resolveFile(
   input: z.output<typeof inputSchema>,
   ctx: ToolRunContext,
@@ -50,7 +58,8 @@ async function resolveFile(
       const url = `${ctx.config.publicBaseUrl}/upload/${ctx.uploadLinks.sign(slot.id)}`;
       throw new InvalidInputError(`The file has not been uploaded yet. Upload it to ${url} first.`);
     }
-    const file = await ctx.uploads.read(slot.id);
+    // Exclusive: a parallel call with the same upload_id gets UPLOAD_GONE.
+    const file = await ctx.uploads.claim(slot.id);
     if (!file) throw new InvalidInputError(UPLOAD_GONE);
     return file;
   }
@@ -71,7 +80,7 @@ async function resolveFile(
   const raw = input.url as string;
   const parsed = URL.canParse(raw) ? new URL(raw) : null;
   if (parsed?.protocol !== "https:") throw new InvalidInputError("url must be a public https URL.");
-  const filename = basename(decodeURIComponent(parsed.pathname)) || "file";
+  const filename = basename(safeDecode(parsed.pathname)) || "file";
   return { url: parsed.href, mimetype: mimetypeFromFilename(filename), filename };
 }
 
@@ -87,26 +96,37 @@ export const sendMediaTool: ToolDefinition<typeof inputSchema, typeof sendOutput
     if (sources.length !== 1) throw new InvalidInputError(ONE_SOURCE);
 
     const file = await resolveFile(input, ctx);
-    const kind = pickMediaKind(file.mimetype, input.as);
-    const caption = input.caption === undefined ? undefined : toWhatsAppText(input.caption);
-    if (caption !== undefined) {
-      if (kind === "voice") throw new InvalidInputError("Voice notes cannot have a caption.");
-      assertTextLength(caption);
+    const claimed = input.upload_id;
+    try {
+      return await send(input, ctx, file);
+    } catch (err) {
+      // Failed or unknown outcome: keep the upload so the owner can retry after checking.
+      if (claimed !== undefined) ctx.uploads.release(claimed);
+      throw err;
     }
-
-    const target = {
-      chatId: input.chat_id,
-      ...(input.reply_to ? { replyTo: input.reply_to } : {}),
-    };
-    const withCaption = { ...target, file, ...(caption === undefined ? {} : { caption }) };
-    let sent: SentMessage;
-    if (kind === "image") sent = await ctx.sender.sendImage(withCaption);
-    else if (kind === "video") sent = await ctx.sender.sendVideo(withCaption);
-    else if (kind === "voice") sent = await ctx.sender.sendVoice({ ...target, file });
-    else sent = await ctx.sender.sendFile(withCaption);
-
-    // Only after WAHA confirmed: a failed send keeps the upload for a retry.
-    if (input.upload_id !== undefined) ctx.uploads.remove(input.upload_id);
-    return sentResult(input.chat_id, sent, caption);
   },
 };
+
+async function send(input: z.output<typeof inputSchema>, ctx: ToolRunContext, file: FileSource) {
+  const kind = pickMediaKind(file.mimetype, input.as);
+  const caption = input.caption === undefined ? undefined : toWhatsAppText(input.caption);
+  if (caption !== undefined) {
+    if (kind === "voice") throw new InvalidInputError("Voice notes cannot have a caption.");
+    assertTextLength(caption);
+  }
+
+  const target = {
+    chatId: input.chat_id,
+    ...(input.reply_to ? { replyTo: input.reply_to } : {}),
+  };
+  const withCaption = { ...target, file, ...(caption === undefined ? {} : { caption }) };
+  let sent: SentMessage;
+  if (kind === "image") sent = await ctx.sender.sendImage(withCaption);
+  else if (kind === "video") sent = await ctx.sender.sendVideo(withCaption);
+  else if (kind === "voice") sent = await ctx.sender.sendVoice({ ...target, file });
+  else sent = await ctx.sender.sendFile(withCaption);
+
+  // Only after WAHA confirmed: a failed send keeps the upload for a retry.
+  if (input.upload_id !== undefined) ctx.uploads.remove(input.upload_id);
+  return sentResult(input.chat_id, sent, caption);
+}

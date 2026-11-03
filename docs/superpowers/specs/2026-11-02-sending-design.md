@@ -127,7 +127,9 @@ Two layers:
    - write the message as the owner would send it: no preamble, no "here is your message"
 2. **Normalizer** (`application/whatsappFormat.ts`, pure, unit-tested), applied to `text`
    and `caption` before sending:
-   - `**x**` / `__x__` → `*x*`; `~~x~~` → `~x~`; single-`*x*` Markdown italic is ambiguous
+   - `**x**` → `*x*`; `~~x~~` → `~x~`, only at word boundaries and never inside URLs
+     (`a**2`, `__init__` stay). `__x__` is not converted (revised during review: it cannot
+     be told apart from identifiers); single-`*x*` Markdown italic is ambiguous
      with WhatsApp bold and is **left as is** (it is valid WhatsApp bold);
    - `# Heading` (any level) → `*Heading*`;
    - `[text](url)` → `text: url` (or just `url` when text equals url);

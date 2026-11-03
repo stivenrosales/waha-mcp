@@ -69,7 +69,7 @@ export function loginPage(opts: {
   return layout(
     "Sign in - waha-mcp",
     `<h1>Sign in to waha-mcp</h1>
-<p class="muted">An application at <strong>${escapeHtml(opts.redirectHost)}</strong> is requesting read-only access to your WhatsApp data.</p>
+<p class="muted">An application at <strong>${escapeHtml(opts.redirectHost)}</strong> is requesting access to read your WhatsApp chats and send messages from your number.</p>
 ${errorLine(opts.error)}
 <form method="post" action="authorize">
 ${hidden}

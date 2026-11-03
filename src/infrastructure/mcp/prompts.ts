@@ -100,7 +100,7 @@ export function registerPrompts(server: McpServer, opts: { timezone: string }): 
           "2. Keep only the real pending items; skip chats that look like noise, broadcasts or already-resolved threads. Use `get_thread` if you need context to decide.",
           "3. For each real pending item propose a task with: title, due date, context (what they asked, in one line) and chat (name and id).",
           "4. Show the proposed tasks and ASK me to confirm (or edit) them. Do not create anything before I answer.",
-          "5. Only after I confirm, create the tasks with the Todoist tools available in this client. If no task tool is available, give me the list to copy instead. This WhatsApp server is read-only and cannot create tasks itself.",
+          "5. Only after I confirm, create the tasks with the Todoist tools available in this client. If no task tool is available, give me the list to copy instead. This WhatsApp server cannot create tasks itself.",
         ].join("\n"),
       ),
   );

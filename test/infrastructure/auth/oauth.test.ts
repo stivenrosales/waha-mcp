@@ -250,6 +250,9 @@ describe("authorization code flow", () => {
     expect(html).toContain("<form");
     expect(html).toMatch(/invalid key/i);
     expect(html).not.toContain("code=");
+    // The consent text must say the client can send, not only read.
+    expect(html).toContain("send messages from your number");
+    expect(html).not.toMatch(/read-only/i);
   });
 
   it("wrong code_verifier → invalid_grant", async () => {

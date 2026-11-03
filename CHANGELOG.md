@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+waha-mcp is no longer read-only: it can send messages from the owner's number.
+
+### Features
+
+- New tools `send_text`, `send_media`, `send_location`, `send_contact` and `create_upload_link` (18 tools in total). They are annotated as writes (`readOnlyHint: false`), so clients ask for approval on every call; read tools keep `readOnlyHint: true`.
+- WhatsApp formatting: tool descriptions carry WhatsApp's syntax, and text and captions are converted from Markdown (`**bold**`, headings, links, tables) before sending. Results echo the exact text sent.
+- Attachments through single-use signed upload links (`/upload/:token`: `PUT` raw body, browser form, or `GET` picker page), stored in `DATA_DIR/uploads` and deleted after the send or on expiry (`UPLOAD_MAX_BYTES`, `UPLOAD_TTL_SECONDS`). `send_media` also forwards attachments already in WhatsApp (`media_id`) and public `https` URLs.
+- A send WAHA does not confirm in time is reported as "outcome unknown" so the model checks the chat instead of retrying. Media sends on WAHA builds without that feature report "update to 2026.6.1 or later".
+
 ## 0.2.0
 
 ### Features

@@ -1,5 +1,13 @@
 /** Sent to clients in `initialize`. Short on purpose: tool descriptions carry the details. */
-export const SERVER_INSTRUCTIONS = `Read-only access to the owner's WhatsApp (via WAHA). Nothing can be sent, edited or deleted.
+export const SERVER_INSTRUCTIONS = `Access to the owner's WhatsApp (via WAHA): read chats and send messages from the owner's number. Nothing can be edited or deleted.
+
+Sending (send_text, send_media, send_location, send_contact):
+- Send only when the owner explicitly asked to send in this conversation. Show the final text and the recipient first. One send per request unless the owner asked for more.
+- Write text and captions in WhatsApp formatting, not Markdown: *bold*, _italic_, ~strikethrough~, \`\`\`monospace\`\`\`, "> " quotes, "- " or "1. " lists; no headings, tables or [text](url) links. The tool result shows the exact text sent.
+- To send a file the owner gave you: create_upload_link, upload the file (curl from your sandbox, or the owner opens the link), then send_media with the upload_id. To forward a file already in WhatsApp, send_media with its media_id.
+- If a send reports that the outcome is unknown, check the chat with get_messages before retrying; never retry on your own.
+
+Reading:
 
 - Groups come from list_groups (ids end in @g.us); direct 1:1 chats come from list_chats. Direct chats are private conversations: summarize them and do not quote them at length unless the user asks.
 - Read messages with get_messages (newest first, paginate with nextCursor).

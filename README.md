@@ -5,7 +5,7 @@
 <h1 align="center">waha-mcp</h1>
 
 <p align="center">
-  <strong>Let Claude, ChatGPT and Gemini read your WhatsApp. Read-only, self-hosted.</strong>
+  <strong>Let Claude, ChatGPT and Gemini read your WhatsApp and send messages for you. Self-hosted.</strong>
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
   <img alt="Node 24" src="https://img.shields.io/badge/node-24-339933?logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-server-blueviolet">
-  <img alt="Read-only" src="https://img.shields.io/badge/access-read--only-informational">
+  <img alt="Read and send" src="https://img.shields.io/badge/access-read%20%26%20send-informational">
   <img alt="WAHA GOWS" src="https://img.shields.io/badge/WAHA-GOWS-25D366">
   <br>
   <img alt="Works with WAHA" src="https://img.shields.io/badge/works%20with-WAHA-25D366">
@@ -32,9 +32,9 @@
 
 ---
 
-`waha-mcp` is a **read-only** [MCP](https://modelcontextprotocol.io) server over [WAHA](https://waha.devlike.pro) (the WhatsApp HTTP API). It lets Claude, ChatGPT and Gemini CLI analyze your WhatsApp groups and direct chats: summaries, activity stats, pending replies, search, shared files and media.
+`waha-mcp` is an [MCP](https://modelcontextprotocol.io) server over [WAHA](https://waha.devlike.pro) (the WhatsApp HTTP API). It lets Claude, ChatGPT and Gemini CLI analyze your WhatsApp groups and direct chats (summaries, activity stats, pending replies, search, shared files and media) and send messages from your number: text, images, documents, voice notes, video, locations and contact cards.
 
-Nothing can be sent, edited or deleted: the WAHA client only issues `GET` requests and no tool writes anything.
+Sending tools are marked as writes, so your client asks you to approve every send. Nothing can be edited or deleted. See [Sending](#sending).
 
 ## What you can ask
 
@@ -43,21 +43,23 @@ Nothing can be sent, edited or deleted: the WAHA client only issues `GET` reques
 - "Find the PDF Ana sent me last week."
 - "What does the voice note Ana sent this morning say?" (needs [transcription](#voice-note-transcription-optional))
 - "Turn my pending chats into Todoist tasks."
+- "Reply to Ana that I'll be there at 5, and send her the PDF I just gave you."
 
 ## How it works
 
 ```mermaid
 flowchart LR
   Client["Client<br/>(Claude / ChatGPT / Gemini CLI)"] -->|"OAuth 2.1 + MCP /mcp"| MCP["waha-mcp"]
-  MCP -->|"GET only"| WAHA["WAHA (GOWS)"]
+  MCP -->|"read (GET) + send (POST)"| WAHA["WAHA (GOWS)"]
   WAHA --> WA["WhatsApp"]
-  MCP -.-> Data[("/data<br/>auth.db, cache.db, media secret")]
+  MCP -.-> Data[("/data<br/>auth.db, cache.db, media secret, uploads")]
 ```
 
 ## Requirements
 
 - A running WAHA with the **GOWS** engine. WEBJS and NOWEB are not supported in v1: the server still starts, detects the engine and the tools report that it is unsupported.
 - Node 24 (the Docker image already includes it) and a public HTTPS URL for the server.
+- To send media (images, documents, voice notes, video): WAHA 2026.6.1 or later, where the former Plus features ship in the free Core image (or an older WAHA Plus). Text, locations and contacts work on any version.
 
 ## Quick start
 
@@ -98,6 +100,12 @@ flowchart LR
 | **Find**     |                        |                                                                                   |
 | 🔎           | `search_messages`      | Case- and accent-insensitive search in one chat or across chats.                  |
 | 📁           | `list_shared_files`    | Documents, media and links shared in chats, with a kind filter.                   |
+| **Send**     |                        |                                                                                   |
+| ✉️           | `send_text`            | Sends a text, optionally quoting a message and @mentioning people.                |
+| ⬆️           | `create_upload_link`   | One-time link to upload a file you gave the model, before sending it.             |
+| 🖼️           | `send_media`           | Sends an uploaded file, forwards a WhatsApp attachment or sends a public URL.     |
+| 📍           | `send_location`        | Sends a location pin.                                                             |
+| 👤           | `send_contact`         | Sends a contact card.                                                             |
 
 ### Prompts
 
@@ -139,6 +147,20 @@ New automatic transcriptions stop starting after 25 s within one tool call so an
 
 Only small images and stickers come back inline. Claude does not accept PDFs or other binary files from MCP connectors, and the model cannot open the signed link itself. For documents, PDFs, video and large images, `get_media` returns a short-lived link together with an instruction: the model gives you the link and asks you to download the file and attach it to the chat, so it can read it there. Audio is different: with transcription on, the model uses `transcribe_audio`; with it off, the model gives you the link so you can listen to it (Claude does not read attached audio). The server does not extract text from PDF or Word files.
 
+## Sending
+
+Every sending tool is annotated as a write (`readOnlyHint: false`), so clients ask you to approve each call. The server instructions tell the model to send only what you explicitly asked to send, to show you the final text and recipient first, and never to retry on its own. When WAHA does not confirm a send in time, the tool says the outcome is unknown and the model checks the chat before trying again.
+
+**WhatsApp formatting.** WhatsApp has its own syntax (`*bold*`, `_italic_`, `~strikethrough~`, ` ```monospace``` `, `> quote`, `- ` and `1. ` lists) and no headings, tables or `[text](url)` links. The tool descriptions teach it to the model, and the server converts the usual Markdown (`**bold**`, `# Heading`, links, tables) before sending. Code is left untouched. Each send returns the exact text that went out.
+
+**Attachments without passing bytes through the model.** A file you give the model in the chat is not sent as base64 in the tool call (too slow and too large). Instead:
+
+1. The model calls `create_upload_link` and gets a single-use `/upload/<token>` link that expires after `UPLOAD_TTL_SECONDS`.
+2. The file is uploaded to that link: either the model runs the returned `curl -T` command from its code sandbox, or you open the link in a browser and pick the file. For the automatic path, allow your client's code sandbox network access to this server's domain (in Claude: Settings → Capabilities → code execution network access).
+3. The model calls `send_media` with the `upload_id`. The server passes the file to WAHA directly and deletes it once WAHA confirms the send.
+
+`send_media` also forwards a file already in WhatsApp (`media_id` from the read tools) or sends a public `https` URL. The message kind follows the file type (image, video, audio as a voice note, anything else as a document); `as: "document"` sends a photo without compression.
+
 ## Configuration
 
 <details>
@@ -154,13 +176,15 @@ All configuration is through environment variables.
 | `WAHA_API_KEY`               | yes      |             | WAHA API key. Also the OAuth login secret.                                  |
 | `PUBLIC_BASE_URL`            | yes      |             | Public HTTPS URL of this server (`http` only for localhost).                |
 | `WAHA_SESSION`               | no       | `default`   | WAHA session name.                                                          |
-| `DATA_DIR`                   | no       | `/data`     | OAuth state (`auth.db`), message cache (`cache.db`), media secret.          |
+| `DATA_DIR`                   | no       | `/data`     | OAuth state (`auth.db`), message cache (`cache.db`), media secret, uploads. |
 | `PORT`                       | no       | `3000`      | HTTP port.                                                                  |
 | `TIMEZONE`                   | no       | `UTC`       | IANA time zone for dates and day boundaries (`America/Lima`).               |
 | `STATS_MAX_MESSAGES`         | no       | `5000`      | Per-chat message cap; fan-out tools read up to 100 chats each.              |
 | `MEDIA_LINK_TTL_SECONDS`     | no       | `600`       | Lifetime of signed media links.                                             |
 | `MEDIA_INLINE_MAX_BYTES`     | no       | `5242880`   | Largest file returned inline (5 MiB); larger ones get a link.               |
 | `MEDIA_MAX_BYTES`            | no       | `104857600` | Largest file served by `/media/:token` (100 MiB).                           |
+| `UPLOAD_MAX_BYTES`           | no       | `67108864`  | Largest file accepted by `/upload/:token` (64 MiB).                         |
+| `UPLOAD_TTL_SECONDS`         | no       | `900`       | Lifetime of an upload link and of the file it receives.                     |
 | `CACHE_ENABLED`              | no       | `true`      | Keep a SQLite copy of read messages in `DATA_DIR/cache.db`.                 |
 | `CACHE_REFRESH_HOURS`        | no       | `48`        | Each sync re-reads this window before the newest cached message.            |
 | `CACHE_MAX_AGE_DAYS`         | no       | `0`         | Prune cached messages older than N days (`0` keeps them forever).           |
@@ -240,6 +264,12 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 
 > [!WARNING]
 > The client address is the last hop of `X-Forwarded-For`, which is only trustworthy behind a reverse proxy that appends it (Traefik on EasyPanel). Do not expose the server directly to the internet.
+
+> [!WARNING]
+> Any client you connect can send WhatsApp messages from your number, subject to the approval prompt of that client. Only connect clients you trust, and keep approvals on for the sending tools.
+
+> [!WARNING]
+> Upload links work once, expire after `UPLOAD_TTL_SECONDS`, are capped at `UPLOAD_MAX_BYTES` and never talk to WAHA; until used, anyone holding one can put one file in that slot. Uploaded files are stored with `0600` permissions in `DATA_DIR/uploads` and deleted after sending or expiry.
 
 > [!WARNING]
 > Signed media links expire after `MEDIA_LINK_TTL_SECONDS` and behave like bearer credentials until then: anyone holding the link can download that file.

@@ -287,6 +287,13 @@ for (const cache of [false, true])
     it("lists the read tools as read-only and the send tools as approval-needing writes", async () => {
       const client = await connect(setup());
       expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
+      for (const needle of [
+        "create_upload_link",
+        "explicitly asked",
+        "get_messages before retrying",
+      ])
+        expect(SERVER_INSTRUCTIONS).toContain(needle);
+      expect(SERVER_INSTRUCTIONS).not.toMatch(/nothing can be sent|read-only access/i);
       const { tools } = await client.listTools();
       const read = [
         "get_activity_digest",

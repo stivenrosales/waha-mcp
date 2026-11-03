@@ -12,6 +12,8 @@ import { listGroupsTool } from "./listGroups.js";
 import { listPendingRepliesTool } from "./listPendingReplies.js";
 import { listSharedFilesTool } from "./listSharedFiles.js";
 import { searchMessagesTool } from "./searchMessages.js";
+import { sendContactTool } from "./sendContact.js";
+import { sendLocationTool } from "./sendLocation.js";
 import { sendMediaTool } from "./sendMedia.js";
 import { sendTextTool } from "./sendText.js";
 import { transcribeAudioTool } from "./transcribeAudio.js";
@@ -35,5 +37,7 @@ export function createTools(): ToolDefinition[] {
     sendTextTool,
     createUploadLinkTool,
     sendMediaTool,
+    sendLocationTool,
+    sendContactTool,
   ] as unknown as ToolDefinition[];
 }

@@ -159,7 +159,13 @@ afterAll(() => {
 });
 
 /** Write tools; each later task appends its own. */
-const SEND_TOOLS = ["send_text", "create_upload_link", "send_media"];
+const SEND_TOOLS = [
+  "send_text",
+  "create_upload_link",
+  "send_media",
+  "send_location",
+  "send_contact",
+];
 
 /** Every e2e test runs twice: CACHE_ENABLED=false (today's path) and with the message cache. */
 let cacheOn = false;
@@ -530,6 +536,60 @@ for (const cache of [false, true])
       });
       expect(textOf(voice)).toBe("Voice notes cannot have a caption.");
       expect(s.sender.calls).toHaveLength(1);
+    });
+
+    it("send_location and send_contact send what they were given", async () => {
+      const s = setup();
+      const client = await connect(s);
+      const loc = await call(client, "send_location", {
+        chat_id: "1@c.us",
+        latitude: -12.0464,
+        longitude: -77.0428,
+        title: "Lima",
+        reply_to: "r1",
+      });
+      expect(loc.isError).toBeFalsy();
+      const card = await call(client, "send_contact", {
+        chat_id: "1@g.us",
+        full_name: "Ana Pérez",
+        phone_number: "+51 999 888 777",
+        organization: "Ñandú SAC",
+      });
+      expect(sc(card).message_id).toBe("true_sent_2");
+      expect(s.sender.calls).toEqual([
+        {
+          method: "sendLocation",
+          args: {
+            chatId: "1@c.us",
+            latitude: -12.0464,
+            longitude: -77.0428,
+            title: "Lima",
+            replyTo: "r1",
+          },
+        },
+        {
+          method: "sendContact",
+          args: {
+            chatId: "1@g.us",
+            fullName: "Ana Pérez",
+            phoneNumber: "+51 999 888 777",
+            organization: "Ñandú SAC",
+          },
+        },
+      ]);
+    });
+
+    it("send_location rejects coordinates outside the globe", async () => {
+      const s = setup();
+      const client = await connect(s);
+      for (const [latitude, longitude] of [
+        [91, 0],
+        [0, -181],
+      ]) {
+        const r = await call(client, "send_location", { chat_id: "1@c.us", latitude, longitude });
+        expect(r.isError).toBe(true);
+      }
+      expect(s.sender.calls).toHaveLength(0);
     });
 
     it("list_pending_replies returns who waits for the owner, with coverage", async () => {

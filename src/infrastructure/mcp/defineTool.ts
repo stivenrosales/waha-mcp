@@ -3,6 +3,7 @@ import type {
   ContentBlock,
   McpServer,
   RegisteredTool,
+  ToolAnnotations,
   ToolCallback,
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
@@ -23,7 +24,9 @@ import {
   WahaUnavailableError,
 } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
+import type { UploadStore } from "../../domain/ports/UploadStore.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
+import type { WhatsAppSender } from "../../domain/ports/WhatsAppSender.js";
 import { MEDIA_IDLE_TIMEOUT_MS } from "../media/resolveMedia.js";
 import type { SignedLinks } from "../media/signedLink.js";
 
@@ -36,13 +39,17 @@ export interface ToolRunContext {
   mediaIdleTimeoutMs: number;
   /** Voice-note transcription; the disabled service when TRANSCRIPTION_* is not configured. */
   transcription: TranscriptionService;
+  sender: WhatsAppSender;
+  uploads: UploadStore;
+  /** Signs `/upload/:token` links. */
+  uploadLinks: SignedLinks;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
 export type ToolOutput<Data> = { text: string; data: Data } | { content: ContentBlock[] };
 
 /**
- * Contract shared by every read-only tool (adapted from bsale-mcp). `run` gets
+ * Contract shared by every tool (adapted from bsale-mcp). `run` gets
  * the input already validated by `inputSchema`; it may throw domain errors,
  * which `createToolHandler` turns into safe messages. Tools that return raw
  * content blocks declare no `outputSchema`.
@@ -56,6 +63,8 @@ export interface ToolDefinition<
   description: string;
   inputSchema: InputSchema;
   outputSchema?: OutputSchema;
+  /** Default `{ readOnlyHint: true }`; write tools use `SEND_ANNOTATIONS`. */
+  annotations?: ToolAnnotations;
   run(
     input: z.output<InputSchema>,
     ctx: ToolRunContext,
@@ -77,8 +86,19 @@ export interface ToolDeps {
   mediaIdleTimeoutMs?: number;
   /** Default: transcription off. */
   transcription?: TranscriptionService;
+  sender: WhatsAppSender;
+  uploads: UploadStore;
+  uploadLinks: SignedLinks;
   logger?: Logger;
 }
+
+/** Writes to WhatsApp: clients ask the owner to approve every call. */
+export const SEND_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+};
 
 export const MESSAGES = {
   auth: "WAHA rejected the server's API key — check WAHA_API_KEY.",
@@ -128,6 +148,9 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         links: deps.links,
         mediaIdleTimeoutMs: deps.mediaIdleTimeoutMs ?? MEDIA_IDLE_TIMEOUT_MS,
         transcription: deps.transcription ?? DISABLED_TRANSCRIPTION,
+        sender: deps.sender,
+        uploads: deps.uploads,
+        uploadLinks: deps.uploadLinks,
       });
       logger.info(`tool=${def.name} ms=${Date.now() - start} result=ok`);
       if ("content" in out) return { content: out.content };
@@ -150,7 +173,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
   };
 }
 
-/** Registers `def` with `readOnlyHint: true` and the shared error handling. */
+/** Registers `def` with its annotations (read-only by default) and the shared error handling. */
 export function toMcpTool<InputSchema extends z.ZodType, OutputSchema extends z.ZodType>(
   server: McpServer,
   def: ToolDefinition<InputSchema, OutputSchema>,
@@ -163,7 +186,7 @@ export function toMcpTool<InputSchema extends z.ZodType, OutputSchema extends z.
       description: def.description,
       inputSchema: def.inputSchema,
       ...(def.outputSchema ? { outputSchema: def.outputSchema } : {}),
-      annotations: { readOnlyHint: true },
+      annotations: def.annotations ?? { readOnlyHint: true },
     },
     // Same runtime type; TypeScript cannot reduce the generic Standard Schema
     // inference to `z.output<InputSchema>` (see bsale-mcp's defineTool).

@@ -11,9 +11,10 @@ import { listGroupsTool } from "./listGroups.js";
 import { listPendingRepliesTool } from "./listPendingReplies.js";
 import { listSharedFilesTool } from "./listSharedFiles.js";
 import { searchMessagesTool } from "./searchMessages.js";
+import { sendTextTool } from "./sendText.js";
 import { transcribeAudioTool } from "./transcribeAudio.js";
 
-/** The read-only tools, in the order clients list them. */
+/** Read tools first, then the tools that send, in the order clients list them. */
 export function createTools(): ToolDefinition[] {
   return [
     listGroupsTool,
@@ -29,5 +30,6 @@ export function createTools(): ToolDefinition[] {
     listSharedFilesTool,
     getContactTool,
     transcribeAudioTool,
+    sendTextTool,
   ] as unknown as ToolDefinition[];
 }

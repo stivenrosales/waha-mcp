@@ -25,6 +25,7 @@ import { createFsUploadStore } from "./infrastructure/uploads/fsUploadStore.js";
 import { createUploadLinks } from "./infrastructure/uploads/uploadLinks.js";
 import { createUploadHandler } from "./infrastructure/uploads/uploadRoute.js";
 import { createWahaHttpGateway } from "./infrastructure/waha/WahaHttpGateway.js";
+import { createWahaHttpSender } from "./infrastructure/waha/WahaHttpSender.js";
 
 /** Expired upload slots are removed at startup and on this interval. */
 const UPLOAD_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -94,6 +95,13 @@ async function main(): Promise<void> {
     config,
     links,
     transcription,
+    sender: createWahaHttpSender({
+      baseUrl: config.wahaApiUrl,
+      apiKey: config.wahaApiKey,
+      session: config.wahaSession,
+    }),
+    uploads,
+    uploadLinks,
     logger,
   });
   const app = createApp({

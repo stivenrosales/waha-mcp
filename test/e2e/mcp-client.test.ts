@@ -10,7 +10,7 @@ import {
   type TranscriptionService,
 } from "../../src/application/transcripts.js";
 import { loadConfig } from "../../src/config.js";
-import { WahaAuthError } from "../../src/domain/errors.js";
+import { SendOutcomeUnknownError, WahaAuthError } from "../../src/domain/errors.js";
 import type { UploadStore } from "../../src/domain/ports/UploadStore.js";
 import { bearerGuard } from "../../src/infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "../../src/infrastructure/auth/oauth.js";
@@ -35,6 +35,7 @@ import { createUploadHandler } from "../../src/infrastructure/uploads/uploadRout
 import {
   type InMemoryData,
   InMemoryWahaGateway,
+  RecordingSender,
   rawText,
   rawVoice,
 } from "../fakes/InMemoryWahaGateway.js";
@@ -144,6 +145,7 @@ interface Setup {
   gateway: InMemoryWahaGateway;
   uploads: UploadStore;
   uploadLinks: SignedLinks;
+  sender: RecordingSender;
 }
 
 const scratchDirs: string[] = [];
@@ -156,6 +158,9 @@ afterAll(() => {
   for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
 });
 
+/** Write tools; each later task appends its own. */
+const SEND_TOOLS = ["send_text"];
+
 /** Every e2e test runs twice: CACHE_ENABLED=false (today's path) and with the message cache. */
 let cacheOn = false;
 
@@ -165,6 +170,7 @@ function setup(
   transcription?: (
     served: InMemoryWahaGateway | ReturnType<typeof createCachedGateway>,
   ) => TranscriptionService,
+  sender = new RecordingSender(),
 ): Setup {
   const served = cacheOn
     ? createCachedGateway(gateway, createSqliteMessageStore(openCacheDatabase(":memory:")), {
@@ -199,6 +205,9 @@ function setup(
     config,
     links,
     mediaIdleTimeoutMs: IDLE_MS,
+    sender,
+    uploads,
+    uploadLinks,
     ...(transcription ? { transcription: transcription(served) } : {}),
   });
   const app = createApp({
@@ -224,7 +233,7 @@ function setup(
   });
   const { clientId } = store.registerClient({ redirectUris: ["https://claude.ai/cb"] });
   const { accessToken } = store.issueTokens(clientId, "mcp");
-  return { app, token: accessToken, gateway, uploads, uploadLinks };
+  return { app, token: accessToken, gateway, uploads, uploadLinks, sender };
 }
 
 async function connect(s: Setup): Promise<Client> {
@@ -269,31 +278,93 @@ for (const cache of [false, true])
       cacheOn = cache;
     });
 
-    it("lists exactly the thirteen tools, all readOnlyHint true, none named like send/delete/edit", async () => {
+    it("lists the read tools as read-only and the send tools as approval-needing writes", async () => {
       const client = await connect(setup());
       expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual(
-        [
-          "get_activity_digest",
-          "get_chat_stats",
-          "get_contact",
-          "get_group_info",
-          "get_media",
-          "get_messages",
-          "get_thread",
-          "list_chats",
-          "list_groups",
-          "list_pending_replies",
-          "list_shared_files",
-          "search_messages",
-          "transcribe_audio",
-        ].sort(),
-      );
+      const read = [
+        "get_activity_digest",
+        "get_chat_stats",
+        "get_contact",
+        "get_group_info",
+        "get_media",
+        "get_messages",
+        "get_thread",
+        "list_chats",
+        "list_groups",
+        "list_pending_replies",
+        "list_shared_files",
+        "search_messages",
+        "transcribe_audio",
+      ];
+      expect(tools.map((t) => t.name).sort()).toEqual([...read, ...SEND_TOOLS].sort());
       for (const t of tools) {
-        expect(t.annotations?.readOnlyHint).toBe(true);
-        expect(t.name).not.toMatch(/send|delete|edit|update|create|write|post|remove|set/i);
+        if (read.includes(t.name)) expect(t.annotations).toEqual({ readOnlyHint: true });
+        else
+          expect(t.annotations).toEqual({
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+          });
+        expect(t.name).not.toMatch(/delete|edit|update|remove/i);
       }
+    });
+
+    it("send_text rewrites Markdown for WhatsApp and reports the text it sent", async () => {
+      const s = setup();
+      const client = await connect(s);
+      const r = await call(client, "send_text", {
+        chat_id: "51999@c.us",
+        text: "## Resumen\n**Hola** Ana, mira [esto](https://a.io) 🎉",
+      });
+      expect(r.isError).toBeFalsy();
+      const sent = "*Resumen*\n*Hola* Ana, mira esto: https://a.io 🎉";
+      expect(s.sender.calls).toEqual([
+        { method: "sendText", args: { chatId: "51999@c.us", text: sent } },
+      ]);
+      expect(sc(r)).toEqual({
+        chat_id: "51999@c.us",
+        message_id: "true_sent_1",
+        timestamp: 1_800_000_001,
+        text_sent: sent,
+      });
+      expect(textOf(r)).toContain("Sent to 51999@c.us (message true_sent_1).");
+    });
+
+    it("send_text forwards reply_to and mentions, and validates mentions first", async () => {
+      const s = setup();
+      const client = await connect(s);
+      await call(client, "send_text", {
+        chat_id: "1@g.us",
+        text: "hola @51999",
+        reply_to: "false_1@g.us_X",
+        mentions: ["51999@c.us"],
+      });
+      expect(s.sender.calls[0]?.args).toEqual({
+        chatId: "1@g.us",
+        text: "hola @51999",
+        replyTo: "false_1@g.us_X",
+        mentions: ["51999@c.us"],
+      });
+      const bad = await call(client, "send_text", {
+        chat_id: "1@g.us",
+        text: "hola",
+        mentions: ["51999@c.us"],
+      });
+      expect(bad.isError).toBe(true);
+      expect(textOf(bad)).toBe("Mention @51999 is not in the text.");
+      const long = await call(client, "send_text", { chat_id: "1@g.us", text: "x".repeat(65537) });
+      expect(long.isError).toBe(true);
+      expect(s.sender.calls).toHaveLength(1);
+    });
+
+    it("send_text surfaces an unknown outcome so the model checks before retrying", async () => {
+      const s = setup();
+      s.sender.failWith = new SendOutcomeUnknownError();
+      const r = await call(await connect(s), "send_text", { chat_id: "1@c.us", text: "hola" });
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toBe(new SendOutcomeUnknownError().message);
     });
 
     it("list_pending_replies returns who waits for the owner, with coverage", async () => {

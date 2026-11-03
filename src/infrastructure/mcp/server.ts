@@ -1,7 +1,9 @@
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import type { TranscriptionService } from "../../application/transcripts.js";
 import type { Config } from "../../config.js";
+import type { UploadStore } from "../../domain/ports/UploadStore.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
+import type { WhatsAppSender } from "../../domain/ports/WhatsAppSender.js";
 import type { AuthInfo } from "../auth/bearer.js";
 import { ICON_DATA_URI } from "../http/icon.js";
 import type { SignedLinks } from "../media/signedLink.js";
@@ -10,7 +12,7 @@ import { type Logger, type ToolDefinition, toMcpTool } from "./defineTool.js";
 import { registerPrompts } from "./prompts.js";
 
 const SERVER_NAME = "waha-mcp";
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 
 export interface CreateMcpServerOptions {
   tools: ReadonlyArray<ToolDefinition>;
@@ -22,6 +24,9 @@ export interface CreateMcpServerOptions {
   mediaIdleTimeoutMs?: number;
   /** Voice-note transcription (default: off). */
   transcription?: TranscriptionService;
+  sender: WhatsAppSender;
+  uploads: UploadStore;
+  uploadLinks: SignedLinks;
   logger?: Logger;
 }
 
@@ -38,8 +43,19 @@ const bearerToken = (req: Request): string =>
  * engine mapper lookup is shared across requests, so `getSession()` runs once.
  */
 export function createMcpServer(options: CreateMcpServerOptions): McpServerHandle {
-  const { tools, instructions, gateway, config, links, logger, mediaIdleTimeoutMs, transcription } =
-    options;
+  const {
+    tools,
+    instructions,
+    gateway,
+    config,
+    links,
+    logger,
+    mediaIdleTimeoutMs,
+    transcription,
+    sender,
+    uploads,
+    uploadLinks,
+  } = options;
   const mapper = createEngineResolver(gateway);
 
   const http = createMcpHandler(() => {
@@ -60,6 +76,9 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
         logger,
         mediaIdleTimeoutMs,
         transcription,
+        sender,
+        uploads,
+        uploadLinks,
       });
     registerPrompts(server, { timezone: config.timezone });
     return server;

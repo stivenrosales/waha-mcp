@@ -1,5 +1,6 @@
 import { WahaNotFoundError } from "../../src/domain/errors.js";
 import type { WahaGateway } from "../../src/domain/ports/WahaGateway.js";
+import type { SentMessage, WhatsAppSender } from "../../src/domain/ports/WhatsAppSender.js";
 
 type Raw = Record<string, unknown>;
 
@@ -242,4 +243,40 @@ export function rawVoice(
       },
     },
   };
+}
+
+/** Records every send; `failWith` makes the next sends throw that error instead. */
+export class RecordingSender implements WhatsAppSender {
+  calls: { method: string; args: unknown }[] = [];
+  failWith?: Error;
+  private n = 0;
+
+  private record(method: string, args: unknown): Promise<SentMessage> {
+    if (this.failWith) return Promise.reject(this.failWith);
+    this.calls.push({ method, args });
+    this.n += 1;
+    return Promise.resolve({ id: `true_sent_${this.n}`, timestamp: 1_800_000_000 + this.n });
+  }
+
+  sendText(q: Parameters<WhatsAppSender["sendText"]>[0]) {
+    return this.record("sendText", q);
+  }
+  sendImage(q: Parameters<WhatsAppSender["sendImage"]>[0]) {
+    return this.record("sendImage", q);
+  }
+  sendVideo(q: Parameters<WhatsAppSender["sendVideo"]>[0]) {
+    return this.record("sendVideo", q);
+  }
+  sendFile(q: Parameters<WhatsAppSender["sendFile"]>[0]) {
+    return this.record("sendFile", q);
+  }
+  sendVoice(q: Parameters<WhatsAppSender["sendVoice"]>[0]) {
+    return this.record("sendVoice", q);
+  }
+  sendLocation(q: Parameters<WhatsAppSender["sendLocation"]>[0]) {
+    return this.record("sendLocation", q);
+  }
+  sendContact(q: Parameters<WhatsAppSender["sendContact"]>[0]) {
+    return this.record("sendContact", q);
+  }
 }

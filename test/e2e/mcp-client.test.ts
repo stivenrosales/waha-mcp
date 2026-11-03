@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Hono } from "hono";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCachedGateway } from "../../src/application/cachedMessages.js";
 import {
   createTranscriptionService,
@@ -9,6 +11,7 @@ import {
 } from "../../src/application/transcripts.js";
 import { loadConfig } from "../../src/config.js";
 import { WahaAuthError } from "../../src/domain/errors.js";
+import type { UploadStore } from "../../src/domain/ports/UploadStore.js";
 import { bearerGuard } from "../../src/infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "../../src/infrastructure/auth/oauth.js";
 import { createLoginLimiter } from "../../src/infrastructure/auth/rateLimit.js";
@@ -23,9 +26,12 @@ import { SERVER_INSTRUCTIONS } from "../../src/infrastructure/mcp/instructions.j
 import { createMcpServer } from "../../src/infrastructure/mcp/server.js";
 import { createTools } from "../../src/infrastructure/mcp/tools/index.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
-import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
+import { createSignedLinks, type SignedLinks } from "../../src/infrastructure/media/signedLink.js";
 import { createOpenAiCompatibleTranscriber } from "../../src/infrastructure/transcription/openaiCompatible.js";
 import { createWahaAudioSource } from "../../src/infrastructure/transcription/wahaAudioSource.js";
+import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
+import { createUploadLinks } from "../../src/infrastructure/uploads/uploadLinks.js";
+import { createUploadHandler } from "../../src/infrastructure/uploads/uploadRoute.js";
 import {
   type InMemoryData,
   InMemoryWahaGateway,
@@ -136,7 +142,19 @@ interface Setup {
   app: Hono;
   token: string;
   gateway: InMemoryWahaGateway;
+  uploads: UploadStore;
+  uploadLinks: SignedLinks;
 }
+
+const scratchDirs: string[] = [];
+const scratch = () => {
+  const dir = mkdtempSync(join(tmpdir(), "e2e-uploads-"));
+  scratchDirs.push(dir);
+  return dir;
+};
+afterAll(() => {
+  for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 /** Every e2e test runs twice: CACHE_ENABLED=false (today's path) and with the message cache. */
 let cacheOn = false;
@@ -168,6 +186,12 @@ function setup(
     secret: new Uint8Array(32).fill(3),
     ttlSeconds: config.mediaLinkTtlSeconds,
   });
+  const uploadLinks = createUploadLinks(new Uint8Array(32).fill(3), config.uploadTtlSeconds);
+  const uploads = createFsUploadStore({
+    dir: join(scratch(), "uploads"),
+    ttlSeconds: config.uploadTtlSeconds,
+    maxBytes: config.uploadMaxBytes,
+  });
   const mcp = createMcpServer({
     tools: createTools(),
     instructions: SERVER_INSTRUCTIONS,
@@ -192,10 +216,15 @@ function setup(
       maxBytes: config.mediaMaxBytes,
       idleTimeoutMs: IDLE_MS,
     }),
+    upload: createUploadHandler({
+      store: uploads,
+      links: uploadLinks,
+      maxBytes: config.uploadMaxBytes,
+    }),
   });
   const { clientId } = store.registerClient({ redirectUris: ["https://claude.ai/cb"] });
   const { accessToken } = store.issueTokens(clientId, "mcp");
-  return { app, token: accessToken, gateway };
+  return { app, token: accessToken, gateway, uploads, uploadLinks };
 }
 
 async function connect(s: Setup): Promise<Client> {
@@ -491,6 +520,17 @@ for (const cache of [false, true])
         expect(res.headers.get("content-type")).toBe("image/svg+xml");
         expect(await res.text()).toContain("<svg");
       }
+    });
+
+    it("mounts /upload/:token: the signed token alone lets one file in", async () => {
+      const s = setup();
+      const slot = s.uploads.create({ filename: "a.txt", mimetype: null });
+      const url = `${BASE}/upload/${s.uploadLinks.sign(slot.id)}`;
+      expect((await s.app.fetch(new Request(url))).status).toBe(200);
+      const res = await s.app.fetch(new Request(url, { method: "PUT", body: "hola" }));
+      expect(res.status).toBe(200);
+      expect((await s.app.fetch(new Request(url, { method: "PUT", body: "x" }))).status).toBe(409);
+      expect((await s.app.fetch(new Request(`${BASE}/upload/forged`))).status).toBe(404);
     });
 
     it("serves /health without auth and rejects /mcp without a token (401)", async () => {

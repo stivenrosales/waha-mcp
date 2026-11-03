@@ -21,7 +21,13 @@ import { createMediaHandler } from "./infrastructure/media/mediaRoute.js";
 import { createSignedLinks, loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
 import { createOpenAiCompatibleTranscriber } from "./infrastructure/transcription/openaiCompatible.js";
 import { createWahaAudioSource } from "./infrastructure/transcription/wahaAudioSource.js";
+import { createFsUploadStore } from "./infrastructure/uploads/fsUploadStore.js";
+import { createUploadLinks } from "./infrastructure/uploads/uploadLinks.js";
+import { createUploadHandler } from "./infrastructure/uploads/uploadRoute.js";
 import { createWahaHttpGateway } from "./infrastructure/waha/WahaHttpGateway.js";
+
+/** Expired upload slots are removed at startup and on this interval. */
+const UPLOAD_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 /** The only file that reads `process.env`. */
 async function main(): Promise<void> {
@@ -70,10 +76,16 @@ async function main(): Promise<void> {
         })
       : DISABLED_TRANSCRIPTION;
   if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");
-  const links = createSignedLinks({
-    secret: loadOrCreateMediaSecret(config.dataDir),
-    ttlSeconds: config.mediaLinkTtlSeconds,
+  const mediaSecret = loadOrCreateMediaSecret(config.dataDir);
+  const links = createSignedLinks({ secret: mediaSecret, ttlSeconds: config.mediaLinkTtlSeconds });
+  const uploadLinks = createUploadLinks(mediaSecret, config.uploadTtlSeconds);
+  const uploads = createFsUploadStore({
+    dir: join(config.dataDir, "uploads"),
+    ttlSeconds: config.uploadTtlSeconds,
+    maxBytes: config.uploadMaxBytes,
   });
+  uploads.sweep();
+  setInterval(() => uploads.sweep(), UPLOAD_SWEEP_INTERVAL_MS).unref();
   const tools = createTools();
   const mcp = createMcpServer({
     tools,
@@ -97,6 +109,12 @@ async function main(): Promise<void> {
       gateway,
       links,
       maxBytes: config.mediaMaxBytes,
+      logger,
+    }),
+    upload: createUploadHandler({
+      store: uploads,
+      links: uploadLinks,
+      maxBytes: config.uploadMaxBytes,
       logger,
     }),
   });

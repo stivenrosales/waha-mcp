@@ -51,20 +51,20 @@ Correct WhatsApp formatting is a first-class requirement, not polish.
 
 ### 6.1 Getting a file from the conversation to the server
 
-1. *Base64 in the tool call.* Rejected: bytes become model output tokens (1 MB ≈ 1.3 M
+1. _Base64 in the tool call._ Rejected: bytes become model output tokens (1 MB ≈ 1.3 M
    chars), slow, expensive, truncates. The model often does not even have the raw bytes.
-2. *Signed one-time upload link* — **chosen.** A tool returns a short-lived URL; the file is
+2. _Signed one-time upload link_ — **chosen.** A tool returns a short-lived URL; the file is
    PUT/POSTed to it outside the model; the send tool references it by `upload_id`. Two ways
    to fill it: Claude's code sandbox runs `curl` (needs network egress to the server's domain
    enabled in the client), or the owner opens the link in a browser and drops the file.
-3. *Public URLs only.* Does not cover files given to Claude in the chat.
+3. _Public URLs only._ Does not cover files given to Claude in the chat.
 
 ### 6.2 Tool shape
 
-1. *One `send_message` tool with a `kind` union.* Rejected: large conditional schema, more
+1. _One `send_message` tool with a `kind` union._ Rejected: large conditional schema, more
    model errors.
-2. *One tool per WAHA endpoint.* Rejected: the model must pick image vs document vs voice.
-3. *Hybrid* — **chosen.** `send_text`, `send_media`, `send_location`, `send_contact`,
+2. _One tool per WAHA endpoint._ Rejected: the model must pick image vs document vs voice.
+3. _Hybrid_ — **chosen.** `send_text`, `send_media`, `send_location`, `send_contact`,
    `create_upload_link`. `send_media` picks the WAHA endpoint from the mimetype, with an
    optional override.
 
@@ -75,13 +75,13 @@ Correct WhatsApp formatting is a first-class requirement, not polish.
 All send tools take `chat_id` (`…@c.us`, `…@lid` or `…@g.us`, as returned by `list_chats`,
 `list_groups` or `get_contact`) and return the sent message id and timestamp.
 
-| Tool | Inputs | Notes |
-|---|---|---|
-| `send_text` | `chat_id`, `text`, `reply_to?` (message id), `mentions?` (contact ids) | Text is normalized to WhatsApp format (7.3). Mentions: each id must appear as `@<number>` in the text; the tool fails with a clear message otherwise. Link previews left to WAHA defaults. |
-| `create_upload_link` | `filename`, `mimetype?` | Returns `upload_id`, `upload_url`, `expires_at`, and a ready `curl` command. |
-| `send_media` | `chat_id`, exactly one of `upload_id` / `media_id` / `url`; `caption?`, `as?` (`auto`\|`image`\|`video`\|`voice`\|`document`, default `auto`), `filename?`, `reply_to?` | `auto`: `image/*` (not svg/gif-as-doc edge cases, builder's call) → image; `video/*` → video; `audio/*` → voice note (WAHA `convert: true`); anything else → document. `as: "document"` sends a photo without recompression. Caption is normalized like text. Voice notes carry no caption: passing one is an error, not a silent drop. |
-| `send_location` | `chat_id`, `latitude`, `longitude`, `title?` | |
-| `send_contact` | `chat_id`, `full_name`, `phone_number`, `organization?` | One contact per call. |
+| Tool                 | Inputs                                                                                                                                                                  | Notes                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `send_text`          | `chat_id`, `text`, `reply_to?` (message id), `mentions?` (contact ids)                                                                                                  | Text is normalized to WhatsApp format (7.3). Mentions: each id must appear as `@<number>` in the text; the tool fails with a clear message otherwise. Link previews left to WAHA defaults.                                                                                                                                              |
+| `create_upload_link` | `filename`, `mimetype?`                                                                                                                                                 | Returns `upload_id`, `upload_url`, `expires_at`, and a ready `curl` command.                                                                                                                                                                                                                                                            |
+| `send_media`         | `chat_id`, exactly one of `upload_id` / `media_id` / `url`; `caption?`, `as?` (`auto`\|`image`\|`video`\|`voice`\|`document`, default `auto`), `filename?`, `reply_to?` | `auto`: `image/*` (not svg/gif-as-doc edge cases, builder's call) → image; `video/*` → video; `audio/*` → voice note (WAHA `convert: true`); anything else → document. `as: "document"` sends a photo without recompression. Caption is normalized like text. Voice notes carry no caption: passing one is an error, not a silent drop. |
+| `send_location`      | `chat_id`, `latitude`, `longitude`, `title?`                                                                                                                            |                                                                                                                                                                                                                                                                                                                                         |
+| `send_contact`       | `chat_id`, `full_name`, `phone_number`, `organization?`                                                                                                                 | One contact per call.                                                                                                                                                                                                                                                                                                                   |
 
 Annotations for every send tool and `create_upload_link`: `readOnlyHint: false`,
 `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: true`, so clients ask the
@@ -131,7 +131,7 @@ Two layers:
      with WhatsApp bold and is **left as is** (it is valid WhatsApp bold);
    - `# Heading` (any level) → `*Heading*`;
    - `[text](url)` → `text: url` (or just `url` when text equals url);
-   - Markdown tables → one line per row, cells joined with ` · `, header row bolded;
+   - Markdown tables → one line per row, cells joined with `·`, header row bolded;
    - horizontal rules (`---`, `***`) removed;
    - content inside code fences and inline code is never touched;
    - trailing whitespace trimmed, 3+ blank lines collapsed to 2.

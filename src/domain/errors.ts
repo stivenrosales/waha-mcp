@@ -68,3 +68,21 @@ export class TranscriptionError extends Error {
     this.name = "TranscriptionError";
   }
 }
+
+/** A send request left the server but WAHA never confirmed it: the message may or may not exist. */
+export class SendOutcomeUnknownError extends Error {
+  constructor() {
+    super(
+      "WAHA did not confirm the send in time. The message may or may not have been sent: check the chat with get_messages before retrying.",
+    );
+    this.name = "SendOutcomeUnknownError";
+  }
+}
+
+/** The connected WAHA build cannot send media (Core before 2026.6.1). */
+export class MediaSendUnsupportedError extends Error {
+  constructor() {
+    super("This WAHA does not support sending media; update to 2026.6.1 or later.");
+    this.name = "MediaSendUnsupportedError";
+  }
+}

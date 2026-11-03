@@ -13,7 +13,9 @@ import {
 import type { Config } from "../../config.js";
 import {
   InvalidInputError,
+  MediaSendUnsupportedError,
   MediaStalledError,
+  SendOutcomeUnknownError,
   TranscriptionError,
   UnsupportedEngineError,
   WahaAuthError,
@@ -97,7 +99,9 @@ function describeError(error: unknown): { message: string; unexpected: boolean }
   if (
     error instanceof UnsupportedEngineError ||
     error instanceof InvalidInputError ||
-    error instanceof TranscriptionError
+    error instanceof TranscriptionError ||
+    error instanceof SendOutcomeUnknownError ||
+    error instanceof MediaSendUnsupportedError
   )
     return { message: error.message, unexpected: false };
   return { message: MESSAGES.unexpected, unexpected: true };

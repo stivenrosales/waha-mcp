@@ -18,6 +18,10 @@ export interface Config {
   mediaInlineMaxBytes: number;
   /** Largest file `/media/:token` will stream; bigger files get a 413. */
   mediaMaxBytes: number;
+  /** Largest file accepted on `/upload/:token`. */
+  uploadMaxBytes: number;
+  /** How long an upload link and its stored file live, in seconds. */
+  uploadTtlSeconds: number;
   /** Keep a SQLite copy of read messages in `DATA_DIR/cache.db`. */
   cacheEnabled: boolean;
   /** How far back from the newest cached message every sync re-reads (edits, deletions). */
@@ -124,6 +128,8 @@ const envSchema = z
     MEDIA_LINK_TTL_SECONDS: positiveInt("MEDIA_LINK_TTL_SECONDS", 600),
     MEDIA_INLINE_MAX_BYTES: positiveInt("MEDIA_INLINE_MAX_BYTES", 5242880),
     MEDIA_MAX_BYTES: positiveInt("MEDIA_MAX_BYTES", 104857600),
+    UPLOAD_MAX_BYTES: positiveInt("UPLOAD_MAX_BYTES", 67108864),
+    UPLOAD_TTL_SECONDS: positiveInt("UPLOAD_TTL_SECONDS", 900),
     CACHE_ENABLED: boolean("CACHE_ENABLED", true),
     CACHE_REFRESH_HOURS: positiveInt("CACHE_REFRESH_HOURS", 48),
     CACHE_MAX_AGE_DAYS: nonNegativeInt("CACHE_MAX_AGE_DAYS", 0),
@@ -193,6 +199,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     mediaLinkTtlSeconds: v.MEDIA_LINK_TTL_SECONDS,
     mediaInlineMaxBytes: v.MEDIA_INLINE_MAX_BYTES,
     mediaMaxBytes: v.MEDIA_MAX_BYTES,
+    uploadMaxBytes: v.UPLOAD_MAX_BYTES,
+    uploadTtlSeconds: v.UPLOAD_TTL_SECONDS,
     cacheEnabled: v.CACHE_ENABLED,
     cacheRefreshHours: v.CACHE_REFRESH_HOURS,
     cacheMaxAgeDays: v.CACHE_MAX_AGE_DAYS,

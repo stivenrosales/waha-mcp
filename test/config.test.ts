@@ -50,6 +50,17 @@ describe("loadConfig", () => {
     );
   });
 
+  it("defaults the upload limits and rejects non-positive values", () => {
+    const c = loadConfig(minimal);
+    expect(c.uploadMaxBytes).toBe(67108864);
+    expect(c.uploadTtlSeconds).toBe(900);
+    const custom = loadConfig({ ...minimal, UPLOAD_MAX_BYTES: "1024", UPLOAD_TTL_SECONDS: "60" });
+    expect(custom.uploadMaxBytes).toBe(1024);
+    expect(custom.uploadTtlSeconds).toBe(60);
+    expect(() => loadConfig({ ...minimal, UPLOAD_MAX_BYTES: "0" })).toThrow(/UPLOAD_MAX_BYTES/);
+    expect(() => loadConfig({ ...minimal, UPLOAD_TTL_SECONDS: "x" })).toThrow(/UPLOAD_TTL_SECONDS/);
+  });
+
   it("reads MEDIA_MAX_BYTES and rejects non-positive values", () => {
     expect(loadConfig({ ...minimal, MEDIA_MAX_BYTES: "2048" }).mediaMaxBytes).toBe(2048);
     expect(() => loadConfig({ ...minimal, MEDIA_MAX_BYTES: "0" })).toThrow(/MEDIA_MAX_BYTES/);

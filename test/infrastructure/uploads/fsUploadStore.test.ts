@@ -69,7 +69,7 @@ describe("createFsUploadStore", () => {
     expect(s.get("../x")).toBeNull();
   });
 
-  it("resolves the mimetype: tool argument, then upload Content-Type, then extension", async () => {
+  it("resolves the mimetype: tool argument, then known extension, then upload Content-Type", async () => {
     const s = store();
     const a = s.create({ filename: "foto.JPG", mimetype: null });
     await s.write(a.id, stream("x"), null);
@@ -77,9 +77,12 @@ describe("createFsUploadStore", () => {
     const b = s.create({ filename: "foto.jpg", mimetype: null });
     await s.write(b.id, stream("x"), "application/octet-stream");
     expect((await s.read(b.id))?.mimetype).toBe("image/jpeg");
-    const c = s.create({ filename: "foto.jpg", mimetype: null });
+    const c = s.create({ filename: "foto", mimetype: null });
     await s.write(c.id, stream("x"), "image/png; charset=binary");
     expect((await s.read(c.id))?.mimetype).toBe("image/png");
+    const e = s.create({ filename: "Cotización.pdf", mimetype: null });
+    await s.write(e.id, stream("x"), "text/plain;charset=UTF-8");
+    expect((await s.read(e.id))?.mimetype).toBe("application/pdf");
     const d = s.create({ filename: "foto.jpg", mimetype: "image/webp" });
     await s.write(d.id, stream("x"), "image/png");
     expect((await s.read(d.id))?.mimetype).toBe("image/webp");

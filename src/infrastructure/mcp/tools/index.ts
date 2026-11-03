@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "../defineTool.js";
+import { createUploadLinkTool } from "./createUploadLink.js";
 import { getActivityDigestTool } from "./getActivityDigest.js";
 import { getChatStatsTool } from "./getChatStats.js";
 import { getContactTool } from "./getContact.js";
@@ -11,6 +12,7 @@ import { listGroupsTool } from "./listGroups.js";
 import { listPendingRepliesTool } from "./listPendingReplies.js";
 import { listSharedFilesTool } from "./listSharedFiles.js";
 import { searchMessagesTool } from "./searchMessages.js";
+import { sendMediaTool } from "./sendMedia.js";
 import { sendTextTool } from "./sendText.js";
 import { transcribeAudioTool } from "./transcribeAudio.js";
 
@@ -31,5 +33,7 @@ export function createTools(): ToolDefinition[] {
     getContactTool,
     transcribeAudioTool,
     sendTextTool,
+    createUploadLinkTool,
+    sendMediaTool,
   ] as unknown as ToolDefinition[];
 }

@@ -197,8 +197,10 @@ description, server instructions.
 - **Other clients.** Send tools are exposed to every client, no per-client filtering. If a
   client (e.g. ChatGPT) restricts write tools, that is the client's policy; reading must
   still work there, checked manually before release.
-- **Mimetype precedence.** The tool's `mimetype` argument wins over the upload's
-  Content-Type, which wins over the filename extension.
+- **Mimetype precedence.** The tool's `mimetype` argument wins, then the filename's extension
+  when it is a known one, then the upload's Content-Type. Revised during implementation: a raw
+  PUT often carries a client default (`text/plain`) that would mislabel a PDF, while the
+  filename is chosen deliberately.
 - **Size caps.** `media_id` forwards use `MEDIA_MAX_BYTES`; uploads use `UPLOAD_MAX_BYTES`.
 
 ## 10. Left to the builder

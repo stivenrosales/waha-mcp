@@ -40,6 +40,16 @@ export function mimetypeFromFilename(name: string): string {
   return EXTENSIONS[extname(name).toLowerCase()] ?? GENERIC;
 }
 
+/**
+ * Tool argument, then a known extension, then the upload's Content-Type: clients often send
+ * a default type (`text/plain` for a raw PUT body), while the filename was chosen on purpose.
+ */
+function resolveMimetype(m: Meta): string {
+  if (m.mimetype) return m.mimetype;
+  const fromName = mimetypeFromFilename(m.filename);
+  return fromName !== GENERIC ? fromName : (m.contentType ?? GENERIC);
+}
+
 interface Meta extends UploadSlot {
   /** Content-Type the upload arrived with, when meaningful. */
   contentType: string | null;
@@ -161,7 +171,7 @@ export function createFsUploadStore(opts: {
       return {
         data,
         filename: m.filename,
-        mimetype: m.mimetype ?? m.contentType ?? mimetypeFromFilename(m.filename),
+        mimetype: resolveMimetype(m),
       };
     },
 

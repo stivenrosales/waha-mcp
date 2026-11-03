@@ -19,3 +19,21 @@ export function assertTextLength(text: string): void {
       `The message is ${text.length} characters long; WhatsApp allows ${MAX_TEXT_CHARS}.`,
     );
 }
+
+export type MediaKind = "image" | "video" | "voice" | "document";
+export type MediaChoice = "auto" | MediaKind;
+
+/**
+ * How a file goes out on WhatsApp. `auto` follows the mimetype; SVG is sent as a document
+ * (WhatsApp does not render it) and GIF as a video (WhatsApp's own GIFs are videos).
+ */
+export function pickMediaKind(mimetype: string, as: MediaChoice): MediaKind {
+  if (as !== "auto") return as;
+  const type = (mimetype.split(";")[0] ?? "").trim().toLowerCase();
+  if (type === "image/svg+xml") return "document";
+  if (type === "image/gif") return "video";
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "voice";
+  return "document";
+}

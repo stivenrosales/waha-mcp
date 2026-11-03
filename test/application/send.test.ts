@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assertMentions, assertTextLength, MAX_TEXT_CHARS } from "../../src/application/send.js";
+import {
+  assertMentions,
+  assertTextLength,
+  MAX_TEXT_CHARS,
+  pickMediaKind,
+} from "../../src/application/send.js";
 import { InvalidInputError } from "../../src/domain/errors.js";
 
 describe("assertMentions", () => {
@@ -22,5 +27,23 @@ describe("assertTextLength", () => {
     expect(MAX_TEXT_CHARS).toBe(65536);
     expect(() => assertTextLength("x".repeat(65536))).not.toThrow();
     expect(() => assertTextLength("x".repeat(65537))).toThrow(InvalidInputError);
+  });
+});
+
+describe("pickMediaKind", () => {
+  it("picks the WhatsApp message kind from the mimetype", () => {
+    expect(pickMediaKind("image/jpeg", "auto")).toBe("image");
+    expect(pickMediaKind("image/png", "auto")).toBe("image");
+    expect(pickMediaKind("image/svg+xml", "auto")).toBe("document");
+    expect(pickMediaKind("image/gif", "auto")).toBe("video");
+    expect(pickMediaKind("video/mp4", "auto")).toBe("video");
+    expect(pickMediaKind("audio/ogg; codecs=opus", "auto")).toBe("voice");
+    expect(pickMediaKind("application/pdf", "auto")).toBe("document");
+    expect(pickMediaKind("application/octet-stream", "auto")).toBe("document");
+  });
+
+  it("honors an explicit choice", () => {
+    expect(pickMediaKind("image/png", "document")).toBe("document");
+    expect(pickMediaKind("audio/mpeg", "document")).toBe("document");
   });
 });

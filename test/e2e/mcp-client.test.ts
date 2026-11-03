@@ -159,7 +159,7 @@ afterAll(() => {
 });
 
 /** Write tools; each later task appends its own. */
-const SEND_TOOLS = ["send_text"];
+const SEND_TOOLS = ["send_text", "create_upload_link", "send_media"];
 
 /** Every e2e test runs twice: CACHE_ENABLED=false (today's path) and with the message cache. */
 let cacheOn = false;
@@ -365,6 +365,171 @@ for (const cache of [false, true])
       const r = await call(await connect(s), "send_text", { chat_id: "1@c.us", text: "hola" });
       expect(r.isError).toBe(true);
       expect(textOf(r)).toBe(new SendOutcomeUnknownError().message);
+    });
+
+    it("create_upload_link returns a one-time link and a ready curl command", async () => {
+      const s = setup();
+      const r = await call(await connect(s), "create_upload_link", {
+        filename: "Cotización Ñandú 🎉.pdf",
+      });
+      expect(r.isError).toBeFalsy();
+      const d = sc(r) as {
+        upload_id: string;
+        upload_url: string;
+        expires_at: string;
+        curl: string;
+      };
+      expect(d.upload_url).toMatch(/^http:\/\/localhost:3000\/upload\/[A-Za-z0-9_.-]+$/);
+      expect(d.curl).toBe(`curl -fsS -T '<path-to-file>' '${d.upload_url}'`);
+      expect(Date.parse(d.expires_at)).toBeGreaterThan(Date.now());
+      expect(s.uploads.get(d.upload_id)).toMatchObject({
+        filename: "Cotización Ñandú 🎉.pdf",
+        uploaded: false,
+      });
+      expect(textOf(r)).toContain("send_media");
+    });
+
+    it("send_media sends an uploaded file by its kind, then forgets it", async () => {
+      const s = setup();
+      const client = await connect(s);
+      const upload = async (filename: string, content: string, type?: string) => {
+        const d = sc(await call(client, "create_upload_link", { filename })) as {
+          upload_id: string;
+          upload_url: string;
+        };
+        const res = await s.app.fetch(
+          new Request(d.upload_url, {
+            method: "PUT",
+            body: content,
+            headers: type ? { "content-type": type } : {},
+          }),
+        );
+        expect(res.status).toBe(200);
+        return d.upload_id;
+      };
+      const pdf = await upload("Cotización Ñandú 🎉.pdf", "%PDF");
+      const r = await call(client, "send_media", {
+        chat_id: "51999@c.us",
+        upload_id: pdf,
+        caption: "**Tu cotización**",
+      });
+      expect(r.isError).toBeFalsy();
+      expect(s.sender.calls[0]).toEqual({
+        method: "sendFile",
+        args: {
+          chatId: "51999@c.us",
+          caption: "*Tu cotización*",
+          file: {
+            data: new TextEncoder().encode("%PDF"),
+            mimetype: "application/pdf",
+            filename: "Cotización Ñandú 🎉.pdf",
+          },
+        },
+      });
+      expect(sc(r).text_sent).toBe("*Tu cotización*");
+      expect(s.uploads.get(pdf)).toBeNull();
+
+      const photo = await upload("foto.jpg", "jpg");
+      await call(client, "send_media", { chat_id: "51999@c.us", upload_id: photo });
+      const voice = await upload("nota.ogg", "ogg");
+      await call(client, "send_media", { chat_id: "51999@c.us", upload_id: voice, reply_to: "r1" });
+      const asDoc = await upload("foto.png", "png", "image/png");
+      await call(client, "send_media", { chat_id: "51999@c.us", upload_id: asDoc, as: "document" });
+      expect(s.sender.calls.map((c) => c.method)).toEqual([
+        "sendFile",
+        "sendImage",
+        "sendVoice",
+        "sendFile",
+      ]);
+      expect(s.sender.calls[2]?.args).toMatchObject({ replyTo: "r1" });
+    });
+
+    it("send_media explains missing, reused and failed uploads, keeping the file on failure", async () => {
+      const s = setup();
+      const client = await connect(s);
+      const d = sc(await call(client, "create_upload_link", { filename: "a.pdf" })) as {
+        upload_id: string;
+        upload_url: string;
+      };
+      const pending = await call(client, "send_media", {
+        chat_id: "1@c.us",
+        upload_id: d.upload_id,
+      });
+      expect(pending.isError).toBe(true);
+      expect(textOf(pending)).toMatch(
+        /^The file has not been uploaded yet\. Upload it to http:\/\/localhost:3000\/upload\/\S+ first\.$/,
+      );
+      await s.app.fetch(new Request(d.upload_url, { method: "PUT", body: "x" }));
+
+      s.sender.failWith = new SendOutcomeUnknownError();
+      const failed = await call(client, "send_media", {
+        chat_id: "1@c.us",
+        upload_id: d.upload_id,
+      });
+      expect(textOf(failed)).toBe(new SendOutcomeUnknownError().message);
+      expect(s.uploads.get(d.upload_id)?.uploaded).toBe(true);
+
+      s.sender.failWith = undefined;
+      expect(
+        (await call(client, "send_media", { chat_id: "1@c.us", upload_id: d.upload_id })).isError,
+      ).toBeFalsy();
+      const again = await call(client, "send_media", { chat_id: "1@c.us", upload_id: d.upload_id });
+      expect(again.isError).toBe(true);
+      expect(textOf(again)).toBe(
+        "This upload was already sent or has expired. Create a new upload link.",
+      );
+      expect(s.sender.calls).toHaveLength(1);
+    });
+
+    it("send_media forwards an attachment already in WhatsApp, within MEDIA_MAX_BYTES", async () => {
+      const s = setup();
+      const client = await connect(s);
+      const ids = await mediaIds(client, DIRECT);
+      const r = await call(client, "send_media", { chat_id: "1@g.us", media_id: ids[2] });
+      expect(r.isError).toBeFalsy();
+      const args = s.sender.calls[0]?.args as { file: { data: Uint8Array; mimetype: string } };
+      expect(s.sender.calls[0]?.method).toBe("sendFile");
+      expect(args.file.mimetype).toBe("application/pdf");
+      expect(args.file.data.byteLength).toBe(50);
+      const big = await call(client, "send_media", { chat_id: "1@g.us", media_id: ids[4] });
+      expect(big.isError).toBe(true);
+      expect(textOf(big)).toBe("This file is too large to forward.");
+    });
+
+    it("send_media passes public URLs to WAHA and validates its arguments", async () => {
+      const s = setup();
+      const client = await connect(s);
+      await call(client, "send_media", { chat_id: "1@c.us", url: "https://x.io/docs/menu.pdf" });
+      expect(s.sender.calls[0]).toEqual({
+        method: "sendFile",
+        args: {
+          chatId: "1@c.us",
+          file: {
+            url: "https://x.io/docs/menu.pdf",
+            mimetype: "application/pdf",
+            filename: "menu.pdf",
+          },
+        },
+      });
+      for (const args of [
+        { chat_id: "1@c.us" },
+        { chat_id: "1@c.us", url: "https://x.io/a.pdf", media_id: "m" },
+      ]) {
+        const r = await call(client, "send_media", args);
+        expect(textOf(r)).toBe("Pass exactly one of upload_id, media_id or url.");
+      }
+      const http = await call(client, "send_media", {
+        chat_id: "1@c.us",
+        url: "http://10.0.0.1/a.pdf",
+      });
+      expect(textOf(http)).toBe("url must be a public https URL.");
+      const voice = await call(client, "send_media", {
+        chat_id: "1@c.us",
+        url: "https://x.io/nota.ogg",
+        caption: "hola",
+      });
+      expect(textOf(voice)).toBe("Voice notes cannot have a caption.");
+      expect(s.sender.calls).toHaveLength(1);
     });
 
     it("list_pending_replies returns who waits for the owner, with coverage", async () => {

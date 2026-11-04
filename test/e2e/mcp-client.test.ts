@@ -7,32 +7,35 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCachedGateway } from "../../src/application/cachedMessages.js";
 import {
   createTranscriptionService,
+  DISABLED_TRANSCRIPTION,
   type TranscriptionService,
 } from "../../src/application/transcripts.js";
+import { composeApp } from "../../src/composition.js";
 import { loadConfig } from "../../src/config.js";
 import { SendOutcomeUnknownError, WahaAuthError } from "../../src/domain/errors.js";
 import type { UploadStore } from "../../src/domain/ports/UploadStore.js";
-import { bearerGuard } from "../../src/infrastructure/auth/bearer.js";
-import { createOAuthRoutes } from "../../src/infrastructure/auth/oauth.js";
-import { createLoginLimiter } from "../../src/infrastructure/auth/rateLimit.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
 import {
   createSqliteMessageStore,
   openCacheDatabase,
 } from "../../src/infrastructure/cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
-import { createApp } from "../../src/infrastructure/http/app.js";
-import { SERVER_INSTRUCTIONS } from "../../src/infrastructure/mcp/instructions.js";
-import { createMcpServer } from "../../src/infrastructure/mcp/server.js";
-import { createTools } from "../../src/infrastructure/mcp/tools/index.js";
+import { generateDek, wrapDek } from "../../src/infrastructure/crypto/envelope.js";
+import {
+  ADMIN_INSTRUCTIONS,
+  SERVER_INSTRUCTIONS,
+} from "../../src/infrastructure/mcp/instructions.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { createSignedLinks, type SignedLinks } from "../../src/infrastructure/media/signedLink.js";
+import type { buildTenantRuntime } from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createOpenAiCompatibleTranscriber } from "../../src/infrastructure/transcription/openaiCompatible.js";
 import { createWahaAudioSource } from "../../src/infrastructure/transcription/wahaAudioSource.js";
 import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
 import { createUploadLinks } from "../../src/infrastructure/uploads/uploadLinks.js";
 import { createUploadHandler } from "../../src/infrastructure/uploads/uploadRoute.js";
+import { createEngineResolver } from "../../src/infrastructure/waha/engines/index.js";
+import { FakeSessionAdmin } from "../fakes/FakeSessionAdmin.js";
 import {
   type InMemoryData,
   InMemoryWahaGateway,
@@ -55,6 +58,8 @@ const INLINE_MAX = 1000;
 const MAX_BYTES = 5000;
 /** Idle timeout for media bodies; production uses 30 s. */
 const IDLE_MS = 50;
+const MASTER_KEY = Buffer.alloc(32, 7);
+const MEDIA_SECRET = new Uint8Array(32).fill(3);
 
 type Raw = Record<string, unknown>;
 const fixture = (path: string): Raw[] =>
@@ -148,6 +153,9 @@ interface Setup {
   uploads: UploadStore;
   uploadLinks: SignedLinks;
   sender: RecordingSender;
+  tenantId: string;
+  /** Access token of a member (non-admin) tenant's user. */
+  memberToken: string;
 }
 
 const scratchDirs: string[] = [];
@@ -195,12 +203,13 @@ function setup(
     WAHA_API_URL: WAHA_URL,
     WAHA_API_KEY: KEY,
     PUBLIC_BASE_URL: BASE,
-    MASTER_KEY: Buffer.alloc(32, 7).toString("base64"),
+    MASTER_KEY: MASTER_KEY.toString("base64"),
     ADMIN_USERNAME: "admin",
     ADMIN_PASSWORD: "correct horse battery",
     TIMEZONE: "America/Lima",
     MEDIA_INLINE_MAX_BYTES: String(INLINE_MAX),
     MEDIA_MAX_BYTES: String(MAX_BYTES),
+    DATA_DIR: scratch(),
   });
   const db = openAuthDatabase(":memory:");
   const store = createAuthStore(db);
@@ -208,8 +217,9 @@ function setup(
   const tenant = tenants.createTenant({
     displayName: "Admin",
     wahaSession: config.wahaSession,
-    wrappedDek: "x",
+    wrappedDek: "pending",
   });
+  tenants.setWrappedDek(tenant.id, wrapDek(MASTER_KEY, generateDek(), tenant.id));
   tenants.setStatus(tenant.id, "active");
   // The e2e suite does not exercise login, so the admin row is seeded directly (sync, no scrypt).
   const adminId = "admin-user";
@@ -217,64 +227,86 @@ function setup(
     "INSERT INTO users (id, tenant_id, username, password_hash, role, created_at) VALUES (?, ?, 'admin', 'unused', 'admin', 0)",
   ).run(adminId, tenant.id);
   const links = createSignedLinks({
-    secret: new Uint8Array(32).fill(3),
+    secret: MEDIA_SECRET,
     ttlSeconds: config.mediaLinkTtlSeconds,
-    tenantId: "legacy",
+    tenantId: tenant.id,
   });
-  const uploadLinks = createUploadLinks(
-    new Uint8Array(32).fill(3),
-    config.uploadTtlSeconds,
-    "legacy",
-  );
+  const uploadLinks = createUploadLinks(MEDIA_SECRET, config.uploadTtlSeconds, tenant.id);
   const uploads = createFsUploadStore({
     dir: join(scratch(), "uploads"),
     ttlSeconds: config.uploadTtlSeconds,
     maxBytes: config.uploadMaxBytes,
-    cipher: testCipher(),
+    cipher: testCipher(tenant.id),
   });
-  const mcp = createMcpServer({
-    tools: createTools(),
-    instructions: SERVER_INSTRUCTIONS,
-    gateway: served,
-    config,
-    links,
-    mediaIdleTimeoutMs: IDLE_MS,
-    sender,
-    uploads,
-    uploadLinks,
-    ...(transcription ? { transcription: transcription(served) } : {}),
-  });
-  const app = createApp({
-    oauth: createOAuthRoutes({
-      store,
-      tenants,
-      publicBaseUrl: BASE,
-      limiter: createLoginLimiter(),
-    }),
-    guard: bearerGuard({ store, tenants, publicBaseUrl: BASE }),
-    mcpHandler: mcp.handler,
+  // The real composition (registry, MCP server, routes, guard); only the tenant runtime is built
+  // from the in-memory WAHA instead of HTTP clients.
+  const buildRuntime: typeof buildTenantRuntime = (b) => ({
+    tenantId: b.tenant.id,
+    context: {
+      gateway: served,
+      mapper: createEngineResolver(served),
+      config: b.config,
+      links,
+      transcription: transcription ? transcription(served) : DISABLED_TRANSCRIPTION,
+      sender,
+      uploads,
+      uploadLinks,
+    },
     media: createMediaHandler({
       gateway: served,
       links,
-      maxBytes: config.mediaMaxBytes,
+      maxBytes: b.config.mediaMaxBytes,
       idleTimeoutMs: IDLE_MS,
     }),
     upload: createUploadHandler({
       store: uploads,
       links: uploadLinks,
-      maxBytes: config.uploadMaxBytes,
+      maxBytes: b.config.uploadMaxBytes,
     }),
+    close() {},
+  });
+  const { app } = composeApp({
+    config,
+    store,
+    tenants,
+    sessions: new FakeSessionAdmin(),
+    mediaSecret: MEDIA_SECRET,
+    logger: { info: () => {} },
+    buildRuntime,
+    mediaIdleTimeoutMs: IDLE_MS,
   });
   const { clientId } = store.registerClient({ redirectUris: ["https://claude.ai/cb"] });
   const { accessToken } = store.issueTokens(clientId, "mcp", adminId);
-  return { app, token: accessToken, gateway, uploads, uploadLinks, sender };
+  // A member tenant next to the admin: same fakes (isolation is Task 12's suite), no admin role.
+  const member = tenants.createTenant({
+    displayName: "Friend",
+    wahaSession: "t_friend",
+    wrappedDek: "pending",
+  });
+  tenants.setWrappedDek(member.id, wrapDek(MASTER_KEY, generateDek(), member.id));
+  tenants.setStatus(member.id, "active");
+  db.prepare(
+    "INSERT INTO users (id, tenant_id, username, password_hash, role, created_at) VALUES ('member-user', ?, 'friend', 'unused', 'member', 0)",
+  ).run(member.id);
+  const memberClient = store.registerClient({ redirectUris: ["https://claude.ai/cb"] });
+  const memberToken = store.issueTokens(memberClient.clientId, "mcp", "member-user").accessToken;
+  return {
+    app,
+    token: accessToken,
+    memberToken,
+    gateway,
+    uploads,
+    uploadLinks,
+    sender,
+    tenantId: tenant.id,
+  };
 }
 
-async function connect(s: Setup): Promise<Client> {
+async function connect(s: Setup, token = s.token): Promise<Client> {
   const client = new Client({ name: "e2e", version: "0.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
     fetch: async (url, init) => s.app.fetch(new Request(url, init)),
-    requestInit: { headers: { Authorization: `Bearer ${s.token}` } },
+    requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
   await client.connect(transport);
   return client;
@@ -313,7 +345,8 @@ for (const cache of [false, true])
     });
 
     it("lists the read tools as read-only and the send tools as approval-needing writes", async () => {
-      const client = await connect(setup());
+      const s = setup();
+      const client = await connect(s, s.memberToken);
       expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
       for (const needle of [
         "create_upload_link",
@@ -350,6 +383,29 @@ for (const cache of [false, true])
           });
         expect(t.name).not.toMatch(/delete|edit|update|remove/i);
       }
+    });
+
+    it("gives the admin the admin tools and their instructions on top of the member's", async () => {
+      const s = setup();
+      const member = await connect(s, s.memberToken);
+      const admin = await connect(s);
+      expect(admin.getInstructions()).toBe(`${SERVER_INSTRUCTIONS}\n\n${ADMIN_INSTRUCTIONS}`);
+      expect(admin.getServerVersion()?.version).toBe("0.4.0");
+      const memberTools = (await member.listTools()).tools.map((t) => t.name);
+      const adminTools = (await admin.listTools()).tools.map((t) => t.name);
+      const adminOnly = [
+        "create_invite",
+        "delete_tenant",
+        "list_tenants",
+        "reset_password",
+        "restore_tenant",
+        "revoke_tenant",
+      ];
+      expect(adminTools.sort()).toEqual([...memberTools, ...adminOnly].sort());
+      for (const name of adminOnly) expect(memberTools).not.toContain(name);
+      const listed = await call(admin, "list_tenants");
+      expect(listed.isError).toBeFalsy();
+      expect(textOf(listed)).toContain("Friend");
     });
 
     it("send_text rewrites Markdown for WhatsApp and reports the text it sent", async () => {
@@ -1306,9 +1362,9 @@ for (const cache of [false, true])
       const s = setup();
       expect((await s.app.fetch(new Request(`${BASE}/media/not.valid`))).status).toBe(404);
       const links = createSignedLinks({
-        secret: new Uint8Array(32).fill(3),
+        secret: MEDIA_SECRET,
         ttlSeconds: 60,
-        tenantId: "legacy",
+        tenantId: s.tenantId,
       });
       const client = await connect(s);
       const gone = (await mediaIds(client, GROUP))[1] as string;

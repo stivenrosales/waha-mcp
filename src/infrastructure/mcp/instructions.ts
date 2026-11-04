@@ -21,3 +21,9 @@ Reading:
 - Media is not included in messages; fetch an attachment on demand with get_media using its media_id. Only small images are returned inline; documents, PDFs, video and large files come back as a link you cannot open yourself, so give the user the link and ask them to download the file and attach it to the chat.
 - When the server has transcription configured, voice notes carry a transcript (null otherwise). Coverage notes say which voice notes were skipped; transcribe one on demand with transcribe_audio and its media_id.
 - Reactions are usually unavailable on the GOWS engine; do not conclude that nobody reacted.`;
+
+/** Appended to the instructions for the admin only (members never see the admin tools). */
+export const ADMIN_INSTRUCTIONS = `Tenant management (admin only; list_tenants, create_invite, reset_password, revoke_tenant, restore_tenant, delete_tenant):
+- Each tenant is one person's WhatsApp account on this server; the tools above act on the admin's own account (the admin tenant), never on another tenant's chats.
+- create_invite and reset_password return single-use links (72 hours); give them only to that tenant's owner.
+- delete_tenant is permanent (account, key, cached messages and WhatsApp session). Confirm with the admin first; prefer revoke_tenant when access only needs to stop.`;

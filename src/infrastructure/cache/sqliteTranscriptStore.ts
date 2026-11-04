@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { TranscriptStore } from "../../domain/ports/TranscriptStore.js";
 import { isSealedText, type TenantCipher } from "../crypto/envelope.js";
-import { readCacheOwner, resetCacheForOwner } from "./sqliteMessageStore.js";
+import { readCacheOwner, resetCacheForOwner, transcriptAad } from "./sqliteMessageStore.js";
 
 /**
  * Transcripts in the `transcripts` table of `cache.db` (open it with `openCacheDatabase`). Used
@@ -17,8 +17,7 @@ export function createSqliteTranscriptStore(
     `INSERT INTO transcripts (chat_id, message_id, text, created_at) VALUES (?, ?, ?, ?)
      ON CONFLICT (chat_id, message_id) DO UPDATE SET text = excluded.text, created_at = excluded.created_at`,
   );
-  const aad = (chatId: string, messageId: string) =>
-    `transcripts:${chatId.length}:${chatId}:${messageId}`;
+  const aad = transcriptAad;
   return {
     get(chatId, messageId) {
       const row = select.get(chatId, messageId) as { text: string } | undefined;

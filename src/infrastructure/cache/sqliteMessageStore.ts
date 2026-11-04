@@ -107,12 +107,20 @@ function rangeWhere(q: { fromTs?: number; toTs?: number }): { sql: string; args:
   return { sql, args };
 }
 
+/** AAD of a sealed `messages.raw` value; shared with the 0.4.0 migration, which seals old rows. */
+export const messageAad = (chatId: string, id: string): string =>
+  `messages:${chatId.length}:${chatId}:${id}`;
+
+/** AAD of a sealed `transcripts.text` value; shared with the 0.4.0 migration. */
+export const transcriptAad = (chatId: string, messageId: string): string =>
+  `transcripts:${chatId.length}:${chatId}:${messageId}`;
+
 /**
  * Message rows are sealed per tenant (AAD `messages:<chatId>:<id>`); a value that is not sealed
  * text is a pre-encryption row and is read as plaintext until it is rewritten.
  */
 export function createSqliteMessageStore(db: DatabaseSync, cipher: TenantCipher): MessageStore {
-  const aad = (chatId: string, id: string) => `messages:${chatId.length}:${chatId}:${id}`;
+  const aad = messageAad;
   const transaction = <T>(fn: () => T): T => inTransaction(db, fn);
 
   // ON CONFLICT ... DO UPDATE keeps the rowid, which orders messages that share a second

@@ -7,6 +7,7 @@ import type {
   ToolCallback,
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
+import type { TenantAdmin } from "../../application/tenantAdmin.js";
 import {
   DISABLED_TRANSCRIPTION,
   type TranscriptionService,
@@ -44,6 +45,8 @@ export interface ToolRunContext {
   uploads: UploadStore;
   /** Signs `/upload/:token` links. */
   uploadLinks: SignedLinks;
+  /** Tenant management; null for tenants that are not the admin. */
+  admin: TenantAdmin | null;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
@@ -90,6 +93,8 @@ export interface ToolDeps {
   sender: WhatsAppSender;
   uploads: UploadStore;
   uploadLinks: SignedLinks;
+  /** Default null: admin tools then fail with a clear error. */
+  admin?: TenantAdmin | null;
   logger?: Logger;
 }
 
@@ -161,6 +166,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         sender: deps.sender,
         uploads: deps.uploads,
         uploadLinks: deps.uploadLinks,
+        admin: deps.admin ?? null,
       });
       logger.info(`tool=${def.name} ms=${Date.now() - start} result=ok`);
       if ("content" in out) return { content: out.content };

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import type { Role, TenantStatus } from "../../../src/domain/ports/TenantStore.js";
 import { bearerGuard } from "../../../src/infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "../../../src/infrastructure/auth/oauth.js";
 import {
@@ -11,41 +12,41 @@ import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/a
 import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
 
 const BASE = "https://mcp.example.com";
-const KEY = "waha-secret-key-0123456789";
+const PASSWORD = "correct horse battery staple";
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 const PRM_URL = `${BASE}/.well-known/oauth-protected-resource`;
 
 type Auth = { clientId: string; scope: string; userId: string; tenantId: string; role: string };
 
-async function setup(
-  opts: { now?: () => number; storeNow?: () => number; noAdmin?: boolean } = {},
-) {
+async function setup(opts: { now?: () => number; storeNow?: () => number } = {}) {
   const db = openAuthDatabase(":memory:");
   const store = createAuthStore(db, opts.storeNow);
   const tenants = createSqliteTenantStore(db);
-  let adminUserId = "";
-  if (!opts.noAdmin) {
+  /** Creates a tenant in `status` with one user whose password is PASSWORD. */
+  const addUser = async (
+    username: string,
+    status: TenantStatus = "active",
+    role: Role = "member",
+  ) => {
     const tenant = tenants.createTenant({
-      displayName: "Admin",
-      wahaSession: "default",
+      displayName: username,
+      wahaSession: `t_${username}`,
       wrappedDek: "x",
     });
-    tenants.setStatus(tenant.id, "active");
-    const admin = await tenants.createUser({
+    tenants.setStatus(tenant.id, status);
+    const user = await tenants.createUser({
       tenantId: tenant.id,
-      username: "admin",
-      password: "correct horse battery",
-      role: "admin",
+      username,
+      password: PASSWORD,
+      role,
     });
-    if (admin === "username_taken") throw new Error("unreachable");
-    adminUserId = admin.id;
-  }
+    if (user === "username_taken") throw new Error("unreachable");
+    return user;
+  };
+  const adminUserId = (await addUser("admin", "active", "admin")).id;
   const limiter = createLoginLimiter({ now: opts.now });
   const app = new Hono<{ Variables: { auth: Auth } }>();
-  app.route(
-    "/",
-    createOAuthRoutes({ store, tenants, wahaApiKey: KEY, publicBaseUrl: BASE, limiter }),
-  );
+  app.route("/", createOAuthRoutes({ store, tenants, publicBaseUrl: BASE, limiter }));
   app.use("/mcp", bearerGuard({ store, tenants, publicBaseUrl: BASE }));
   app.get("/mcp", (c) => c.json(c.get("auth")));
 
@@ -57,7 +58,7 @@ async function setup(
     seen.push(body, JSON.stringify([...res.headers.entries()]));
     return res;
   };
-  return { store, app, request, seen, adminUserId };
+  return { store, tenants, app, request, seen, adminUserId, addUser };
 }
 
 const pkce = () => {
@@ -103,14 +104,20 @@ const authParams = (clientId: string, challenge: string, extra: Record<string, s
 async function login(
   ctx: Ctx,
   params: Record<string, string>,
-  key: string,
+  password: string,
   headers: Record<string, string> = {},
+  username = "admin",
 ) {
-  return ctx.request("/authorize", form({ ...params, waha_key: key }, headers));
+  return ctx.request("/authorize", form({ ...params, username, password }, headers));
 }
 
-async function obtainCode(ctx: Ctx, clientId: string, challenge: string): Promise<string> {
-  const res = await login(ctx, authParams(clientId, challenge), KEY);
+async function obtainCode(
+  ctx: Ctx,
+  clientId: string,
+  challenge: string,
+  username = "admin",
+): Promise<string> {
+  const res = await login(ctx, authParams(clientId, challenge), PASSWORD, {}, username);
   expect(res.status).toBe(302);
   const location = new URL(res.headers.get("location") ?? "");
   return location.searchParams.get("code") ?? "";
@@ -220,7 +227,7 @@ describe("authorization code flow", () => {
     expect(page.headers.get("x-frame-options")).toBe("DENY");
     expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
 
-    const res = await login(ctx, params, KEY);
+    const res = await login(ctx, params, PASSWORD);
     expect(res.status).toBe(302);
     const location = new URL(res.headers.get("location") ?? "");
     expect(`${location.origin}${location.pathname}`).toBe(REDIRECT);
@@ -269,27 +276,38 @@ describe("authorization code flow", () => {
     expect(((await reused.json()) as { error: string }).error).toBe("invalid_grant");
   });
 
-  it("wrong key re-renders login with error and no code", async () => {
+  it("wrong password → 401 page", async () => {
     const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
-    const res = await login(ctx, authParams(clientId, challenge), "wrong-key");
-    expect(res.status).toBe(401);
-    expect(res.headers.get("location")).toBeNull();
+    const params = authParams(clientId, challenge);
+    for (const [username, password] of [
+      ["admin", "wrong-password"],
+      ["nobody", PASSWORD],
+    ]) {
+      const res = await login(ctx, params, password, {}, username);
+      expect(res.status).toBe(401);
+      expect(res.headers.get("location")).toBeNull();
+      expect(await res.text()).toContain("Invalid username or password.");
+    }
+    const res = await login(ctx, params, "wrong-password");
     const html = await res.text();
     expect(html).toContain("<form");
-    expect(html).toMatch(/invalid key/i);
+    expect(html).toContain('name="username"');
+    expect(html).toContain('name="password"');
+    expect(html).not.toContain("waha_key");
     expect(html).not.toContain("code=");
     // The consent text must say the client can send, not only read.
     expect(html).toContain("send messages from your number");
     expect(html).not.toMatch(/read-only/i);
   });
 
-  it("binds the legacy login to the admin user", async () => {
+  it("login with username/password issues a code bound to the user", async () => {
     const ctx = await setup();
+    const member = await ctx.addUser("alice");
     const clientId = await registeredClient(ctx);
     const { verifier, challenge } = pkce();
-    const code = await obtainCode(ctx, clientId, challenge);
+    const code = await obtainCode(ctx, clientId, challenge, "ALICE");
     const res = await exchange(ctx, {
       grant_type: "authorization_code",
       code,
@@ -303,19 +321,64 @@ describe("authorization code flow", () => {
     });
     expect(me.status).toBe(200);
     expect((await me.json()) as { userId: string; role: string }).toMatchObject({
-      userId: ctx.adminUserId,
-      role: "admin",
+      userId: member.id,
+      tenantId: member.tenantId,
+      role: "member",
     });
+    expect(ctx.tenants.getUser(member.id)?.lastLoginAt).not.toBeNull();
   });
 
-  it("answers the login with an error page when no admin account exists", async () => {
-    const ctx = await setup({ noAdmin: true });
+  it("user of a pairing tenant cannot log in", async () => {
+    const ctx = await setup();
+    await ctx.addUser("pending", "pairing");
+    await ctx.addUser("gone", "revoked");
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
-    const res = await login(ctx, authParams(clientId, challenge), KEY);
-    expect(res.status).toBe(503);
-    expect(res.headers.get("location")).toBeNull();
-    expect(await res.text()).toContain("No admin account is configured.");
+    const params = authParams(clientId, challenge);
+    const pairing = await login(ctx, params, PASSWORD, {}, "pending");
+    expect(pairing.status).toBe(403);
+    expect(pairing.headers.get("location")).toBeNull();
+    expect(await pairing.text()).toContain(
+      `This account is not active yet. Finish connecting WhatsApp at ${BASE}/pair.`,
+    );
+    const revoked = await login(ctx, params, PASSWORD, {}, "gone");
+    expect(revoked.status).toBe(403);
+    expect(await revoked.text()).toContain("This account is disabled.");
+  });
+
+  it("a client bound to one user refuses another user's login; revoking B leaves A", async () => {
+    const ctx = await setup();
+    const bob = await ctx.addUser("bob");
+    const clientId = await registeredClient(ctx);
+    const { verifier, challenge } = pkce();
+    const code = await obtainCode(ctx, clientId, challenge);
+    const tokens = (await (
+      await exchange(ctx, {
+        grant_type: "authorization_code",
+        code,
+        code_verifier: verifier,
+        client_id: clientId,
+        redirect_uri: REDIRECT,
+      })
+    ).json()) as { access_token: string; refresh_token: string };
+
+    const refused = await login(ctx, authParams(clientId, challenge), PASSWORD, {}, "bob");
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get("location")).toBeNull();
+    expect(await refused.text()).toContain(
+      "This client is linked to another account. Reconnect from your MCP client.",
+    );
+
+    ctx.store.revokeUser(bob.id);
+    expect(ctx.store.getClient(clientId)).not.toBeNull();
+    const auth = { authorization: `Bearer ${tokens.access_token}` };
+    expect((await ctx.request("/mcp", { headers: auth })).status).toBe(200);
+    const refreshed = await exchange(ctx, {
+      grant_type: "refresh_token",
+      refresh_token: tokens.refresh_token,
+      client_id: clientId,
+    });
+    expect(refreshed.status).toBe(200);
   });
 
   it("wrong code_verifier → invalid_grant", async () => {
@@ -411,7 +474,7 @@ describe("authorization code flow", () => {
     const get = await ctx.request(`/authorize?${new URLSearchParams(bad)}`);
     expect(get.status).toBe(400);
     expect(get.headers.get("location")).toBeNull();
-    const post = await login(ctx, bad, KEY);
+    const post = await login(ctx, bad, PASSWORD);
     expect(post.status).toBe(400);
     expect(post.headers.get("location")).toBeNull();
     expect(await post.text()).not.toContain("code=");
@@ -440,7 +503,7 @@ describe("authorization code flow", () => {
       const params = authParams(clientId, challenge, extra);
       for (const res of [
         await ctx.request(`/authorize?${new URLSearchParams(params)}`),
-        await login(ctx, params, KEY),
+        await login(ctx, params, PASSWORD),
       ]) {
         // Client and redirect_uri are valid, so the error goes back to the client.
         expect(res.status).toBe(302);
@@ -461,7 +524,7 @@ describe("authorization code flow", () => {
     const res = await login(
       ctx,
       authParams(clientId, challenge, { resource: "https://evil.example/mcp" }),
-      KEY,
+      PASSWORD,
     );
     expect(res.headers.get("location") ?? "").not.toContain("code=");
   });
@@ -484,12 +547,34 @@ describe("login rate limit", () => {
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
     const ip = { "x-forwarded-for": "203.0.113.7" };
-    for (let i = 0; i < 5; i++) expect((await login(ctx, params, "bad", ip)).status).toBe(401);
-    const blocked = await login(ctx, params, KEY, ip);
+    for (let i = 0; i < 5; i++) {
+      expect((await login(ctx, params, "bad", ip, `intruder-${i}`)).status).toBe(401);
+    }
+    const blocked = await login(ctx, params, PASSWORD, ip);
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("location")).toBeNull();
     // Another client address is not affected.
-    expect((await login(ctx, params, KEY, { "x-forwarded-for": "198.51.100.1" })).status).toBe(302);
+    expect((await login(ctx, params, PASSWORD, { "x-forwarded-for": "198.51.100.1" })).status).toBe(
+      302,
+    );
+  });
+
+  it("five failures for one username from different addresses block that username", async () => {
+    const ctx = await setup();
+    await ctx.addUser("carol");
+    const clientId = await registeredClient(ctx);
+    const { challenge } = pkce();
+    const params = authParams(clientId, challenge);
+    for (let i = 0; i < 5; i++) {
+      await login(ctx, params, "bad", { "x-forwarded-for": `198.51.100.${i}` }, "Admin");
+    }
+    const fresh = { "x-forwarded-for": "192.0.2.50" };
+    expect((await login(ctx, params, PASSWORD, fresh)).status).toBe(429);
+    expect(
+      (await ctx.request("/logout", form({ username: "admin", password: PASSWORD }, fresh))).status,
+    ).toBe(429);
+    // Other usernames from the same fresh address are not affected.
+    expect((await login(ctx, params, PASSWORD, fresh, "carol")).status).toBe(302);
   });
 
   it("unblocks after the 15 min window", async () => {
@@ -499,9 +584,9 @@ describe("login rate limit", () => {
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
     for (let i = 0; i < 5; i++) await login(ctx, params, "bad");
-    expect((await login(ctx, params, KEY)).status).toBe(429);
+    expect((await login(ctx, params, PASSWORD)).status).toBe(429);
     t += 15 * 60 * 1000 + 1;
-    expect((await login(ctx, params, KEY)).status).toBe(302);
+    expect((await login(ctx, params, PASSWORD)).status).toBe(302);
   });
 
   it("success resets counter", async () => {
@@ -510,9 +595,9 @@ describe("login rate limit", () => {
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
     for (let i = 0; i < 4; i++) await login(ctx, params, "bad");
-    expect((await login(ctx, params, KEY)).status).toBe(302);
+    expect((await login(ctx, params, PASSWORD)).status).toBe(302);
     for (let i = 0; i < 4; i++) expect((await login(ctx, params, "bad")).status).toBe(401);
-    expect((await login(ctx, params, KEY)).status).toBe(302);
+    expect((await login(ctx, params, PASSWORD)).status).toBe(302);
   });
 
   it("rotating a spoofed leading x-forwarded-for hop does not bypass the limiter", async () => {
@@ -521,9 +606,9 @@ describe("login rate limit", () => {
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
     for (let i = 0; i < 5; i++) {
-      await login(ctx, params, "bad", { "x-forwarded-for": `10.0.0.${i}, 203.0.113.7` });
+      await login(ctx, params, "bad", { "x-forwarded-for": `10.0.0.${i}, 203.0.113.7` }, `u${i}`);
     }
-    const res = await login(ctx, params, KEY, { "x-forwarded-for": "10.9.9.9, 203.0.113.7" });
+    const res = await login(ctx, params, PASSWORD, { "x-forwarded-for": "10.9.9.9, 203.0.113.7" });
     expect(res.status).toBe(429);
   });
 
@@ -561,9 +646,9 @@ describe("limiter hardening", () => {
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
     for (let i = 1; i <= 5; i++) {
-      await login(ctx, params, "bad", { "x-forwarded-for": `2001:db8:1:2::${i}` });
+      await login(ctx, params, "bad", { "x-forwarded-for": `2001:db8:1:2::${i}` }, `u${i}`);
     }
-    const res = await login(ctx, params, KEY, { "x-forwarded-for": "2001:db8:1:2:ffff::99" });
+    const res = await login(ctx, params, PASSWORD, { "x-forwarded-for": "2001:db8:1:2:ffff::99" });
     expect(res.status).toBe(429);
   });
 
@@ -573,9 +658,9 @@ describe("limiter hardening", () => {
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
     for (let i = 0; i < 5; i++) {
-      await login(ctx, params, "bad", { "x-forwarded-for": "::ffff:203.0.113.7" });
+      await login(ctx, params, "bad", { "x-forwarded-for": "::ffff:203.0.113.7" }, `u${i}`);
     }
-    const res = await login(ctx, params, KEY, { "x-forwarded-for": "203.0.113.7" });
+    const res = await login(ctx, params, PASSWORD, { "x-forwarded-for": "203.0.113.7" });
     expect(res.status).toBe(429);
   });
 
@@ -585,12 +670,20 @@ describe("limiter hardening", () => {
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
     for (let i = 0; i < 50; i++) {
-      const res = await login(ctx, params, "bad", { "x-forwarded-for": `198.51.100.${i}` });
+      const res = await login(
+        ctx,
+        params,
+        "bad",
+        { "x-forwarded-for": `198.51.100.${i}` },
+        `u${i}`,
+      );
       expect(res.status).toBe(401);
     }
     const fresh = { "x-forwarded-for": "192.0.2.200" };
-    expect((await login(ctx, params, KEY, fresh)).status).toBe(429);
-    expect((await ctx.request("/logout", form({ waha_key: KEY }, fresh))).status).toBe(429);
+    expect((await login(ctx, params, PASSWORD, fresh)).status).toBe(429);
+    expect(
+      (await ctx.request("/logout", form({ username: "admin", password: PASSWORD }, fresh))).status,
+    ).toBe(429);
   });
 
   it("success does not reset the global budget", () => {
@@ -652,11 +745,11 @@ describe("bearer guard and logout", () => {
     expect(page.status).toBe(200);
     expect(await page.text()).toContain("<form");
 
-    const wrong = await ctx.request("/logout", form({ waha_key: "bad" }));
+    const wrong = await ctx.request("/logout", form({ username: "admin", password: "bad" }));
     expect(wrong.status).toBe(401);
     expect((await ctx.request("/mcp", { headers: auth })).status).toBe(200);
 
-    const ok = await ctx.request("/logout", form({ waha_key: KEY }));
+    const ok = await ctx.request("/logout", form({ username: "admin", password: PASSWORD }));
     expect(ok.status).toBe(200);
 
     const after = await ctx.request("/mcp", { headers: auth });
@@ -671,16 +764,44 @@ describe("bearer guard and logout", () => {
     expect(refresh.status).not.toBe(200);
   });
 
+  it("logout revokes only that user", async () => {
+    const ctx = await setup();
+    await ctx.addUser("dave");
+    const issue = async (username: string) => {
+      const clientId = await registeredClient(ctx);
+      const { verifier, challenge } = pkce();
+      const code = await obtainCode(ctx, clientId, challenge, username);
+      const res = await exchange(ctx, {
+        grant_type: "authorization_code",
+        code,
+        code_verifier: verifier,
+        client_id: clientId,
+        redirect_uri: REDIRECT,
+      });
+      const { access_token } = (await res.json()) as { access_token: string };
+      return { clientId, auth: { authorization: `Bearer ${access_token}` } };
+    };
+    const admin = await issue("admin");
+    const dave = await issue("dave");
+    const ok = await ctx.request("/logout", form({ username: "dave", password: PASSWORD }));
+    expect(ok.status).toBe(200);
+    expect((await ctx.request("/mcp", { headers: dave.auth })).status).toBe(401);
+    expect(ctx.store.getClient(dave.clientId)).toBeNull();
+    expect((await ctx.request("/mcp", { headers: admin.auth })).status).toBe(200);
+    expect(ctx.store.getClient(admin.clientId)).not.toBeNull();
+  });
+
   it("logout is rate limited", async () => {
     const ctx = await setup();
-    for (let i = 0; i < 5; i++) await ctx.request("/logout", form({ waha_key: "bad" }));
-    const res = await ctx.request("/logout", form({ waha_key: KEY }));
+    for (let i = 0; i < 5; i++)
+      await ctx.request("/logout", form({ username: "admin", password: "bad" }));
+    const res = await ctx.request("/logout", form({ username: "admin", password: PASSWORD }));
     expect(res.status).toBe(429);
   });
 });
 
 describe("secrecy", () => {
-  it("no response body or header contains the WAHA key", async () => {
+  it("no response body or header contains the password", async () => {
     const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { verifier, challenge } = pkce();
@@ -695,13 +816,13 @@ describe("secrecy", () => {
       client_id: clientId,
       redirect_uri: REDIRECT,
     });
-    for (let i = 0; i < 6; i++) await login(ctx, params, KEY.slice(0, -1));
-    await login(ctx, params, KEY);
+    for (let i = 0; i < 6; i++) await login(ctx, params, PASSWORD.slice(0, -1));
+    await login(ctx, params, PASSWORD);
     const other = { "x-forwarded-for": "198.51.100.2" };
     await ctx.request("/logout");
-    await ctx.request("/logout", form({ waha_key: "bad" }, other));
-    await ctx.request("/logout", form({ waha_key: KEY }, other));
+    await ctx.request("/logout", form({ username: "admin", password: "bad" }, other));
+    await ctx.request("/logout", form({ username: "admin", password: PASSWORD }, other));
     expect(ctx.seen.length).toBeGreaterThan(10);
-    for (const text of ctx.seen) expect(text).not.toContain(KEY);
+    for (const text of ctx.seen) expect(text).not.toContain(PASSWORD);
   });
 });

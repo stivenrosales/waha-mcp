@@ -248,7 +248,6 @@ function setup(
     oauth: createOAuthRoutes({
       store,
       tenants,
-      wahaApiKey: KEY,
       publicBaseUrl: BASE,
       limiter: createLoginLimiter(),
     }),

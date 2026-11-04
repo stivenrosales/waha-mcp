@@ -2,9 +2,9 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { TenantStore } from "../../domain/ports/TenantStore.js";
+import type { TenantStore, User } from "../../domain/ports/TenantStore.js";
 import { HTML_SECURITY_HEADERS, loginPage, logoutPage, messagePage } from "./loginPage.js";
-import { clientKey, type LoginLimiter } from "./rateLimit.js";
+import { type LoginLimiter, loginLimitKeys } from "./rateLimit.js";
 import type { AuthStore } from "./store.js";
 
 export const MAX_CLIENTS = 50;
@@ -67,7 +67,6 @@ type Validation =
 export function createOAuthRoutes(deps: {
   store: AuthStore;
   tenants: TenantStore;
-  wahaApiKey: string;
   publicBaseUrl: string;
   limiter: LoginLimiter;
 }): Hono {
@@ -82,8 +81,25 @@ export function createOAuthRoutes(deps: {
       c.json({ error: "invalid_request", error_description: "Request body too large." }, 413),
   });
 
-  const keyMatches = (candidate: string | null): boolean =>
-    candidate !== null && safeEqual(candidate, deps.wahaApiKey);
+  /**
+   * Checks a username/password form against the limiter (per address and per username) and the
+   * tenant store. A success clears both keys' counters; the global budget is never reset.
+   */
+  const authenticate = async (
+    c: Context,
+    form: URLSearchParams,
+  ): Promise<"blocked" | "invalid" | User> => {
+    const username = form.get("username") ?? "";
+    const keys = loginLimitKeys(c, username);
+    if (keys.some((k) => limiter.isBlocked(k))) return "blocked";
+    const user = await tenants.verifyPassword(username, form.get("password") ?? "");
+    if (!user) {
+      limiter.recordFailure(keys);
+      return "invalid";
+    }
+    for (const k of keys) limiter.reset(k);
+    return user;
+  };
 
   const isOwnResource = (value: string): boolean =>
     URL.canParse(value) &&
@@ -174,10 +190,16 @@ export function createOAuthRoutes(deps: {
     request: AuthorizeRequest,
     status: ContentfulStatusCode,
     error?: string,
+    username?: string,
   ) =>
     html(
       c,
-      loginPage({ params: request.echo, redirectHost: new URL(request.redirectUri).host, error }),
+      loginPage({
+        params: request.echo,
+        redirectHost: new URL(request.redirectUri).host,
+        username,
+        error,
+      }),
       status,
     );
 
@@ -247,7 +269,7 @@ export function createOAuthRoutes(deps: {
       return oauthError(
         c,
         "invalid_client_metadata",
-        `Client limit reached (${MAX_CLIENTS}). Log out at ${base}/logout to reset all clients.`,
+        `Client limit reached (${MAX_CLIENTS}). Log out at ${base}/logout to remove your clients; unused registrations expire after 24 hours.`,
       );
     }
     const redirectUris = [...new Set(uris as string[])];
@@ -267,7 +289,7 @@ export function createOAuthRoutes(deps: {
     );
   });
 
-  // --- Authorization endpoint with WAHA-key login ---
+  // --- Authorization endpoint with username/password login ---
 
   app.get("/authorize", (c) => {
     const result = validateAuthorize(new URL(c.req.url).searchParams);
@@ -281,22 +303,23 @@ export function createOAuthRoutes(deps: {
     if (!result.ok) return rejectAuthorize(c, result);
     const { request } = result;
 
-    const key = clientKey(c);
-    if (limiter.isBlocked(key)) return tooManyAttempts(c);
-    if (!keyMatches(form.get("waha_key"))) {
-      limiter.recordFailure(key);
-      return renderLogin(c, request, 401, "Invalid key. Try again.");
+    const username = form.get("username") ?? "";
+    const user = await authenticate(c, form);
+    if (user === "blocked") return tooManyAttempts(c);
+    if (user === "invalid") {
+      return renderLogin(c, request, 401, "Invalid username or password.", username);
     }
-    limiter.reset(key);
-
-    // Interim (until the per-user login): the WAHA key identifies the admin account.
-    const admin = tenants.getAdmin();
-    if (!admin) {
-      return html(c, messagePage("Sign-in unavailable", "No admin account is configured."), 503);
+    const status = tenants.getTenant(user.tenantId)?.status;
+    if (status !== "active") {
+      const reason =
+        status === "pairing" || status === "invited"
+          ? `This account is not active yet. Finish connecting WhatsApp at ${base}/pair.`
+          : "This account is disabled.";
+      return renderLogin(c, request, 403, reason, username);
     }
 
     const code = store.saveCode({
-      userId: admin.id,
+      userId: user.id,
       clientId: request.clientId,
       redirectUri: request.redirectUri,
       codeChallenge: request.codeChallenge,
@@ -309,8 +332,10 @@ export function createOAuthRoutes(deps: {
         request,
         403,
         "This client is linked to another account. Reconnect from your MCP client.",
+        username,
       );
     }
+    tenants.touchLogin(user.id);
     const url = new URL(request.redirectUri);
     url.searchParams.set("code", code);
     if (request.state !== undefined) url.searchParams.set("state", request.state);
@@ -396,25 +421,24 @@ export function createOAuthRoutes(deps: {
     return tokenResponse(rotated);
   });
 
-  // --- Logout: revokes every client and token ---
+  // --- Logout: revokes the signed-in user's clients and tokens only ---
 
   app.get("/logout", (c) => html(c, logoutPage()));
 
   app.post("/logout", limitBody, async (c) => {
     const form = new URLSearchParams(await c.req.text());
-    const key = clientKey(c);
-    if (limiter.isBlocked(key)) return tooManyAttempts(c);
-    if (!keyMatches(form.get("waha_key"))) {
-      limiter.recordFailure(key);
-      return html(c, logoutPage({ error: "Invalid key. Try again." }), 401);
+    const username = form.get("username") ?? "";
+    const user = await authenticate(c, form);
+    if (user === "blocked") return tooManyAttempts(c);
+    if (user === "invalid") {
+      return html(c, logoutPage({ username, error: "Invalid username or password." }), 401);
     }
-    limiter.reset(key);
-    store.revokeAll();
+    store.revokeUser(user.id);
     return html(
       c,
       messagePage(
         "Logged out",
-        "All tokens and clients were revoked. Connected apps must sign in again.",
+        "Your tokens and clients were revoked. Your connected apps must sign in again.",
       ),
     );
   });

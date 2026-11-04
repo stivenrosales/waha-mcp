@@ -120,7 +120,6 @@ async function main(): Promise<void> {
     oauth: createOAuthRoutes({
       store,
       tenants,
-      wahaApiKey: config.wahaApiKey,
       publicBaseUrl: config.publicBaseUrl,
       limiter: createLoginLimiter(),
     }),

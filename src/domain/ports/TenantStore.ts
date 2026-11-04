@@ -46,6 +46,11 @@ export interface TenantStore {
   /** Invalidates earlier links of the same kind for the tenant. */
   issueLink(tenantId: string, kind: LinkKind, ttlMs: number): { token: string; expiresAt: number };
   peekLink(token: string, kind: LinkKind): { tenantId: string } | null;
+  /** Like `peekLink`, but also reports used and expired links (for precise page errors). */
+  linkState(
+    token: string,
+    kind: LinkKind,
+  ): { tenantId: string; state: "valid" | "used" | "expired" } | null;
   /** Atomic single use. */
   consumeLink(token: string, kind: LinkKind): { tenantId: string } | null;
 }

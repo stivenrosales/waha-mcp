@@ -248,6 +248,18 @@ export function createSqliteTenantStore(
       return row ? { tenantId: row.tenant_id } : null;
     },
 
+    linkState(token: string, kind: LinkKind) {
+      const row = db
+        .prepare("SELECT tenant_id, expires_at, used_at FROM invites WHERE hash = ? AND kind = ?")
+        .get(sha256(token), kind) as
+        | { tenant_id: string; expires_at: number; used_at: number | null }
+        | undefined;
+      if (!row) return null;
+      const state =
+        row.used_at !== null ? "used" : Number(row.expires_at) > now() ? "valid" : "expired";
+      return { tenantId: row.tenant_id, state };
+    },
+
     consumeLink(token: string, kind: LinkKind) {
       return transaction(() => {
         const row = db

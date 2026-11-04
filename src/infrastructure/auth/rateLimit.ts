@@ -3,7 +3,8 @@ import type { Context } from "hono";
 
 export interface LoginLimiter {
   isBlocked(key: string): boolean;
-  recordFailure(key: string): void;
+  /** One failed attempt: counted once in the global budget, and once for each key given. */
+  recordFailure(key: string | readonly string[]): void;
   reset(key: string): void;
 }
 
@@ -61,14 +62,16 @@ export function createLoginLimiter(
 
   return {
     isBlocked: (key) => globalCount() >= globalMaxFailures || recent(key).length >= maxFailures,
-    recordFailure(key) {
+    recordFailure(keys) {
       globalCount();
       globalFailures.push(now());
       globalFailures = globalFailures.slice(-Math.max(globalMaxFailures, 1));
-      const list = recent(key);
-      if (list.length === 0) makeRoom();
-      list.push(now());
-      failures.set(key, list.slice(-maxFailures));
+      for (const key of typeof keys === "string" ? [keys] : keys) {
+        const list = recent(key);
+        if (list.length === 0) makeRoom();
+        list.push(now());
+        failures.set(key, list.slice(-maxFailures));
+      }
     },
     reset(key) {
       failures.delete(key);
@@ -130,4 +133,15 @@ export function clientKey(c: Context): string {
   const incoming = env?.server?.incoming ?? env?.incoming;
   const address = incoming?.socket?.remoteAddress;
   return address ? normalizeClientKey(address) : "unknown";
+}
+
+/** Longest username kept in a rate-limit key; longer input shares the truncated key. */
+const MAX_USERNAME_KEY = 64;
+
+/**
+ * Rate-limit keys for a username/password attempt: the client address and the username
+ * (case-insensitive, like usernames themselves). An attempt is refused when either is blocked.
+ */
+export function loginLimitKeys(c: Context, username: string): string[] {
+  return [clientKey(c), `user:${username.toLowerCase().slice(0, MAX_USERNAME_KEY)}`];
 }

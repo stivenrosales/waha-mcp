@@ -160,6 +160,19 @@ describe("sqlite tenant store", () => {
     expect(store.consumeLink(reset.token, "reset")).toEqual({ tenantId: tenant.id });
   });
 
+  it("linkState tells valid, used and expired links apart", () => {
+    const { store, tenant, advance } = setup();
+    const used = store.issueLink(tenant.id, "reset", HOUR);
+    const { token } = store.issueLink(tenant.id, "invite", HOUR);
+    expect(store.linkState(token, "invite")).toEqual({ tenantId: tenant.id, state: "valid" });
+    expect(store.linkState(token, "reset")).toBeNull();
+    expect(store.linkState("unknown", "invite")).toBeNull();
+    store.consumeLink(used.token, "reset");
+    expect(store.linkState(used.token, "reset")).toEqual({ tenantId: tenant.id, state: "used" });
+    advance(HOUR);
+    expect(store.linkState(token, "invite")).toEqual({ tenantId: tenant.id, state: "expired" });
+  });
+
   it("an invite token never consumes as a reset", () => {
     const { store, tenant } = setup();
     const { token } = store.issueLink(tenant.id, "invite", HOUR);

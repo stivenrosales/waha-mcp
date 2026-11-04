@@ -36,12 +36,17 @@ export interface TenantAdmin {
   /**
    * Deletes the tenant for good. `whatsappCleanup` is "failed" when WAHA could not be told to
    * log out and remove the session; `localCleanup` is "failed" when the runtime eviction or the
-   * data directory removal threw. The row and key are gone in every case.
+   * data directory removal threw. The row and key are gone in every case. When either failed,
+   * `wahaSession` names the WAHA session so the admin can clean it up by hand.
    */
   delete(
     tenantId: string,
     confirmDisplayName: string,
-  ): Promise<{ whatsappCleanup: "ok" | "failed"; localCleanup: "ok" | "failed" }>;
+  ): Promise<{
+    whatsappCleanup: "ok" | "failed";
+    localCleanup: "ok" | "failed";
+    wahaSession?: string;
+  }>;
 }
 
 export interface TenantAdminDeps {
@@ -87,6 +92,12 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
     const tenant = tenants.getTenant(tenantId);
     if (!tenant) throw new InvalidInputError("Tenant not found.");
     return tenant;
+  };
+
+  /** Never log (or touch the filesystem with) a caller-supplied id that is not id-shaped. */
+  const isSafeId = (tenantId: string): boolean => TENANT_ID_PATTERN.test(tenantId);
+  const assertSafeId = (tenantId: string): void => {
+    if (!isSafeId(tenantId)) throw new InvalidInputError("Invalid tenant id.");
   };
 
   const assertNotAdmin = (tenantId: string): void => {
@@ -162,6 +173,7 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
     revoke(tenantId) {
       let outcome = "error";
       try {
+        assertSafeId(tenantId);
         assertNotAdmin(tenantId);
         const tenant = requireTenant(tenantId);
         if (tenant.status !== "revoked") tenants.setStatus(tenantId, "revoked");
@@ -170,13 +182,16 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
         registry.evict(tenantId);
         outcome = "ok";
       } finally {
-        logger.info(`admin revoke_tenant tenant=${tenantId} outcome=${outcome}`);
+        logger.info(
+          `admin revoke_tenant tenant=${isSafeId(tenantId) ? tenantId : "-"} outcome=${outcome}`,
+        );
       }
     },
 
     restore(tenantId) {
       let outcome = "error";
       try {
+        assertSafeId(tenantId);
         assertNotAdmin(tenantId);
         const tenant = requireTenant(tenantId);
         let status: TenantStatus = tenant.status;
@@ -194,13 +209,16 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
         outcome = "ok";
         return status;
       } finally {
-        logger.info(`admin restore_tenant tenant=${tenantId} outcome=${outcome}`);
+        logger.info(
+          `admin restore_tenant tenant=${isSafeId(tenantId) ? tenantId : "-"} outcome=${outcome}`,
+        );
       }
     },
 
     resetPassword(tenantId) {
       let outcome = "error";
       try {
+        assertSafeId(tenantId);
         const tenant = requireTenant(tenantId);
         if (!tenants.getUserByTenant(tenant.id))
           throw new InvalidInputError(
@@ -210,18 +228,18 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
         outcome = "ok";
         return result;
       } finally {
-        logger.info(`admin reset_password tenant=${tenantId} outcome=${outcome}`);
+        logger.info(
+          `admin reset_password tenant=${isSafeId(tenantId) ? tenantId : "-"} outcome=${outcome}`,
+        );
       }
     },
 
     delete(tenantId, confirmDisplayName) {
-      // Never log (or touch the filesystem with) a caller-supplied id that is not id-shaped.
-      const safe = TENANT_ID_PATTERN.test(tenantId);
       return audited(
         "delete_tenant",
-        () => (safe ? tenantId : "-"),
+        () => (isSafeId(tenantId) ? tenantId : "-"),
         async () => {
-          if (!safe) throw new InvalidInputError("Invalid tenant id.");
+          assertSafeId(tenantId);
           assertNotAdmin(tenantId);
           const tenant = requireTenant(tenantId);
           if (confirmDisplayName !== tenant.displayName)
@@ -233,38 +251,36 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           // Row + wrapped DEK first: from here on the tenant's data is unrecoverable.
           tenants.deleteTenant(tenant.id);
 
-          let localCleanup: "ok" | "failed" = "ok";
-          try {
-            if (user) auth.revokeUser(user.id);
-          } catch {
-            localCleanup = "failed";
-          }
-          try {
-            registry.evict(tenant.id);
-          } catch {
-            localCleanup = "failed";
-          }
+          /** Runs one cleanup step; a failure is logged (never its error text) and reported. */
+          const step = async (name: string, fn: () => unknown): Promise<"ok" | "failed"> => {
+            try {
+              await fn();
+              return "ok";
+            } catch {
+              logger.info(
+                `admin delete_tenant tenant=${tenant.id} session=${tenant.wahaSession} step=${name} outcome=failed`,
+              );
+              return "failed";
+            }
+          };
+          const worst = (...r: ("ok" | "failed")[]) => (r.includes("failed") ? "failed" : "ok");
 
-          let whatsappCleanup: "ok" | "failed" = "ok";
-          try {
-            await sessions.logout(tenant.wahaSession);
-          } catch {
-            whatsappCleanup = "failed";
-          }
-          try {
-            await sessions.remove(tenant.wahaSession);
-          } catch {
-            whatsappCleanup = "failed";
-          }
-          try {
+          const revoked = await step("revoke_user", () => user && auth.revokeUser(user.id));
+          const evicted = await step("evict", () => registry.evict(tenant.id));
+          const whatsappCleanup = worst(
+            await step("waha_logout", () => sessions.logout(tenant.wahaSession)),
+            await step("waha_remove", () => sessions.remove(tenant.wahaSession)),
+          );
+          const removed = await step("remove_data_dir", () =>
             fs.rmSync(path.join(deps.dataDir, "tenants", tenant.id), {
               recursive: true,
               force: true,
-            });
-          } catch {
-            localCleanup = "failed";
-          }
-          return { whatsappCleanup, localCleanup };
+            }),
+          );
+          const localCleanup = worst(revoked, evicted, removed);
+          return whatsappCleanup === "ok" && localCleanup === "ok"
+            ? { whatsappCleanup, localCleanup }
+            : { whatsappCleanup, localCleanup, wahaSession: tenant.wahaSession };
         },
       );
     },

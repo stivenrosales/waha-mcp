@@ -172,6 +172,17 @@ describe("revoke / restore", () => {
     expect(s.tenants.getTenant(fresh.tenantId)?.status).toBe("invited");
   });
 
+  it("refuses an id that is not id-shaped and never logs it", async () => {
+    const s = await setup();
+    const evil = "x outcome=ok\nadmin delete_tenant tenant=y";
+    expect(() => s.admin.revoke(evil)).toThrow(new InvalidInputError("Invalid tenant id."));
+    expect(s.logs.at(-1)).toBe("admin revoke_tenant tenant=- outcome=error");
+    expect(() => s.admin.restore(evil)).toThrow(new InvalidInputError("Invalid tenant id."));
+    expect(s.logs.at(-1)).toBe("admin restore_tenant tenant=- outcome=error");
+    expect(() => s.admin.resetPassword(evil)).toThrow(new InvalidInputError("Invalid tenant id."));
+    expect(s.logs.at(-1)).toBe("admin reset_password tenant=- outcome=error");
+  });
+
   it("refuses the admin tenant for revoke, restore and delete", async () => {
     const s = await setup();
     const id = s.adminTenant.id;
@@ -246,10 +257,17 @@ describe("delete_tenant", () => {
     };
     const dir = path.join(s.dataDir, "tenants", tenantId);
     fs.mkdirSync(dir, { recursive: true });
+    const session = s.tenants.getTenant(tenantId)?.wahaSession as string;
     const out = await s.admin.delete(tenantId, "Acme");
-    expect(out).toEqual({ whatsappCleanup: "failed", localCleanup: "ok" });
+    expect(out).toEqual({ whatsappCleanup: "failed", localCleanup: "ok", wahaSession: session });
     expect(s.tenants.getTenant(tenantId)).toBeNull();
     expect(fs.existsSync(dir)).toBe(false);
+    // One non-secret line per failed step, naming the WAHA session to clean up by hand.
+    expect(s.logs).toContain(
+      `admin delete_tenant tenant=${tenantId} session=${session} step=waha_logout outcome=failed`,
+    );
+    expect(s.logs.filter((l) => l.includes("step="))).toHaveLength(1);
+    expect(s.logs.join("\n")).not.toContain("waha down");
   });
 
   it("never touches the filesystem outside tenants/ for an unsafe id", async () => {
@@ -266,6 +284,8 @@ describe("delete_tenant", () => {
   it("reports local cleanup failures instead of throwing once the row is gone", async () => {
     const s = await setup();
     const { tenantId } = await onboard(s);
+    const logs: string[] = [];
+    const session = s.tenants.getTenant(tenantId)?.wahaSession as string;
     const boom = createTenantAdmin({
       tenants: s.tenants,
       auth: s.auth,
@@ -278,11 +298,14 @@ describe("delete_tenant", () => {
       newWrappedDek: () => "x",
       dataDir: s.dataDir,
       publicBaseUrl: "https://mcp.example.com",
-      logger: { info: () => {} },
+      logger: { info: (m) => void logs.push(m) },
     });
     const out = await boom.delete(tenantId, "Acme");
-    expect(out).toEqual({ whatsappCleanup: "ok", localCleanup: "failed" });
+    expect(out).toEqual({ whatsappCleanup: "ok", localCleanup: "failed", wahaSession: session });
     expect(s.tenants.getTenant(tenantId)).toBeNull();
+    expect(logs).toContain(
+      `admin delete_tenant tenant=${tenantId} session=${session} step=evict outcome=failed`,
+    );
   });
 });
 

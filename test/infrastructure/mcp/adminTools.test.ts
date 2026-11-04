@@ -91,7 +91,7 @@ describe("admin tool output through run()", () => {
         data: Record<string, unknown>;
       }>;
     };
-    return { run, store };
+    return { run, store, sessions };
   }
 
   it("create_invite, revoke_tenant, restore_tenant and delete_tenant report clean text and data", async () => {
@@ -118,6 +118,27 @@ describe("admin tool output through run()", () => {
       deleted: true,
       whatsappCleanup: "ok",
       localCleanup: "ok",
+    });
+  });
+
+  it("delete_tenant names the WAHA session when cleanup fails", async () => {
+    const { run, store, sessions } = await world();
+    const invite = await run("create_invite", { display_name: "Acme" });
+    const id = invite.data.tenantId as string;
+    const session = store.getTenant(id)?.wahaSession as string;
+    sessions.remove = async () => {
+      throw new Error("waha down");
+    };
+    const deleted = await run("delete_tenant", { tenant_id: id, confirm_display_name: "Acme" });
+    expect(deleted.text).toBe(
+      `Tenant ${id} deleted. The WhatsApp session ${session} could not be removed from WAHA; log it out and delete it there manually.`,
+    );
+    expect(deleted.data).toEqual({
+      tenantId: id,
+      deleted: true,
+      whatsappCleanup: "failed",
+      localCleanup: "ok",
+      wahaSession: session,
     });
   });
 

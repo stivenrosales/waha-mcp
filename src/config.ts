@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseMasterKey } from "./infrastructure/crypto/envelope.js";
 
 /**
  * Validated server configuration. `loadConfig` is pure: it never reads
@@ -8,7 +9,18 @@ import { z } from "zod";
 export interface Config {
   wahaApiUrl: string;
   wahaApiKey: string;
+  /** WAHA session of the admin tenant (tenant #1); other tenants get generated sessions. */
   wahaSession: string;
+  /** 32-byte key that wraps every tenant's data key. Env only, never persisted or logged. */
+  masterKey: Buffer;
+  /** Previous master key, set only while rotating; null otherwise. */
+  masterKeyPrevious: Buffer | null;
+  /** Username of the admin account seeded on first start. */
+  adminUsername: string;
+  /** Password of the admin account seeded on first start (min 12 characters). */
+  adminPassword: string;
+  /** When true, the admin's stored password is overwritten with `adminPassword` at boot. */
+  adminPasswordReset: boolean;
   publicBaseUrl: string;
   dataDir: string;
   port: number;
@@ -104,6 +116,38 @@ const boolean = (name: string, fallback: boolean) =>
         .transform((v) => v === "true"),
     );
 
+const ADMIN_PASSWORD_MIN = 12;
+
+/** Base64 key of exactly 32 bytes; the message names the variable, never the value. */
+const masterKeyVar = (name: string, optional: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform((value, ctx): Buffer | null => {
+      const text = (value ?? "").trim();
+      if (text === "" && optional) return null;
+      try {
+        return parseMasterKey(text);
+      } catch {
+        const message =
+          text === "" ? `${name} is required.` : `${name} must be 32 bytes encoded in base64.`;
+        ctx.addIssue({ code: "custom", message });
+        return z.NEVER;
+      }
+    });
+
+/** Accepts "1"/"true" and "0"/"false" (case-insensitive); empty or unset is false. */
+const flag = (name: string) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "").trim().toLowerCase())
+    .pipe(
+      z
+        .enum(["", "0", "false", "1", "true"], `${name} must be "1", "true", "0" or "false".`)
+        .transform((v) => v === "1" || v === "true"),
+    );
+
 const envSchema = z
   .object({
     WAHA_API_URL: required("WAHA_API_URL")
@@ -117,6 +161,14 @@ const envSchema = z
         "PUBLIC_BASE_URL must use https (http is only allowed for localhost).",
       )
       .transform(stripTrailingSlashes),
+    MASTER_KEY: masterKeyVar("MASTER_KEY", false),
+    MASTER_KEY_PREVIOUS: masterKeyVar("MASTER_KEY_PREVIOUS", true),
+    ADMIN_USERNAME: required("ADMIN_USERNAME"),
+    ADMIN_PASSWORD: required("ADMIN_PASSWORD").min(
+      ADMIN_PASSWORD_MIN,
+      `ADMIN_PASSWORD must be at least ${ADMIN_PASSWORD_MIN} characters.`,
+    ),
+    ADMIN_PASSWORD_RESET: flag("ADMIN_PASSWORD_RESET"),
     WAHA_SESSION: z.string().min(1, "WAHA_SESSION must not be empty.").default("default"),
     DATA_DIR: z.string().min(1, "DATA_DIR must not be empty.").default("/data"),
     PORT: positiveInt("PORT", 3000),
@@ -191,6 +243,11 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     wahaApiUrl: v.WAHA_API_URL,
     wahaApiKey: v.WAHA_API_KEY,
     wahaSession: v.WAHA_SESSION,
+    masterKey: v.MASTER_KEY as Buffer,
+    masterKeyPrevious: v.MASTER_KEY_PREVIOUS,
+    adminUsername: v.ADMIN_USERNAME,
+    adminPassword: v.ADMIN_PASSWORD,
+    adminPasswordReset: v.ADMIN_PASSWORD_RESET,
     publicBaseUrl: v.PUBLIC_BASE_URL,
     dataDir: v.DATA_DIR,
     port: v.PORT,

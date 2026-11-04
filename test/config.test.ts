@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 
+const KEY_B64 = Buffer.alloc(32, 7).toString("base64");
+
 const minimal = {
   WAHA_API_URL: "http://waha:3000",
   WAHA_API_KEY: "k",
   PUBLIC_BASE_URL: "https://mcp.example.com",
+  MASTER_KEY: KEY_B64,
+  ADMIN_USERNAME: "admin",
+  ADMIN_PASSWORD: "correct horse battery",
 };
 
 describe("loadConfig", () => {
@@ -227,5 +232,82 @@ describe("loadConfig", () => {
       expect(message).toMatch(/WAHA_API_URL[\s\S]*PUBLIC_BASE_URL[\s\S]*PORT[\s\S]*TIMEZONE/);
       expect(message).not.toContain(key);
     }
+  });
+
+  describe("multi-tenancy settings", () => {
+    const { MASTER_KEY: _k, ADMIN_USERNAME: _u, ADMIN_PASSWORD: _p, ...base } = minimal;
+
+    it("requires MASTER_KEY, ADMIN_USERNAME and ADMIN_PASSWORD", () => {
+      let message = "";
+      try {
+        loadConfig(base);
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toMatch(/MASTER_KEY/);
+      expect(message).toMatch(/ADMIN_USERNAME/);
+      expect(message).toMatch(/ADMIN_PASSWORD/);
+    });
+
+    it("exposes the master key and admin seed", () => {
+      const c = loadConfig(minimal);
+      expect(c.masterKey.equals(Buffer.alloc(32, 7))).toBe(true);
+      expect(c.masterKeyPrevious).toBeNull();
+      expect(c.adminUsername).toBe("admin");
+      expect(c.adminPassword).toBe("correct horse battery");
+      expect(c.adminPasswordReset).toBe(false);
+    });
+
+    it("rejects ADMIN_PASSWORD shorter than 12 chars", () => {
+      expect(() => loadConfig({ ...minimal, ADMIN_PASSWORD: "short-pass1" })).toThrow(
+        /ADMIN_PASSWORD must be at least 12 characters/,
+      );
+      expect(loadConfig({ ...minimal, ADMIN_PASSWORD: "exactly12chr" }).adminPassword).toBe(
+        "exactly12chr",
+      );
+    });
+
+    it("rejects a MASTER_KEY that is not 32 bytes without echoing the value", () => {
+      const bad = Buffer.alloc(16, 1).toString("base64");
+      let message = "";
+      try {
+        loadConfig({ ...minimal, MASTER_KEY: bad });
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toMatch(/MASTER_KEY must be 32 bytes/);
+      expect(message).not.toContain(bad);
+    });
+
+    it("ADMIN_PASSWORD_RESET defaults to false and accepts 1/true", () => {
+      expect(loadConfig({ ...minimal, ADMIN_PASSWORD_RESET: "" }).adminPasswordReset).toBe(false);
+      expect(loadConfig({ ...minimal, ADMIN_PASSWORD_RESET: "0" }).adminPasswordReset).toBe(false);
+      expect(loadConfig({ ...minimal, ADMIN_PASSWORD_RESET: "false" }).adminPasswordReset).toBe(
+        false,
+      );
+      expect(loadConfig({ ...minimal, ADMIN_PASSWORD_RESET: "1" }).adminPasswordReset).toBe(true);
+      expect(loadConfig({ ...minimal, ADMIN_PASSWORD_RESET: "TRUE" }).adminPasswordReset).toBe(
+        true,
+      );
+      expect(() => loadConfig({ ...minimal, ADMIN_PASSWORD_RESET: "yes" })).toThrow(
+        /ADMIN_PASSWORD_RESET/,
+      );
+    });
+
+    it("MASTER_KEY_PREVIOUS is optional and validated like MASTER_KEY", () => {
+      const prev = Buffer.alloc(32, 9).toString("base64");
+      const c = loadConfig({ ...minimal, MASTER_KEY_PREVIOUS: prev });
+      expect(c.masterKeyPrevious?.equals(Buffer.alloc(32, 9))).toBe(true);
+      expect(loadConfig({ ...minimal, MASTER_KEY_PREVIOUS: "" }).masterKeyPrevious).toBeNull();
+      const bad = Buffer.alloc(8, 2).toString("base64");
+      let message = "";
+      try {
+        loadConfig({ ...minimal, MASTER_KEY_PREVIOUS: bad });
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toMatch(/MASTER_KEY_PREVIOUS must be 32 bytes/);
+      expect(message).not.toContain(bad);
+    });
   });
 });

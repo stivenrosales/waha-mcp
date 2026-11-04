@@ -89,6 +89,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       tenants,
       auth: store,
       sessions,
+      registry,
       cookieSecret,
       publicBaseUrl: config.publicBaseUrl,
       limiter,

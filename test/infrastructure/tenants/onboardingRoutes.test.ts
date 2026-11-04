@@ -20,10 +20,12 @@ function setup() {
   const auth = createAuthStore(db, now);
   const tenants = createSqliteTenantStore(db, now);
   const sessions = new FakeSessionAdmin();
+  const evicted: string[] = [];
   const app = createOnboardingRoutes({
     tenants,
     auth,
     sessions,
+    registry: { evict: (id) => void evicted.push(id) },
     cookieSecret: new Uint8Array(32).fill(9),
     publicBaseUrl: BASE,
     limiter: createLoginLimiter({ now }),
@@ -75,6 +77,7 @@ function setup() {
     auth,
     tenants,
     sessions,
+    evicted,
     seen,
     request,
     post,
@@ -364,6 +367,23 @@ describe("pair", () => {
       waId: null,
     });
     expect(ctx.tenants.getTenant(first.tenant.id)?.status).toBe("active");
+  });
+
+  it("pairing a different phone evicts the tenant's runtime; the same phone does not", async () => {
+    const ctx = setup();
+    const { tenant, cookie } = await ctx.onboarded();
+    ctx.sessions.setState(tenant.wahaSession, "WORKING");
+    ctx.sessions.setMe(tenant.wahaSession, "51999888777@c.us");
+    await ctx.pairPage(cookie);
+    // First pairing: no previous phone, nothing cached to drop.
+    expect(ctx.evicted).toEqual([]);
+    await ctx.pairPage(cookie);
+    expect(ctx.evicted).toEqual([]);
+    ctx.sessions.setMe(tenant.wahaSession, "51911222333@c.us");
+    const res = await ctx.pairPage(cookie);
+    expect(res.status).toBe(200);
+    expect(ctx.tenants.getTenant(tenant.id)?.waId).toBe("51911222333@c.us");
+    expect(ctx.evicted).toEqual([tenant.id]);
   });
 
   it("an active tenant that is WORKING sees the done page", async () => {

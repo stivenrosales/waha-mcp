@@ -50,12 +50,14 @@ export function createOnboardingRoutes(deps: {
   tenants: TenantStore;
   auth: AuthStore;
   sessions: SessionAdmin;
+  /** Drops a tenant's cached runtime, so the next request re-checks the paired account. */
+  registry: { evict(tenantId: string): void };
   cookieSecret: Uint8Array;
   publicBaseUrl: string;
   limiter: LoginLimiter;
   now?: () => number;
 }): Hono {
-  const { tenants, auth, sessions, limiter } = deps;
+  const { tenants, auth, sessions, registry, limiter } = deps;
   const now = deps.now ?? Date.now;
   const base = deps.publicBaseUrl;
   const baseOrigin = new URL(base).origin;
@@ -274,10 +276,13 @@ export function createOnboardingRoutes(deps: {
       } else if (state === "WORKING") {
         const me = await sessions.me(name);
         if (me) {
+          const previous = tenants.getTenant(tenant.id)?.waId ?? null;
           if (tenants.setWaId(tenant.id, me.id) === "taken") {
             await sessions.logout(name);
             return html(pairTakenPage(NUMBER_TAKEN), 409);
           }
+          // A different phone: the cached runtime still serves the old account's cache.
+          if (previous !== null && previous !== me.id) registry.evict(tenant.id);
           const current = tenants.getTenant(tenant.id)?.status;
           if (current === "pairing") tenants.setStatus(tenant.id, "active");
           return html(pairDonePage(`${base}/mcp`));

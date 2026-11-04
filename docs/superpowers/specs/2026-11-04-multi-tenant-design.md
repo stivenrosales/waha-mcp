@@ -6,7 +6,7 @@ Date: 2026-11-04. Supersedes the "personal use only, one owner" scope of
 ## 1. Intent
 
 waha-mcp today serves exactly one person: the owner. One `WAHA_SESSION`, one `cache.db`, and
-the login password *is* the WAHA API key. A friend wants to use it, and more will follow. The
+the login password _is_ the WAHA API key. A friend wants to use it, and more will follow. The
 owner wants to keep **one** deployment and manage everyone from the MCP itself ("invite Juan"
 from Claude), while each friend's WhatsApp data stays private to that friend and is encrypted
 at rest. WAHA is now the Plus tier (multi-session), so every friend gets their own WAHA session

@@ -81,6 +81,7 @@
 
 **Interfaces:**
 - Produces (`TenantStore.ts`):
+
   ```ts
   type TenantStatus = "invited" | "pairing" | "active" | "revoked";
   type Role = "admin" | "member";
@@ -181,6 +182,7 @@
 **Interfaces:**
 - Consumes: Tasks 1, 3, 5, 6.
 - Produces:
+
   ```ts
   interface TenantRuntime {
     tenantId: string;
@@ -198,6 +200,7 @@
   }
   function createTenantRegistry(deps: { config: Config; tenants: TenantStore; kek: Buffer; mediaSecret: Uint8Array; logger: Logger; maxOpen?: number /* default 32 */; build?: typeof buildTenantRuntime }): TenantRegistry;
   ```
+
   `buildTenantRuntime` is the per-tenant part of today's `main.ts` (gateway, cached gateway, transcription, sender, uploads in `DATA_DIR/tenants/<id>/uploads`, cache in `DATA_DIR/tenants/<id>/cache.db`, per-tenant links, media and upload handlers).
   - `WhatsAppDisconnectedError` in `src/domain/errors.ts`; the gateway throws it when WAHA answers that the session is not `WORKING` (verify the exact status code/body on the instance — WAHA uses 422 for this). `defineTool` maps it to: `WhatsApp is disconnected for this account. Re-pair at <PUBLIC_BASE_URL>/pair.`
 
@@ -213,6 +216,7 @@
 
 **Interfaces:**
 - Produces:
+
   ```ts
   type SessionState = "STOPPED" | "STARTING" | "SCAN_QR_CODE" | "WORKING" | "FAILED" | "UNKNOWN";
   interface SessionAdmin {
@@ -225,6 +229,7 @@
   }
   function createWahaSessionAdmin(opts: { baseUrl: string; apiKey: string; fetch?: typeof fetch }): SessionAdmin;
   ```
+
   `FakeSessionAdmin` keeps states in memory and lets tests set `state`/`me` per session.
 
 - [ ] **Step 0: Verify** the endpoints against the instance (`/api/version` shows Plus; `POST /api/sessions`, `GET /api/sessions/{name}`, `GET /api/{name}/auth/qr`, `GET /api/sessions/{name}/me`, `POST /api/sessions/{name}/logout`, `DELETE /api/sessions/{name}`) and record the result in the commit message body. Needs the owner's authorization to call the live instance.
@@ -264,6 +269,7 @@
 **Interfaces:**
 - Consumes: `TenantStore`, `AuthStore.revokeUser`, `SessionAdmin`, `TenantRegistry.evict`, envelope `generateDek`/`wrapDek`.
 - Produces:
+
   ```ts
   interface TenantAdmin {
     createInvite(q: { displayName?: string; tenantId?: string }): Promise<{ tenantId: string; url: string; expiresAt: string }>;
@@ -274,6 +280,7 @@
   }
   function createTenantAdmin(deps: { tenants; auth; sessions; registry; kek: Buffer; dataDir: string; publicBaseUrl: string; logger; now? }): TenantAdmin;
   ```
+
   Tools: `create_invite({ display_name?, tenant_id? })` (exactly one), `list_tenants()`, `revoke_tenant({ tenant_id })`, `restore_tenant({ tenant_id })`, `reset_password({ tenant_id })`, `delete_tenant({ tenant_id, confirm_display_name })`. Annotations: `delete_tenant` destructive; list read-only.
   Rules: re-issue only for a tenant with no user (else `InvalidInputError("This tenant already has a user; use reset_password.")`); admin tenant refused by revoke/restore/delete (`InvalidInputError("The admin tenant cannot be revoked, restored or deleted.")`); delete requires exact display name; delete order per spec §6.4 (row + DEK, `revokeUser`, registry `evict`, WAHA `logout`+`remove`, `rm -r DATA_DIR/tenants/<id>`); every call logs `admin <tool> tenant=<id> outcome=<ok|error>`.
 

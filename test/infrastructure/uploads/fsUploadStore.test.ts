@@ -50,6 +50,36 @@ describe("createFsUploadStore", () => {
     expect(readdirSync(dir).some((f) => f.endsWith(".part"))).toBe(false);
   });
 
+  it("two concurrent writes to one slot: exactly one wins and its bytes are stored", async () => {
+    const s = store();
+    const { id } = s.create({ filename: "a.txt", mimetype: null });
+    const results = await Promise.all([
+      s.write(id, stream("first"), null),
+      s.write(id, stream("second"), null),
+    ]);
+    expect([...results].sort()).toEqual(["already_uploaded", "ok"]);
+    const winner = results[0] === "ok" ? "first" : "second";
+    expect(new TextDecoder().decode((await s.read(id))?.data)).toBe(winner);
+  });
+
+  it("a write after the file was claimed does not recreate it", async () => {
+    const s = store();
+    const { id } = s.create({ filename: "a.txt", mimetype: null });
+    await s.write(id, stream("one"), null);
+    await s.claim(id);
+    expect(await s.write(id, stream("two"), null)).toBe("already_uploaded");
+    expect(existsSync(join(dir, `${id}.bin`))).toBe(false);
+  });
+
+  it("the .json on disk does not contain the filename, but get and read return it", async () => {
+    const s = store();
+    const { id } = s.create({ filename: "Secret Plan.pdf", mimetype: null });
+    await s.write(id, stream("x"), null);
+    expect(readFileSync(join(dir, `${id}.json`), "utf8")).not.toContain("Secret Plan");
+    expect(s.get(id)?.filename).toBe("Secret Plan.pdf");
+    expect((await s.read(id))?.filename).toBe("Secret Plan.pdf");
+  });
+
   it("a tampered .bin reads as null", async () => {
     const s = store();
     const { id } = s.create({ filename: "a.txt", mimetype: null });

@@ -17,7 +17,8 @@ export function createSqliteTranscriptStore(
     `INSERT INTO transcripts (chat_id, message_id, text, created_at) VALUES (?, ?, ?, ?)
      ON CONFLICT (chat_id, message_id) DO UPDATE SET text = excluded.text, created_at = excluded.created_at`,
   );
-  const aad = (chatId: string, messageId: string) => `transcripts:${chatId}:${messageId}`;
+  const aad = (chatId: string, messageId: string) =>
+    `transcripts:${chatId.length}:${chatId}:${messageId}`;
   return {
     get(chatId, messageId) {
       const row = select.get(chatId, messageId) as { text: string } | undefined;

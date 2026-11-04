@@ -11,7 +11,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { UploadSlot, UploadStore, WriteResult } from "../../domain/ports/UploadStore.js";
-import { DecryptionError, type TenantCipher } from "../crypto/envelope.js";
+import { DecryptionError, isSealedText, type TenantCipher } from "../crypto/envelope.js";
 
 const ID = /^[A-Za-z0-9_-]{32}$/;
 const GENERIC = "application/octet-stream";
@@ -84,13 +84,23 @@ export function createFsUploadStore(opts: {
     }
   };
   const path = (id: string, ext: string) => join(opts.dir, `${id}.${ext}`);
+  // The filename is user content: sealed in the metadata file. The rest stays plaintext.
+  const metaAad = (id: string) => `uploads-meta:${id}`;
   const saveMeta = (m: Meta) =>
-    writeFileSync(path(m.id, "json"), JSON.stringify(m), { mode: 0o600 });
+    writeFileSync(
+      path(m.id, "json"),
+      JSON.stringify({ ...m, filename: opts.cipher.sealText(m.filename, metaAad(m.id)) }),
+      { mode: 0o600 },
+    );
+  /** Slots with a body being received; reserved synchronously so one writer wins. */
+  const inFlight = new Set<string>();
 
   function loadMeta(id: string): Meta | null {
     if (!ID.test(id)) return null;
     try {
-      return JSON.parse(readFileSync(path(id, "json"), "utf8")) as Meta;
+      const m = JSON.parse(readFileSync(path(id, "json"), "utf8")) as Meta;
+      if (isSealedText(m.filename)) m.filename = opts.cipher.openText(m.filename, metaAad(id));
+      return m;
     } catch {
       return null;
     }
@@ -137,37 +147,44 @@ export function createFsUploadStore(opts: {
         await body.cancel().catch(() => {});
         return "already_uploaded";
       }
-      // Buffered in memory (bounded by maxBytes) so the file is sealed once, as one GCM message.
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      const reader = body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > opts.maxBytes) {
-          await reader.cancel().catch(() => {});
-          return "too_large";
-        }
-        chunks.push(value);
+      if (inFlight.has(id)) {
+        await body.cancel().catch(() => {});
+        return "already_uploaded";
       }
-      const sealed = opts.cipher.seal(Buffer.concat(chunks), aad(id));
+      inFlight.add(id);
       try {
-        // "wx": a concurrent upload to the same slot loses instead of interleaving.
-        writeFileSync(path(id, "part"), sealed, { flag: "wx", mode: 0o600 });
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "EEXIST") return "already_uploaded";
-        throw err;
+        // Buffered in memory (bounded by maxBytes) so the file is sealed once, as one GCM message.
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        const reader = body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > opts.maxBytes) {
+            await reader.cancel().catch(() => {});
+            return "too_large";
+          }
+          chunks.push(value);
+        }
+        // Everything from here to the return is synchronous: re-check the slot, then commit.
+        const current = live(id);
+        if (!current) return "not_found";
+        if (current.uploaded) return "already_uploaded";
+        const sealed = opts.cipher.seal(Buffer.concat(chunks), aad(id));
+        writeFileSync(path(id, "part"), sealed, { mode: 0o600 });
+        renameSync(path(id, "part"), path(id, "bin"));
+        const type = contentType?.split(";")[0]?.trim().toLowerCase() || null;
+        saveMeta({
+          ...current,
+          uploaded: true,
+          size,
+          contentType: type && type !== GENERIC ? type : null,
+        });
+        return "ok";
+      } finally {
+        inFlight.delete(id);
       }
-      renameSync(path(id, "part"), path(id, "bin"));
-      const type = contentType?.split(";")[0]?.trim().toLowerCase() || null;
-      saveMeta({
-        ...m,
-        uploaded: true,
-        size,
-        contentType: type && type !== GENERIC ? type : null,
-      });
-      return "ok";
     },
 
     async read(id) {

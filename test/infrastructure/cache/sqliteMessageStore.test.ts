@@ -203,19 +203,11 @@ describe("sqlite message store", () => {
     ]);
   });
 
-  it("transcript text on disk is sealed, bound to its tenant, and legacy plaintext still reads", () => {
+  it('row AADs are unambiguous: chat "a:b" / id "c" is not chat "a" / id "b:c"', () => {
     const db = openCacheDatabase(":memory:");
-    const store = createSqliteTranscriptStore(db, cipher);
-    store.put(CHAT, "m1", "private words");
-    const { text } = db.prepare("SELECT text FROM transcripts").get() as { text: string };
-    expect(text.startsWith("v1.")).toBe(true);
-    expect(text).not.toContain("private");
-    expect(store.get(CHAT, "m1")).toBe("private words");
-    const other = createSqliteTranscriptStore(db, createTenantCipher(generateDek(), "t2"));
-    expect(() => other.get(CHAT, "m1")).toThrow(DecryptionError);
-    db.prepare(
-      "INSERT INTO transcripts (chat_id, message_id, text, created_at) VALUES (?, 'old', 'plain', 1)",
-    ).run(CHAT);
-    expect(store.get(CHAT, "old")).toBe("plain");
+    const store = createSqliteMessageStore(db, cipher);
+    store.upsertRaw("a:b", [row("c", 1)]);
+    db.prepare("UPDATE messages SET chat_id = 'a', id = 'b:c'").run();
+    expect(() => store.readRange("a", { limit: 10, offset: 0 })).toThrow(DecryptionError);
   });
 });

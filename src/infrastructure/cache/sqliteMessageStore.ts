@@ -112,7 +112,7 @@ function rangeWhere(q: { fromTs?: number; toTs?: number }): { sql: string; args:
  * text is a pre-encryption row and is read as plaintext until it is rewritten.
  */
 export function createSqliteMessageStore(db: DatabaseSync, cipher: TenantCipher): MessageStore {
-  const aad = (chatId: string, id: string) => `messages:${chatId}:${id}`;
+  const aad = (chatId: string, id: string) => `messages:${chatId.length}:${chatId}:${id}`;
   const transaction = <T>(fn: () => T): T => inTransaction(db, fn);
 
   // ON CONFLICT ... DO UPDATE keeps the rowid, which orders messages that share a second

@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import type { TenantStore } from "../../domain/ports/TenantStore.js";
 import { HTML_SECURITY_HEADERS, loginPage, logoutPage, messagePage } from "./loginPage.js";
 import { clientKey, type LoginLimiter } from "./rateLimit.js";
 import type { AuthStore } from "./store.js";
@@ -65,11 +66,12 @@ type Validation =
 
 export function createOAuthRoutes(deps: {
   store: AuthStore;
+  tenants: TenantStore;
   wahaApiKey: string;
   publicBaseUrl: string;
   limiter: LoginLimiter;
 }): Hono {
-  const { store, limiter } = deps;
+  const { store, tenants, limiter } = deps;
   const base = deps.publicBaseUrl;
   const resourceUrl = `${base}/mcp`;
   const app = new Hono();
@@ -287,7 +289,14 @@ export function createOAuthRoutes(deps: {
     }
     limiter.reset(key);
 
+    // Interim (until the per-user login): the WAHA key identifies the admin account.
+    const admin = tenants.getAdmin();
+    if (!admin) {
+      return html(c, messagePage("Sign-in unavailable", "No admin account is configured."), 503);
+    }
+
     const code = store.saveCode({
+      userId: admin.id,
       clientId: request.clientId,
       redirectUri: request.redirectUri,
       codeChallenge: request.codeChallenge,
@@ -366,7 +375,7 @@ export function createOAuthRoutes(deps: {
       ) {
         return oauthError(c, "invalid_grant", "Invalid, expired or mismatched authorization code.");
       }
-      return tokenResponse(store.issueTokens(clientId, data.scope));
+      return tokenResponse(store.issueTokens(clientId, data.scope, data.userId));
     }
 
     const refreshToken = get("refresh_token");

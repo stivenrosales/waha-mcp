@@ -14,6 +14,7 @@ export interface AuthorizationCodeData {
   codeChallenge: string;
   scope: string;
   resource: string | null;
+  userId: string;
 }
 
 export interface IssuedTokens {
@@ -37,11 +38,13 @@ export interface AuthStore {
   saveCode(c: AuthorizationCodeData): string;
   /** Single use: the code is deleted atomically as it is read. */
   consumeCode(code: string): AuthorizationCodeData | null;
-  issueTokens(clientId: string, scope: string): IssuedTokens;
-  verifyAccessToken(token: string): { clientId: string; scope: string } | null;
+  issueTokens(clientId: string, scope: string, userId: string): IssuedTokens;
+  verifyAccessToken(token: string): { clientId: string; scope: string; userId: string } | null;
   /** Single use: the old refresh token is deleted atomically; bound to `clientId`. */
   rotateRefreshToken(token: string, clientId: string): IssuedTokens | null;
-  /** Logout: removes every client, code and token. */
+  /** Removes the clients, codes and tokens of one user; other users are untouched. */
+  revokeUser(userId: string): void;
+  /** Removes every client, code and token (migrations, legacy logout). */
   revokeAll(): void;
   /** Closes the database; the store must not be used afterwards. */
   close(): void;
@@ -55,7 +58,8 @@ CREATE TABLE IF NOT EXISTS clients (
   client_id TEXT PRIMARY KEY,
   redirect_uris TEXT NOT NULL,
   client_name TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  user_id TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
@@ -68,16 +72,32 @@ CREATE TABLE IF NOT EXISTS codes (
   code_challenge TEXT NOT NULL,
   scope TEXT NOT NULL,
   resource TEXT,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tokens (
   hash TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
   client_id TEXT NOT NULL,
   scope TEXT NOT NULL,
-  expires_at INTEGER NOT NULL
+  expires_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL
 );
 `;
+
+/**
+ * Databases created before multi-tenancy lack `user_id`. Codes and tokens issued back then belong
+ * to no user, so they are dropped (the 0.4.0 migration revokes them anyway); clients keep a NULL.
+ */
+function migrateUserColumns(db: DatabaseSync): void {
+  for (const table of ["clients", "codes", "tokens"]) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!columns.some((c) => c.name === "user_id"))
+      db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT`);
+  }
+  db.exec("DELETE FROM codes WHERE user_id IS NULL");
+  db.exec("DELETE FROM tokens WHERE user_id IS NULL");
+}
 
 /** Opens the auth database (WAL, busy timeout) and keeps its files private to the owner. */
 export function openAuthDatabase(dbPath: string): DatabaseSync {
@@ -98,6 +118,7 @@ export function openAuthDatabase(dbPath: string): DatabaseSync {
  */
 export function createAuthStore(db: DatabaseSync, now: () => number = Date.now): AuthStore {
   db.exec(SCHEMA);
+  migrateUserColumns(db);
 
   const transaction = <T>(fn: () => T): T => {
     db.exec("BEGIN IMMEDIATE");
@@ -121,18 +142,19 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
     kind: "access" | "refresh",
     clientId: string,
     scope: string,
+    userId: string,
     ttlS: number,
   ) => {
     const raw = randomToken();
     db.prepare(
-      "INSERT INTO tokens (hash, kind, client_id, scope, expires_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(sha256(raw), kind, clientId, scope, now() + ttlS * 1000);
+      "INSERT INTO tokens (hash, kind, client_id, scope, user_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(sha256(raw), kind, clientId, scope, userId, now() + ttlS * 1000);
     return raw;
   };
 
-  const mintPair = (clientId: string, scope: string): IssuedTokens => ({
-    accessToken: insertToken("access", clientId, scope, ACCESS_TTL_S),
-    refreshToken: insertToken("refresh", clientId, scope, REFRESH_TTL_S),
+  const mintPair = (clientId: string, scope: string, userId: string): IssuedTokens => ({
+    accessToken: insertToken("access", clientId, scope, userId, ACCESS_TTL_S),
+    refreshToken: insertToken("refresh", clientId, scope, userId, REFRESH_TTL_S),
     expiresIn: ACCESS_TTL_S,
   });
 
@@ -191,8 +213,8 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
       purgeExpired();
       const code = randomToken();
       db.prepare(
-        `INSERT INTO codes (hash, client_id, redirect_uri, code_challenge, scope, resource, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO codes (hash, client_id, redirect_uri, code_challenge, scope, resource, user_id, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         sha256(code),
         c.clientId,
@@ -200,8 +222,10 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
         c.codeChallenge,
         c.scope,
         c.resource,
+        c.userId,
         now() + CODE_TTL_MS,
       );
+      db.prepare("UPDATE clients SET user_id = ? WHERE client_id = ?").run(c.userId, c.clientId);
       return code;
     },
 
@@ -209,7 +233,7 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
       const row = db
         .prepare(
           `DELETE FROM codes WHERE hash = ? AND expires_at > ?
-           RETURNING client_id, redirect_uri, code_challenge, scope, resource`,
+           RETURNING client_id, redirect_uri, code_challenge, scope, resource, user_id`,
         )
         .get(sha256(code), now()) as
         | {
@@ -218,6 +242,7 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
             code_challenge: string;
             scope: string;
             resource: string | null;
+            user_id: string;
           }
         | undefined;
       if (!row) return null;
@@ -227,23 +252,26 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
         codeChallenge: row.code_challenge,
         scope: row.scope,
         resource: row.resource,
+        userId: row.user_id,
       };
     },
 
-    issueTokens(clientId, scope) {
+    issueTokens(clientId, scope, userId) {
       return transaction(() => {
         purgeExpired();
-        return mintPair(clientId, scope);
+        return mintPair(clientId, scope, userId);
       });
     },
 
     verifyAccessToken(token) {
       const row = db
         .prepare(
-          "SELECT client_id, scope FROM tokens WHERE hash = ? AND kind = 'access' AND expires_at > ?",
+          "SELECT client_id, scope, user_id FROM tokens WHERE hash = ? AND kind = 'access' AND expires_at > ?",
         )
-        .get(sha256(token), now()) as { client_id: string; scope: string } | undefined;
-      return row ? { clientId: row.client_id, scope: row.scope } : null;
+        .get(sha256(token), now()) as
+        | { client_id: string; scope: string; user_id: string }
+        | undefined;
+      return row ? { clientId: row.client_id, scope: row.scope, userId: row.user_id } : null;
     },
 
     rotateRefreshToken(token, clientId) {
@@ -252,10 +280,18 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
         const row = db
           .prepare(
             `DELETE FROM tokens WHERE hash = ? AND kind = 'refresh' AND client_id = ? AND expires_at > ?
-             RETURNING scope`,
+             RETURNING scope, user_id`,
           )
-          .get(sha256(token), clientId, now()) as { scope: string } | undefined;
-        return row ? mintPair(clientId, row.scope) : null;
+          .get(sha256(token), clientId, now()) as { scope: string; user_id: string } | undefined;
+        return row ? mintPair(clientId, row.scope, row.user_id) : null;
+      });
+    },
+
+    revokeUser(userId) {
+      transaction(() => {
+        db.prepare("DELETE FROM tokens WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM codes WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM clients WHERE user_id = ?").run(userId);
       });
     },
 

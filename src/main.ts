@@ -19,6 +19,7 @@ import { createMcpServer } from "./infrastructure/mcp/server.js";
 import { createTools } from "./infrastructure/mcp/tools/index.js";
 import { createMediaHandler } from "./infrastructure/media/mediaRoute.js";
 import { createSignedLinks, loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
+import { createSqliteTenantStore } from "./infrastructure/tenants/sqliteTenantStore.js";
 import { createOpenAiCompatibleTranscriber } from "./infrastructure/transcription/openaiCompatible.js";
 import { createWahaAudioSource } from "./infrastructure/transcription/wahaAudioSource.js";
 import { createFsUploadStore } from "./infrastructure/uploads/fsUploadStore.js";
@@ -48,7 +49,9 @@ async function main(): Promise<void> {
     session: config.wahaSession,
   });
   mkdirSync(config.dataDir, { recursive: true });
-  const store = createAuthStore(openAuthDatabase(join(config.dataDir, "auth.db")));
+  const authDb = openAuthDatabase(join(config.dataDir, "auth.db"));
+  const store = createAuthStore(authDb);
+  const tenants = createSqliteTenantStore(authDb);
   // The message cache is a copy of conversations at rest; logout does not clear it. Voice-note
   // transcripts live in the same file (even with the message cache off) and share its owner.
   const cacheDb =
@@ -107,11 +110,12 @@ async function main(): Promise<void> {
   const app = createApp({
     oauth: createOAuthRoutes({
       store,
+      tenants,
       wahaApiKey: config.wahaApiKey,
       publicBaseUrl: config.publicBaseUrl,
       limiter: createLoginLimiter(),
     }),
-    guard: bearerGuard({ store, publicBaseUrl: config.publicBaseUrl }),
+    guard: bearerGuard({ store, tenants, publicBaseUrl: config.publicBaseUrl }),
     mcpHandler: mcp.handler,
     media: createMediaHandler({
       gateway,

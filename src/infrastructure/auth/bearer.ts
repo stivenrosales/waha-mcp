@@ -1,28 +1,42 @@
 import type { MiddlewareHandler } from "hono";
+import type { Role, TenantStore } from "../../domain/ports/TenantStore.js";
 import type { AuthStore } from "./store.js";
 
 export interface AuthInfo {
   clientId: string;
   scope: string;
+  userId: string;
+  tenantId: string;
+  role: Role;
 }
 
 export type AuthVariables = { auth: AuthInfo };
 
 /**
- * Requires a valid opaque access token in `Authorization: Bearer <token>`.
- * On failure answers 401 with the RFC 9728 `resource_metadata` pointer, which
+ * Requires a valid opaque access token in `Authorization: Bearer <token>` whose user still exists
+ * and belongs to an active tenant. On failure answers 401 with the RFC 9728 `resource_metadata` pointer, which
  * is how MCP clients discover the authorization server.
  */
 export function bearerGuard(deps: {
   store: AuthStore;
+  tenants: TenantStore;
   publicBaseUrl: string;
 }): MiddlewareHandler<{ Variables: AuthVariables }> {
   const metadata = `resource_metadata="${deps.publicBaseUrl}/.well-known/oauth-protected-resource"`;
+  const resolve = (token: string): AuthInfo | null => {
+    const verified = deps.store.verifyAccessToken(token);
+    if (!verified) return null;
+    const user = deps.tenants.getUser(verified.userId);
+    if (!user) return null;
+    const tenant = deps.tenants.getTenant(user.tenantId);
+    if (tenant?.status !== "active") return null;
+    return { ...verified, tenantId: tenant.id, role: user.role };
+  };
   return async (c, next) => {
     const match = /^Bearer[ ]+([A-Za-z0-9\-._~+/]+=*)\s*$/i.exec(
       c.req.header("authorization") ?? "",
     );
-    const auth = match ? deps.store.verifyAccessToken(match[1]) : null;
+    const auth = match ? resolve(match[1]) : null;
     if (!auth) {
       // RFC 6750 §3.1: error="invalid_token" only when a token was presented.
       const error = match ? 'error="invalid_token", ' : "";

@@ -8,20 +8,45 @@ import {
   normalizeClientKey,
 } from "../../../src/infrastructure/auth/rateLimit.js";
 import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
+import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
 
 const BASE = "https://mcp.example.com";
 const KEY = "waha-secret-key-0123456789";
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 const PRM_URL = `${BASE}/.well-known/oauth-protected-resource`;
 
-type Auth = { clientId: string; scope: string };
+type Auth = { clientId: string; scope: string; userId: string; tenantId: string; role: string };
 
-function setup(opts: { now?: () => number; storeNow?: () => number } = {}) {
-  const store = createAuthStore(openAuthDatabase(":memory:"), opts.storeNow);
+async function setup(
+  opts: { now?: () => number; storeNow?: () => number; noAdmin?: boolean } = {},
+) {
+  const db = openAuthDatabase(":memory:");
+  const store = createAuthStore(db, opts.storeNow);
+  const tenants = createSqliteTenantStore(db);
+  let adminUserId = "";
+  if (!opts.noAdmin) {
+    const tenant = tenants.createTenant({
+      displayName: "Admin",
+      wahaSession: "default",
+      wrappedDek: "x",
+    });
+    tenants.setStatus(tenant.id, "active");
+    const admin = await tenants.createUser({
+      tenantId: tenant.id,
+      username: "admin",
+      password: "correct horse battery",
+      role: "admin",
+    });
+    if (admin === "username_taken") throw new Error("unreachable");
+    adminUserId = admin.id;
+  }
   const limiter = createLoginLimiter({ now: opts.now });
   const app = new Hono<{ Variables: { auth: Auth } }>();
-  app.route("/", createOAuthRoutes({ store, wahaApiKey: KEY, publicBaseUrl: BASE, limiter }));
-  app.use("/mcp", bearerGuard({ store, publicBaseUrl: BASE }));
+  app.route(
+    "/",
+    createOAuthRoutes({ store, tenants, wahaApiKey: KEY, publicBaseUrl: BASE, limiter }),
+  );
+  app.use("/mcp", bearerGuard({ store, tenants, publicBaseUrl: BASE }));
   app.get("/mcp", (c) => c.json(c.get("auth")));
 
   // Every response body and header seen in a test, to prove the key never leaks.
@@ -32,7 +57,7 @@ function setup(opts: { now?: () => number; storeNow?: () => number } = {}) {
     seen.push(body, JSON.stringify([...res.headers.entries()]));
     return res;
   };
-  return { store, app, request, seen };
+  return { store, app, request, seen, adminUserId };
 }
 
 const pkce = () => {
@@ -47,7 +72,7 @@ const form = (fields: Record<string, string>, headers: Record<string, string> = 
   body: new URLSearchParams(fields).toString(),
 });
 
-type Ctx = ReturnType<typeof setup>;
+type Ctx = Awaited<ReturnType<typeof setup>>;
 
 async function register(ctx: Ctx, redirectUris: unknown = [REDIRECT]) {
   return ctx.request("/register", {
@@ -97,7 +122,7 @@ async function exchange(ctx: Ctx, fields: Record<string, string>) {
 
 describe("oauth metadata", () => {
   it("metadata documents point at PUBLIC_BASE_URL", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     for (const path of [
       "/.well-known/oauth-protected-resource",
       "/.well-known/oauth-protected-resource/mcp",
@@ -127,7 +152,7 @@ describe("oauth metadata", () => {
 
 describe("dynamic client registration", () => {
   it("registers a public client", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const res = await register(ctx);
     expect(res.status).toBe(201);
     const body = (await res.json()) as Record<string, unknown>;
@@ -137,14 +162,14 @@ describe("dynamic client registration", () => {
   });
 
   it("accepts loopback http redirect URIs", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     for (const uri of ["http://localhost:7777/oauth/callback", "http://127.0.0.1:33418/cb"]) {
       expect((await register(ctx, [uri])).status).toBe(201);
     }
   });
 
   it("rejects missing, non-https and malformed redirect URIs", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     for (const uris of [
       null,
       [],
@@ -161,7 +186,7 @@ describe("dynamic client registration", () => {
   });
 
   it("caps registered clients at 50 until logout", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     for (let i = 0; i < 50; i++) expect((await register(ctx)).status).toBe(201);
     const res = await register(ctx);
     expect(res.status).toBe(400);
@@ -174,7 +199,7 @@ describe("dynamic client registration", () => {
 
   it("prunes day-old clients without live tokens before checking the cap", async () => {
     let t = 1_800_000_000_000;
-    const ctx = setup({ storeNow: () => t });
+    const ctx = await setup({ storeNow: () => t });
     for (let i = 0; i < 50; i++) expect((await register(ctx)).status).toBe(201);
     t += 25 * 3600 * 1000;
     expect((await register(ctx)).status).toBe(201);
@@ -184,7 +209,7 @@ describe("dynamic client registration", () => {
 
 describe("authorization code flow", () => {
   it("full flow", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { verifier, challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -221,7 +246,12 @@ describe("authorization code flow", () => {
       headers: { authorization: `Bearer ${tokens.access_token}` },
     });
     expect(guarded.status).toBe(200);
-    expect(await guarded.json()).toEqual({ clientId, scope: "mcp" });
+    expect(await guarded.json()).toMatchObject({
+      clientId,
+      scope: "mcp",
+      userId: ctx.adminUserId,
+      role: "admin",
+    });
 
     const refreshed = await exchange(ctx, {
       grant_type: "refresh_token",
@@ -240,7 +270,7 @@ describe("authorization code flow", () => {
   });
 
   it("wrong key re-renders login with error and no code", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const res = await login(ctx, authParams(clientId, challenge), "wrong-key");
@@ -255,8 +285,41 @@ describe("authorization code flow", () => {
     expect(html).not.toMatch(/read-only/i);
   });
 
+  it("binds the legacy login to the admin user", async () => {
+    const ctx = await setup();
+    const clientId = await registeredClient(ctx);
+    const { verifier, challenge } = pkce();
+    const code = await obtainCode(ctx, clientId, challenge);
+    const res = await exchange(ctx, {
+      grant_type: "authorization_code",
+      code,
+      code_verifier: verifier,
+      client_id: clientId,
+      redirect_uri: REDIRECT,
+    });
+    const tokens = (await res.json()) as { access_token: string };
+    const me = await ctx.request("/mcp", {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    expect(me.status).toBe(200);
+    expect((await me.json()) as { userId: string; role: string }).toMatchObject({
+      userId: ctx.adminUserId,
+      role: "admin",
+    });
+  });
+
+  it("answers the login with an error page when no admin account exists", async () => {
+    const ctx = await setup({ noAdmin: true });
+    const clientId = await registeredClient(ctx);
+    const { challenge } = pkce();
+    const res = await login(ctx, authParams(clientId, challenge), KEY);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain("No admin account is configured.");
+  });
+
   it("wrong code_verifier → invalid_grant", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const code = await obtainCode(ctx, clientId, challenge);
@@ -272,7 +335,7 @@ describe("authorization code flow", () => {
   });
 
   it("reused code → invalid_grant", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { verifier, challenge } = pkce();
     const code = await obtainCode(ctx, clientId, challenge);
@@ -290,7 +353,7 @@ describe("authorization code flow", () => {
   });
 
   it("code bound to its client and redirect_uri at /token", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const otherId = await registeredClient(ctx);
     for (const override of [{ client_id: otherId }, { redirect_uri: `${REDIRECT}/other` }]) {
@@ -310,7 +373,7 @@ describe("authorization code flow", () => {
   });
 
   it("token endpoint errors follow RFC 6749", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const cases: [Record<string, string>, string][] = [
       [{}, "invalid_request"],
@@ -341,7 +404,7 @@ describe("authorization code flow", () => {
   });
 
   it("redirect_uri mismatch at authorize → 400 page, no redirect", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const bad = authParams(clientId, challenge, { redirect_uri: "https://evil.example/cb" });
@@ -355,7 +418,7 @@ describe("authorization code flow", () => {
   });
 
   it("unknown client at authorize → 400 page, no redirect", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const { challenge } = pkce();
     const res = await ctx.request(
       `/authorize?${new URLSearchParams(authParams("nope", challenge))}`,
@@ -365,7 +428,7 @@ describe("authorization code flow", () => {
   });
 
   it("plain code_challenge_method rejected", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     for (const extra of <Record<string, string>[]>[
@@ -392,7 +455,7 @@ describe("authorization code flow", () => {
   });
 
   it("re-validates every original parameter on POST", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const res = await login(
@@ -404,7 +467,7 @@ describe("authorization code flow", () => {
   });
 
   it("escapes reflected values in the login page", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge, { state: '"><script>alert(1)</script>' });
@@ -416,7 +479,7 @@ describe("authorization code flow", () => {
 
 describe("login rate limit", () => {
   it("sixth failed login within 15 min → 429 even with the right key", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -431,7 +494,7 @@ describe("login rate limit", () => {
 
   it("unblocks after the 15 min window", async () => {
     let t = 1_800_000_000_000;
-    const ctx = setup({ now: () => t });
+    const ctx = await setup({ now: () => t });
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -442,7 +505,7 @@ describe("login rate limit", () => {
   });
 
   it("success resets counter", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -453,7 +516,7 @@ describe("login rate limit", () => {
   });
 
   it("rotating a spoofed leading x-forwarded-for hop does not bypass the limiter", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -493,7 +556,7 @@ describe("limiter hardening", () => {
   });
 
   it("IPv6 addresses in the same /64 share one counter", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -505,7 +568,7 @@ describe("limiter hardening", () => {
   });
 
   it("IPv4-mapped IPv6 shares the IPv4 counter", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -517,7 +580,7 @@ describe("limiter hardening", () => {
   });
 
   it("51st failure across distinct keys blocks a fresh key, login and logout", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { challenge } = pkce();
     const params = authParams(clientId, challenge);
@@ -555,7 +618,7 @@ describe("limiter hardening", () => {
 
 describe("bearer guard and logout", () => {
   it("missing or invalid token → 401 with resource_metadata", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     for (const headers of [{}, { authorization: "Basic x" }]) {
       const res = await ctx.request("/mcp", { headers });
       expect(res.status).toBe(401);
@@ -569,7 +632,7 @@ describe("bearer guard and logout", () => {
   });
 
   it("token used after logout → 401 with WWW-Authenticate resource_metadata", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { verifier, challenge } = pkce();
     const code = await obtainCode(ctx, clientId, challenge);
@@ -609,7 +672,7 @@ describe("bearer guard and logout", () => {
   });
 
   it("logout is rate limited", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     for (let i = 0; i < 5; i++) await ctx.request("/logout", form({ waha_key: "bad" }));
     const res = await ctx.request("/logout", form({ waha_key: KEY }));
     expect(res.status).toBe(429);
@@ -618,7 +681,7 @@ describe("bearer guard and logout", () => {
 
 describe("secrecy", () => {
   it("no response body or header contains the WAHA key", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const clientId = await registeredClient(ctx);
     const { verifier, challenge } = pkce();
     const params = authParams(clientId, challenge);

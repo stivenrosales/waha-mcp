@@ -27,6 +27,7 @@ import { createMcpServer } from "../../src/infrastructure/mcp/server.js";
 import { createTools } from "../../src/infrastructure/mcp/tools/index.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { createSignedLinks, type SignedLinks } from "../../src/infrastructure/media/signedLink.js";
+import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createOpenAiCompatibleTranscriber } from "../../src/infrastructure/transcription/openaiCompatible.js";
 import { createWahaAudioSource } from "../../src/infrastructure/transcription/wahaAudioSource.js";
 import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
@@ -196,7 +197,20 @@ function setup(
     MEDIA_INLINE_MAX_BYTES: String(INLINE_MAX),
     MEDIA_MAX_BYTES: String(MAX_BYTES),
   });
-  const store = createAuthStore(openAuthDatabase(":memory:"));
+  const db = openAuthDatabase(":memory:");
+  const store = createAuthStore(db);
+  const tenants = createSqliteTenantStore(db);
+  const tenant = tenants.createTenant({
+    displayName: "Admin",
+    wahaSession: config.wahaSession,
+    wrappedDek: "x",
+  });
+  tenants.setStatus(tenant.id, "active");
+  // The e2e suite does not exercise login, so the admin row is seeded directly (sync, no scrypt).
+  const adminId = "admin-user";
+  db.prepare(
+    "INSERT INTO users (id, tenant_id, username, password_hash, role, created_at) VALUES (?, ?, 'admin', 'unused', 'admin', 0)",
+  ).run(adminId, tenant.id);
   const links = createSignedLinks({
     secret: new Uint8Array(32).fill(3),
     ttlSeconds: config.mediaLinkTtlSeconds,
@@ -222,11 +236,12 @@ function setup(
   const app = createApp({
     oauth: createOAuthRoutes({
       store,
+      tenants,
       wahaApiKey: KEY,
       publicBaseUrl: BASE,
       limiter: createLoginLimiter(),
     }),
-    guard: bearerGuard({ store, publicBaseUrl: BASE }),
+    guard: bearerGuard({ store, tenants, publicBaseUrl: BASE }),
     mcpHandler: mcp.handler,
     media: createMediaHandler({
       gateway: served,
@@ -241,7 +256,7 @@ function setup(
     }),
   });
   const { clientId } = store.registerClient({ redirectUris: ["https://claude.ai/cb"] });
-  const { accessToken } = store.issueTokens(clientId, "mcp");
+  const { accessToken } = store.issueTokens(clientId, "mcp", adminId);
   return { app, token: accessToken, gateway, uploads, uploadLinks, sender };
 }
 

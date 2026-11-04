@@ -30,16 +30,18 @@ export interface TenantAdmin {
   }): Promise<{ tenantId: string; url: string; expiresAt: string }>;
   listTenants(): Promise<TenantOverview[]>;
   revoke(tenantId: string): void;
-  restore(tenantId: string): void;
+  /** Returns the status the tenant is in afterwards. */
+  restore(tenantId: string): TenantStatus;
   resetPassword(tenantId: string): { url: string; expiresAt: string };
   /**
    * Deletes the tenant for good. `whatsappCleanup` is "failed" when WAHA could not be told to
-   * log out and remove the session; the local data is gone either way.
+   * log out and remove the session; `localCleanup` is "failed" when the runtime eviction or the
+   * data directory removal threw. The row and key are gone in every case.
    */
   delete(
     tenantId: string,
     confirmDisplayName: string,
-  ): Promise<{ whatsappCleanup: "ok" | "failed" }>;
+  ): Promise<{ whatsappCleanup: "ok" | "failed"; localCleanup: "ok" | "failed" }>;
 }
 
 export interface TenantAdminDeps {
@@ -127,6 +129,8 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
             await sessions.create(wahaSession);
           } catch (error) {
             tenants.deleteTenant(tenant.id);
+            // The session may exist even if create threw (e.g. a timeout); never mask `error`.
+            await sessions.remove(wahaSession).catch(() => {});
             throw error;
           }
           return { tenantId: tenant.id, ...linkResult(tenant.id, "invite") };
@@ -175,6 +179,7 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
       try {
         assertNotAdmin(tenantId);
         const tenant = requireTenant(tenantId);
+        let status: TenantStatus = tenant.status;
         if (tenant.status === "revoked") {
           // Resume where onboarding stopped: no user yet -> invited; user but no paired
           // WhatsApp -> pairing; fully onboarded -> active.
@@ -184,8 +189,10 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
               ? "active"
               : "pairing";
           tenants.transitionStatus(tenantId, "revoked", next);
+          status = tenants.getTenant(tenantId)?.status ?? next;
         }
         outcome = "ok";
+        return status;
       } finally {
         logger.info(`admin restore_tenant tenant=${tenantId} outcome=${outcome}`);
       }
@@ -208,24 +215,35 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
     },
 
     delete(tenantId, confirmDisplayName) {
+      // Never log (or touch the filesystem with) a caller-supplied id that is not id-shaped.
+      const safe = TENANT_ID_PATTERN.test(tenantId);
       return audited(
         "delete_tenant",
-        () => tenantId,
+        () => (safe ? tenantId : "-"),
         async () => {
+          if (!safe) throw new InvalidInputError("Invalid tenant id.");
           assertNotAdmin(tenantId);
           const tenant = requireTenant(tenantId);
           if (confirmDisplayName !== tenant.displayName)
             throw new InvalidInputError(
               "confirm_display_name does not match the tenant's display name; nothing was deleted.",
             );
-          if (!TENANT_ID_PATTERN.test(tenant.id))
-            throw new InvalidInputError("Refusing to delete a tenant with an unsafe id.");
           const user = tenants.getUserByTenant(tenant.id);
 
           // Row + wrapped DEK first: from here on the tenant's data is unrecoverable.
           tenants.deleteTenant(tenant.id);
-          if (user) auth.revokeUser(user.id);
-          registry.evict(tenant.id);
+
+          let localCleanup: "ok" | "failed" = "ok";
+          try {
+            if (user) auth.revokeUser(user.id);
+          } catch {
+            localCleanup = "failed";
+          }
+          try {
+            registry.evict(tenant.id);
+          } catch {
+            localCleanup = "failed";
+          }
 
           let whatsappCleanup: "ok" | "failed" = "ok";
           try {
@@ -238,11 +256,15 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           } catch {
             whatsappCleanup = "failed";
           }
-          fs.rmSync(path.join(deps.dataDir, "tenants", tenant.id), {
-            recursive: true,
-            force: true,
-          });
-          return { whatsappCleanup };
+          try {
+            fs.rmSync(path.join(deps.dataDir, "tenants", tenant.id), {
+              recursive: true,
+              force: true,
+            });
+          } catch {
+            localCleanup = "failed";
+          }
+          return { whatsappCleanup, localCleanup };
         },
       );
     },

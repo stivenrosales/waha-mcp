@@ -2,14 +2,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createTenantAdmin } from "../../../src/application/tenantAdmin.js";
 import { loadConfig } from "../../../src/config.js";
 import type { Tenant, TenantStatus, TenantStore } from "../../../src/domain/ports/TenantStore.js";
+import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
 import { generateDek, wrapDek } from "../../../src/infrastructure/crypto/envelope.js";
 import { createTenantRegistry } from "../../../src/infrastructure/tenants/registry.js";
 import type {
   buildTenantRuntime,
   TenantRuntime,
 } from "../../../src/infrastructure/tenants/runtime.js";
+import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
+import { FakeSessionAdmin } from "../../fakes/FakeSessionAdmin.js";
 
 const KEK = Buffer.alloc(32, 9);
 const SECRET = new Uint8Array(32).fill(4);
@@ -235,5 +239,55 @@ describe("TenantRegistry", () => {
     registry.acquire("b")?.release();
     registry.closeAll();
     expect(built.map((b) => b.closed)).toEqual([1, 1]);
+  });
+});
+
+describe("revoke through the admin service", () => {
+  it("makes acquire return null and closes the cached runtime", async () => {
+    const dataDir = scratch();
+    const db = openAuthDatabase(":memory:");
+    const tenants = createSqliteTenantStore(db);
+    const { build, built } = fakeBuild();
+    const registry = createTenantRegistry({
+      config: configFor(dataDir),
+      tenants,
+      kek: KEK,
+      mediaSecret: SECRET,
+      logger: { info: () => {} },
+      build,
+    });
+    const admin = createTenantAdmin({
+      tenants,
+      auth: createAuthStore(db),
+      sessions: new FakeSessionAdmin(),
+      registry,
+      newWrappedDek: (id) => wrapDek(KEK, generateDek(), id),
+      dataDir,
+      publicBaseUrl: "https://mcp.example.com",
+      logger: { info: () => {} },
+    });
+    const owner = tenants.createTenant({
+      displayName: "Owner",
+      wahaSession: "t_o",
+      wrappedDek: "x",
+    });
+    await tenants.createUser({
+      tenantId: owner.id,
+      username: "admin",
+      password: "correct horse battery",
+      role: "admin",
+    });
+    const { tenantId } = await admin.createInvite({ displayName: "Acme" });
+    tenants.setStatus(tenantId, "active");
+
+    const held = registry.acquire(tenantId);
+    expect(held).not.toBeNull();
+    held?.release();
+    expect(built).toHaveLength(1);
+
+    admin.revoke(tenantId);
+
+    expect(registry.acquire(tenantId)).toBeNull();
+    expect(built[0]?.closed).toBe(1);
   });
 });

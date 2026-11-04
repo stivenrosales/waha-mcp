@@ -105,6 +105,22 @@ describe("create_invite", () => {
     );
   });
 
+  it("removes the WAHA session when create throws after WAHA made it, keeping the original error", async () => {
+    const s = await setup();
+    s.sessions.create = async (name) => {
+      s.sessions.calls.push(`create:${name}`);
+      throw new Error("timeout");
+    };
+    s.sessions.remove = async (name) => {
+      s.sessions.calls.push(`remove:${name}`);
+      throw new Error("remove also failed");
+    };
+    await expect(s.admin.createInvite({ displayName: "Acme" })).rejects.toThrow("timeout");
+    const created = s.sessions.calls.find((c) => c.startsWith("create:"));
+    expect(s.sessions.calls).toContain(`remove:${created?.slice(7)}`);
+    expect(s.tenants.listTenants()).toHaveLength(1);
+  });
+
   it("requires exactly one of display_name and tenant_id", async () => {
     const s = await setup();
     await expect(s.admin.createInvite({})).rejects.toBeInstanceOf(InvalidInputError);
@@ -148,7 +164,9 @@ describe("revoke / restore", () => {
     const noWa = await onboard(s, "NoWa", false);
     const fresh = await s.admin.createInvite({ displayName: "Fresh" });
     for (const id of [full.tenantId, noWa.tenantId, fresh.tenantId]) s.admin.revoke(id);
-    for (const id of [full.tenantId, noWa.tenantId, fresh.tenantId]) s.admin.restore(id);
+    expect(s.admin.restore(full.tenantId)).toBe("active");
+    expect(s.admin.restore(noWa.tenantId)).toBe("pairing");
+    expect(s.admin.restore(fresh.tenantId)).toBe("invited");
     expect(s.tenants.getTenant(full.tenantId)?.status).toBe("active");
     expect(s.tenants.getTenant(noWa.tenantId)?.status).toBe("pairing");
     expect(s.tenants.getTenant(fresh.tenantId)?.status).toBe("invited");
@@ -207,7 +225,7 @@ describe("delete_tenant", () => {
 
     const out = await s.admin.delete(tenantId, "Acme");
 
-    expect(out).toEqual({ whatsappCleanup: "ok" });
+    expect(out).toEqual({ whatsappCleanup: "ok", localCleanup: "ok" });
     expect(s.tenants.getTenant(tenantId)).toBeNull();
     expect(s.tenants.getWrappedDek(tenantId)).toBeNull();
     expect(s.tenants.getUser(user.id)).toBeNull();
@@ -229,7 +247,7 @@ describe("delete_tenant", () => {
     const dir = path.join(s.dataDir, "tenants", tenantId);
     fs.mkdirSync(dir, { recursive: true });
     const out = await s.admin.delete(tenantId, "Acme");
-    expect(out).toEqual({ whatsappCleanup: "failed" });
+    expect(out).toEqual({ whatsappCleanup: "failed", localCleanup: "ok" });
     expect(s.tenants.getTenant(tenantId)).toBeNull();
     expect(fs.existsSync(dir)).toBe(false);
   });
@@ -238,8 +256,33 @@ describe("delete_tenant", () => {
     const s = await setup();
     const outside = path.join(s.dataDir, "keep");
     fs.mkdirSync(outside);
-    await expect(s.admin.delete("../keep", "x")).rejects.toBeInstanceOf(InvalidInputError);
+    await expect(s.admin.delete("../keep", "x")).rejects.toThrow(
+      new InvalidInputError("Invalid tenant id."),
+    );
     expect(fs.existsSync(outside)).toBe(true);
+    expect(s.logs.at(-1)).toBe("admin delete_tenant tenant=- outcome=error");
+  });
+
+  it("reports local cleanup failures instead of throwing once the row is gone", async () => {
+    const s = await setup();
+    const { tenantId } = await onboard(s);
+    const boom = createTenantAdmin({
+      tenants: s.tenants,
+      auth: s.auth,
+      sessions: s.sessions,
+      registry: {
+        evict: () => {
+          throw new Error("evict failed");
+        },
+      },
+      newWrappedDek: () => "x",
+      dataDir: s.dataDir,
+      publicBaseUrl: "https://mcp.example.com",
+      logger: { info: () => {} },
+    });
+    const out = await boom.delete(tenantId, "Acme");
+    expect(out).toEqual({ whatsappCleanup: "ok", localCleanup: "failed" });
+    expect(s.tenants.getTenant(tenantId)).toBeNull();
   });
 });
 

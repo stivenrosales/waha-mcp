@@ -13,6 +13,7 @@ const outputSchema = z.object({
   tenantId: z.string(),
   deleted: z.literal(true),
   whatsappCleanup: z.enum(["ok", "failed"]),
+  localCleanup: z.enum(["ok", "failed"]),
 });
 
 export const deleteTenantTool: ToolDefinition<typeof inputSchema, typeof outputSchema> = {
@@ -24,17 +25,20 @@ export const deleteTenantTool: ToolDefinition<typeof inputSchema, typeof outputS
   outputSchema,
   annotations: ADMIN_DELETE_ANNOTATIONS,
   async run(input, ctx) {
-    const { whatsappCleanup } = await requireAdmin(ctx).delete(
+    const { whatsappCleanup, localCleanup } = await requireAdmin(ctx).delete(
       input.tenant_id,
       input.confirm_display_name,
     );
     const note =
-      whatsappCleanup === "ok"
+      (whatsappCleanup === "ok"
         ? ""
-        : " The WhatsApp session could not be removed from WAHA; remove it there manually.";
+        : " The WhatsApp session could not be removed from WAHA; remove it there manually.") +
+      (localCleanup === "ok"
+        ? ""
+        : " Some local cleanup failed; check the server logs and the tenant's data directory.");
     return {
       text: `Tenant ${input.tenant_id} deleted.${note}`,
-      data: { tenantId: input.tenant_id, deleted: true as const, whatsappCleanup },
+      data: { tenantId: input.tenant_id, deleted: true as const, whatsappCleanup, localCleanup },
     };
   },
 };

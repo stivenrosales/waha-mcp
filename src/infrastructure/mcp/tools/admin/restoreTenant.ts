@@ -14,11 +14,10 @@ export const restoreTenantTool: ToolDefinition<typeof inputSchema, typeof output
   outputSchema,
   annotations: ADMIN_WRITE_ANNOTATIONS,
   async run(input, ctx) {
-    const admin = requireAdmin(ctx);
-    admin.restore(input.tenant_id);
+    const status = requireAdmin(ctx).restore(input.tenant_id);
     return {
-      text: `Tenant ${input.tenant_id} restored.`,
-      data: { tenantId: input.tenant_id, status: "restored" },
+      text: `Tenant ${input.tenant_id} restored; status is now ${status}.`,
+      data: { tenantId: input.tenant_id, status },
     };
   },
 };

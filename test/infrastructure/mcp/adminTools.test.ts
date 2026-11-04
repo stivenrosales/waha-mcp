@@ -1,11 +1,24 @@
-import { describe, expect, it } from "vitest";
-import { createToolHandler, type ToolDeps } from "../../../src/infrastructure/mcp/defineTool.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createTenantAdmin } from "../../../src/application/tenantAdmin.js";
+import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
+import { generateDek, wrapDek } from "../../../src/infrastructure/crypto/envelope.js";
+import {
+  createToolHandler,
+  type ToolDefinition,
+  type ToolDeps,
+  type ToolRunContext,
+} from "../../../src/infrastructure/mcp/defineTool.js";
 import { createAdminTools } from "../../../src/infrastructure/mcp/tools/admin/index.js";
+import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
+import { FakeSessionAdmin } from "../../fakes/FakeSessionAdmin.js";
+
+const tools = createAdminTools();
+const byName = (n: string) => tools.find((t) => t.name === n);
 
 describe("admin tools", () => {
-  const tools = createAdminTools();
-  const byName = (n: string) => tools.find((t) => t.name === n);
-
   it("exposes the six tools with the right annotations", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
@@ -38,5 +51,79 @@ describe("admin tools", () => {
     expect(result.content[0]).toMatchObject({
       text: "Admin tools are not available on this server.",
     });
+  });
+});
+
+describe("admin tool output through run()", () => {
+  const scratch: string[] = [];
+  afterEach(() => {
+    for (const d of scratch.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  async function world() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-admintools-"));
+    scratch.push(dataDir);
+    const db = openAuthDatabase(":memory:");
+    const store = createSqliteTenantStore(db);
+    const sessions = new FakeSessionAdmin();
+    const admin = createTenantAdmin({
+      tenants: store,
+      auth: createAuthStore(db),
+      sessions,
+      registry: { evict: () => {} },
+      newWrappedDek: (id) => wrapDek(Buffer.alloc(32, 1), generateDek(), id),
+      dataDir,
+      publicBaseUrl: "https://mcp.example.com",
+      logger: { info: () => {} },
+    });
+    const owner = store.createTenant({ displayName: "Owner", wahaSession: "t_o", wrappedDek: "x" });
+    await store.createUser({
+      tenantId: owner.id,
+      username: "admin",
+      password: "correct horse battery",
+      role: "admin",
+    });
+    const ctx = { admin } as unknown as ToolRunContext;
+    const run = (name: string, input: unknown) => {
+      const tool = createAdminTools().find((t) => t.name === name) as ToolDefinition;
+      return tool.run(tool.inputSchema.parse(input), ctx) as Promise<{
+        text: string;
+        data: Record<string, unknown>;
+      }>;
+    };
+    return { run, store };
+  }
+
+  it("create_invite, revoke_tenant, restore_tenant and delete_tenant report clean text and data", async () => {
+    const { run } = await world();
+    const invite = await run("create_invite", { display_name: "Acme" });
+    const id = invite.data.tenantId as string;
+    expect(invite.text).toBe(
+      `Invite link for tenant ${id} (expires ${invite.data.expiresAt}, single use):\n${invite.data.url}`,
+    );
+    expect(invite.data.url).toMatch(/^https:\/\/mcp\.example\.com\/invite\//);
+
+    const revoked = await run("revoke_tenant", { tenant_id: id });
+    expect(revoked.text).toBe(`Tenant ${id} revoked.`);
+    expect(revoked.data).toEqual({ tenantId: id, status: "revoked" });
+
+    const restored = await run("restore_tenant", { tenant_id: id });
+    expect(restored.text).toBe(`Tenant ${id} restored; status is now invited.`);
+    expect(restored.data).toEqual({ tenantId: id, status: "invited" });
+
+    const deleted = await run("delete_tenant", { tenant_id: id, confirm_display_name: "Acme" });
+    expect(deleted.text).toBe(`Tenant ${id} deleted.`);
+    expect(deleted.data).toEqual({
+      tenantId: id,
+      deleted: true,
+      whatsappCleanup: "ok",
+      localCleanup: "ok",
+    });
+  });
+
+  it("keeps the full revoke description", () => {
+    expect(byName("revoke_tenant")?.description).toBe(
+      "Revokes a tenant's access: its sessions and tokens stop working immediately and its data is kept. Reversible with restore_tenant. The admin tenant cannot be revoked.",
+    );
   });
 });

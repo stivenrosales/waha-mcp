@@ -6,6 +6,7 @@ import {
   WahaAuthError,
   WahaNotFoundError,
   WahaUnavailableError,
+  WhatsAppDisconnectedError,
 } from "../../../src/domain/errors.js";
 import { createWahaHttpSender } from "../../../src/infrastructure/waha/WahaHttpSender.js";
 
@@ -206,17 +207,30 @@ describe("WahaHttpSender", () => {
   });
 
   it("treats other 422s on media as a rejected message, not as an old WAHA", async () => {
-    const { fn } = fakeFetch(() =>
-      json(
-        { message: "Session status is not as expected. Try again later or restart the session" },
-        422,
-      ),
-    );
+    const { fn } = fakeFetch(() => json({ message: "file.mimetype is not supported" }, 422));
     const err = await make(fn)
       .sendImage({ chatId: "1@c.us", file: FILE })
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(InvalidInputError);
-    expect((err as Error).message).toContain("Session status is not as expected");
+    expect((err as Error).message).toContain("file.mimetype is not supported");
+  });
+
+  it("not-WORKING response → WhatsAppDisconnectedError", async () => {
+    const notWorking = json(
+      {
+        message: "Session status is not as expected. Try again later or restart the session",
+        session: "default",
+        status: "SCAN_QR_CODE",
+        expected: ["WORKING"],
+      },
+      422,
+    );
+    await expect(
+      make(fakeFetch(() => notWorking.clone()).fn).sendText({ chatId: "1@c.us", text: "x" }),
+    ).rejects.toBeInstanceOf(WhatsAppDisconnectedError);
+    await expect(
+      make(fakeFetch(() => notWorking.clone()).fn).sendImage({ chatId: "1@c.us", file: FILE }),
+    ).rejects.toBeInstanceOf(WhatsAppDisconnectedError);
   });
 
   it("reports media sending as unsupported on WAHA builds without it", async () => {

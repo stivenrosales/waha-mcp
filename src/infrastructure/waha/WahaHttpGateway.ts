@@ -1,5 +1,11 @@
-import { WahaAuthError, WahaNotFoundError, WahaUnavailableError } from "../../domain/errors.js";
+import {
+  WahaAuthError,
+  WahaNotFoundError,
+  WahaUnavailableError,
+  WhatsAppDisconnectedError,
+} from "../../domain/errors.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
+import { isSessionNotWorking } from "./sessionState.js";
 
 export interface WahaHttpGatewayOptions {
   baseUrl: string;
@@ -63,17 +69,24 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
     return res;
   }
 
-  /** Maps non-2xx statuses. 404/410 are returned to the caller via `allowGone`. */
-  function assertOk(res: Response, what: string): void {
+  /**
+   * Maps non-2xx statuses (reading the body only for 422, to spot "session not WORKING";
+   * other error bodies are left unread). 404/410 are returned to the caller via `allowGone`.
+   */
+  async function assertOk(res: Response, what: string): Promise<void> {
     if (res.ok) return;
     if (res.status === 401 || res.status === 403) throw new WahaAuthError();
     if (res.status === 404) throw new WahaNotFoundError(what);
+    if (res.status === 422) {
+      const body: unknown = await res.json().catch(() => null);
+      if (isSessionNotWorking(res.status, body)) throw new WhatsAppDisconnectedError();
+    }
     throw new WahaUnavailableError(`WAHA responded with status ${res.status}.`);
   }
 
   async function getJson(pathAndQuery: string, what: string): Promise<unknown> {
     const res = await get(pathAndQuery);
-    assertOk(res, what);
+    await assertOk(res, what);
     try {
       return await res.json();
     } catch {
@@ -192,8 +205,8 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
         await res.body?.cancel().catch(() => {});
         return null;
       }
-      if (!res.ok) await res.body?.cancel().catch(() => {});
-      assertOk(res, "media");
+      if (!res.ok && res.status !== 422) await res.body?.cancel().catch(() => {});
+      await assertOk(res, "media");
       const declared = res.headers.get("content-length");
       const length = declared !== null && /^\d+$/.test(declared) ? Number(declared) : null;
       return {

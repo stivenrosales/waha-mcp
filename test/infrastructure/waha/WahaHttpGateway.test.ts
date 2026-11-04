@@ -4,6 +4,7 @@ import {
   WahaAuthError,
   WahaNotFoundError,
   WahaUnavailableError,
+  WhatsAppDisconnectedError,
 } from "../../../src/domain/errors.js";
 import { createWahaHttpGateway } from "../../../src/infrastructure/waha/WahaHttpGateway.js";
 
@@ -80,6 +81,37 @@ describe("WahaHttpGateway", () => {
   it("maps 401 to WahaAuthError", async () => {
     const { fn } = fakeFetch(() => new Response("no", { status: 401 }));
     await expect(make(fn).listGroups()).rejects.toBeInstanceOf(WahaAuthError);
+  });
+
+  it("not-WORKING response → WhatsAppDisconnectedError", async () => {
+    const notWorking = {
+      message: "Session status is not as expected. Try again later or restart the session",
+      session: "default",
+      status: "SCAN_QR_CODE",
+      expected: ["WORKING"],
+    };
+    await expect(
+      make(fakeFetch(() => json(notWorking, 422)).fn).listGroups(),
+    ).rejects.toBeInstanceOf(WhatsAppDisconnectedError);
+    // Only the message, no `expected` list.
+    await expect(
+      make(fakeFetch(() => json({ message: notWorking.message }, 422)).fn).listChats({
+        limit: 1,
+        offset: 0,
+      }),
+    ).rejects.toBeInstanceOf(WhatsAppDisconnectedError);
+    // Only the `expected` list.
+    await expect(
+      make(fakeFetch(() => json({ status: "STOPPED", expected: ["WORKING"] }, 422)).fn).getMe(),
+    ).rejects.toBeInstanceOf(WhatsAppDisconnectedError);
+    // Media downloads too.
+    await expect(
+      make(fakeFetch(() => json(notWorking, 422)).fn).openMedia("/api/files/x.jpg"),
+    ).rejects.toBeInstanceOf(WhatsAppDisconnectedError);
+    // Any other 422 stays "unavailable".
+    const other = make(fakeFetch(() => json({ message: "bad chat" }, 422)).fn).listGroups();
+    await expect(other).rejects.toBeInstanceOf(WahaUnavailableError);
+    await expect(other).rejects.not.toBeInstanceOf(WhatsAppDisconnectedError);
   });
 
   it("maps 404 on getGroup to WahaNotFoundError", async () => {

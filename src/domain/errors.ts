@@ -86,3 +86,14 @@ export class MediaSendUnsupportedError extends Error {
     this.name = "MediaSendUnsupportedError";
   }
 }
+
+/**
+ * WAHA answered that the tenant's session is not `WORKING` (unpaired, QR pending, stopped).
+ * The tool layer turns it into a "re-pair at <PUBLIC_BASE_URL>/pair" message.
+ */
+export class WhatsAppDisconnectedError extends Error {
+  constructor() {
+    super("WhatsApp is disconnected for this account.");
+    this.name = "WhatsAppDisconnectedError";
+  }
+}

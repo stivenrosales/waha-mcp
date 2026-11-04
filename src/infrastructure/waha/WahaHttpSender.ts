@@ -5,8 +5,10 @@ import {
   WahaAuthError,
   WahaNotFoundError,
   WahaUnavailableError,
+  WhatsAppDisconnectedError,
 } from "../../domain/errors.js";
 import type { FileSource, SentMessage, WhatsAppSender } from "../../domain/ports/WhatsAppSender.js";
+import { isSessionNotWorking } from "./sessionState.js";
 
 export interface WahaHttpSenderOptions {
   baseUrl: string;
@@ -106,6 +108,8 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
 
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) throw new WahaAuthError();
+      // Checked before the generic 422 "rejected": an unpaired session is not a bad message.
+      if (isSessionNotWorking(res.status, parsed)) throw new WhatsAppDisconnectedError();
       if (media && (res.status === 501 || /\bplus\b/i.test(reason)))
         throw new MediaSendUnsupportedError();
       if (res.status === 404) throw new WahaNotFoundError("chat");

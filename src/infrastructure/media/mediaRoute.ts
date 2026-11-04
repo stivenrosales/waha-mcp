@@ -4,6 +4,7 @@ import {
   WahaAuthError,
   WahaNotFoundError,
   WahaUnavailableError,
+  WhatsAppDisconnectedError,
 } from "../../domain/errors.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import type { Logger } from "../mcp/defineTool.js";
@@ -26,6 +27,7 @@ const isDomainError = (err: unknown) =>
   err instanceof WahaAuthError ||
   err instanceof WahaUnavailableError ||
   err instanceof WahaNotFoundError ||
+  err instanceof WhatsAppDisconnectedError ||
   err instanceof UnsupportedEngineError;
 
 /**

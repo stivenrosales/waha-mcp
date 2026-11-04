@@ -22,6 +22,7 @@ import {
   WahaAuthError,
   WahaNotFoundError,
   WahaUnavailableError,
+  WhatsAppDisconnectedError,
 } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
 import type { UploadStore } from "../../domain/ports/UploadStore.js";
@@ -107,8 +108,17 @@ export const MESSAGES = {
   unexpected: "Unexpected error while talking to WAHA. Try again later.",
 } as const;
 
-function describeError(error: unknown): { message: string; unexpected: boolean } {
+/** The user-facing message for a tenant whose WhatsApp session is not `WORKING`. */
+export const disconnectedMessage = (publicBaseUrl: string): string =>
+  `WhatsApp is disconnected for this account. Re-pair at ${publicBaseUrl.replace(/\/+$/, "")}/pair.`;
+
+function describeError(
+  error: unknown,
+  config: Pick<Config, "publicBaseUrl">,
+): { message: string; unexpected: boolean } {
   if (error instanceof WahaAuthError) return { message: MESSAGES.auth, unexpected: false };
+  if (error instanceof WhatsAppDisconnectedError)
+    return { message: disconnectedMessage(config.publicBaseUrl), unexpected: false };
   // Checked before WahaUnavailableError (its parent): a stalled transfer is a failure
   // worth its own message, not "gone" (the file may still exist on WAHA).
   if (error instanceof MediaStalledError) return { message: error.message, unexpected: false };
@@ -159,7 +169,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         : undefined;
       return { content: [{ type: "text", text: out.text }], structuredContent };
     } catch (error) {
-      const { message, unexpected } = describeError(error);
+      const { message, unexpected } = describeError(error, deps.config);
       const name = error instanceof Error ? error.name : "UnknownError";
       logger.info(`tool=${def.name} ms=${Date.now() - start} result=${name}`);
       if (unexpected)

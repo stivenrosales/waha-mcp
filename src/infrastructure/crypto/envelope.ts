@@ -35,16 +35,31 @@ export function generateDek(): Buffer {
   return randomBytes(KEY_BYTES);
 }
 
+// AADs are length-prefixed (tenant id length) so no tenant id can be confused with
+// part of the caller's aad, and domain-separated ("dek" vs "val") so a wrapped DEK
+// can never be opened as a value or the other way around.
+const dekAad = (tenantId: string) => `dek:${tenantId.length}:${tenantId}`;
+
+function assertKey(key: Buffer, name: string): void {
+  if (key.length !== KEY_BYTES) throw new Error(`${name} must be ${KEY_BYTES} bytes.`);
+}
+
 export function wrapDek(kek: Buffer, dek: Buffer, tenantId: string): string {
-  return encodeText(sealBytes(kek, dek, `dek:${tenantId}`));
+  assertKey(kek, "KEK");
+  assertKey(dek, "DEK");
+  return encodeText(sealBytes(kek, dek, dekAad(tenantId)));
 }
 
 export function unwrapDek(kek: Buffer, wrapped: string, tenantId: string): Buffer {
-  return openBytes(kek, decodeText(wrapped), `dek:${tenantId}`);
+  assertKey(kek, "KEK");
+  const dek = openBytes(kek, decodeText(wrapped), dekAad(tenantId));
+  if (dek.length !== KEY_BYTES) throw new DecryptionError();
+  return dek;
 }
 
 export function createTenantCipher(dek: Buffer, tenantId: string): TenantCipher {
-  const scope = (aad: string) => `${tenantId}:${aad}`;
+  assertKey(dek, "DEK");
+  const scope = (aad: string) => `val:${tenantId.length}:${tenantId}:${aad}`;
   return {
     sealText: (text, aad) => encodeText(sealBytes(dek, Buffer.from(text, "utf8"), scope(aad))),
     openText: (sealed, aad) => openBytes(dek, decodeText(sealed), scope(aad)).toString("utf8"),
@@ -53,8 +68,12 @@ export function createTenantCipher(dek: Buffer, tenantId: string): TenantCipher 
   };
 }
 
+/** True only for `v1.` + base64url long enough to hold a nonce and a tag. */
 export function isSealedText(value: string): boolean {
-  return value.startsWith(TEXT_PREFIX);
+  if (!value.startsWith(TEXT_PREFIX)) return false;
+  const body = value.slice(TEXT_PREFIX.length);
+  if (!/^[A-Za-z0-9_-]+$/.test(body) || body.length % 4 === 1) return false;
+  return Math.floor((body.length * 3) / 4) >= NONCE_BYTES + TAG_BYTES;
 }
 
 function sealBytes(key: Buffer, data: Uint8Array, aad: string): Buffer {

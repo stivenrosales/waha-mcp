@@ -14,6 +14,7 @@ import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth
 import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
 import { createTenantCipher } from "../../src/infrastructure/crypto/envelope.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
+import { MEDIA_GONE } from "../../src/infrastructure/media/resolveMedia.js";
 import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
 import { migrateToMultiTenant } from "../../src/infrastructure/tenants/migrate.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
@@ -506,7 +507,8 @@ describe("e2e: tenant isolation through the composed app", () => {
     // get_messages with A's chat id: B's WAHA has no such chat, nothing of A's comes back.
     for (const chat of [A_CHAT, DIRECT]) {
       const r = await call(bob.client, "get_messages", { chat_id: chat });
-      expect(sc(r).messages ?? []).toEqual([]);
+      expect(r.isError).toBeFalsy();
+      expect(sc(r).messages).toEqual([]);
       expect(JSON.stringify(r)).not.toContain("alice secret");
     }
 
@@ -522,7 +524,7 @@ describe("e2e: tenant isolation through the composed app", () => {
     const media = await call(bob.client, "get_media", { media_id: pdf });
     expect(linkOf(media)).toBeUndefined();
     expect(media.content.some((c) => c.type === "image")).toBe(false);
-    expect(textOf(media)).toMatch(/no longer available|not available|unavailable|not found/i);
+    expect(textOf(media)).toBe(MEDIA_GONE);
 
     // search_messages for A's text: nothing.
     const search = await call(bob.client, "search_messages", { query: "alice secret" });
@@ -556,16 +558,44 @@ describe("e2e: tenant isolation through the composed app", () => {
     expect(tampered.status).toBe(404);
     // Uniform: same status and body as a link that names no tenant at all.
     expect(await tampered.text()).toBe(await unknown.text());
-    // B's WAHA was never asked for A's media.
+    // The edited token dies at the signature check: B's WAHA is not even asked.
+    const aGateway = w.fakes.get("Alice")?.gateway as InMemoryWahaGateway;
     const bGateway = w.fakes.get("Bob")?.gateway as InMemoryWahaGateway;
     expect(bGateway.calls.filter((c) => c.method === "getMessage")).toEqual([]);
 
-    // The same for A's upload links.
+    // A correctly signed token for tenant B carrying A's media id: routed to B's runtime, which
+    // looks the id up in B's WhatsApp only and finds nothing.
+    const bLinks = createSignedLinks({
+      secret: MEDIA_SECRET,
+      ttlSeconds: 60,
+      tenantId: bob.tenantId,
+    });
+    const aCalls = aGateway.calls.length;
+    const aReads = new Map(aGateway.bodyReads);
+    const resigned = await request(w.app, `${BASE}/media/${bLinks.sign(pdf)}`);
+    expect(resigned.status).toBe(404);
+    expect(await resigned.text()).toBe(
+      await (await request(w.app, `${BASE}/media/not.valid`)).text(),
+    );
+    // Exactly one lookup, in B's gateway, for A's chat (the chat half of A's media id).
+    expect(bGateway.calls.filter((c) => c.method === "getMessage").map((c) => c.args[0])).toEqual([
+      DIRECT,
+    ]);
+    expect(aGateway.calls.length).toBe(aCalls);
+    expect(aGateway.bodyReads).toEqual(aReads);
+
+    // The same for A's upload links: edited claim, then a correctly signed B token for A's slot.
     const slot = sc(await call(alice.client, "create_upload_link", { filename: "a.txt" })) as {
+      upload_id: string;
       upload_url: string;
     };
     const forgedUpload = retarget(slot.upload_url, bob.tenantId);
     expect((await request(w.app, forgedUpload, { method: "PUT", body: "x" })).status).toBe(404);
+    const bUploadLinks = createUploadLinks(MEDIA_SECRET, 60, bob.tenantId);
+    const resignedUpload = `${BASE}/upload/${bUploadLinks.sign(slot.upload_id)}`;
+    expect((await request(w.app, resignedUpload)).status).toBe(404);
+    expect((await request(w.app, resignedUpload, { method: "PUT", body: "x" })).status).toBe(404);
+    // A's slot was not touched by B's runtime: still empty, and A's own link fills it once.
     expect((await request(w.app, slot.upload_url, { method: "PUT", body: "x" })).status).toBe(200);
   });
 
@@ -595,11 +625,20 @@ describe("e2e: tenant isolation through the composed app", () => {
 
     const forward = await call(bob.client, "send_media", { chat_id: A_CHAT, media_id: pdf });
     expect(forward.isError).toBe(true);
+    // A's media id is unknown to B's WAHA (B's gateway looked it up, A's was not asked).
+    expect(textOf(forward)).toContain(MEDIA_GONE);
+    expect(
+      bFakes.gateway.calls.filter((c) => c.method === "getMessage").map((c) => c.args[0]),
+    ).toEqual([DIRECT]);
     const reuse = await call(bob.client, "send_media", {
       chat_id: A_CHAT,
       upload_id: aliceUpload.upload_id,
     });
     expect(reuse.isError).toBe(true);
+    // B's upload store has no such slot.
+    expect(textOf(reuse)).toContain(
+      "This upload was already sent or has expired. Create a new upload link.",
+    );
 
     expect(bFakes.sender.calls.map((c) => c.method)).toEqual(["sendText", "sendLocation"]);
     expect(aFakes.sender.calls).toEqual([]);

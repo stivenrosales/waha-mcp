@@ -45,7 +45,13 @@ export function createWahaSessionAdmin(opts: WahaSessionAdminOptions): SessionAd
       Accept: "application/json",
     };
     if (body !== undefined) headers["Content-Type"] = "application/json";
-    try {
+    const aborted = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener("abort", () => reject(new Error("aborted")), {
+        once: true,
+      });
+    });
+    aborted.catch(() => {});
+    const work = async () => {
       const res = await doFetch(`${baseUrl}${path}`, {
         method,
         // Never follow redirects: they could resend X-Api-Key to another origin.
@@ -66,9 +72,12 @@ export function createWahaSessionAdmin(opts: WahaSessionAdminOptions): SessionAd
         await res.body?.cancel().catch(() => {});
       }
       return { status: res.status, ok: res.ok, data };
-    } catch (err) {
+    };
+    try {
+      // Race against the abort so a fetch that ignores the signal still times out.
+      return await Promise.race([work(), aborted]);
+    } catch {
       if (controller.signal.aborted) throw new WahaUnavailableError("WAHA request timed out.");
-      if (err instanceof WahaUnavailableError) throw err;
       throw new WahaUnavailableError("Could not reach WAHA.");
     } finally {
       clearTimeout(timer);

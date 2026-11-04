@@ -152,4 +152,26 @@ describe("WahaSessionAdmin", () => {
     await make(f).state("x");
     expect(redirect).toBe("error");
   });
+
+  it("times out with WahaUnavailableError even if fetch ignores the abort signal", async () => {
+    const hang = (() => new Promise<Response>(() => {})) as typeof fetch;
+    const admin = createWahaSessionAdmin({
+      baseUrl: BASE,
+      apiKey: KEY,
+      fetch: hang,
+      timeoutMs: 20,
+    });
+    const err = await admin.state("x").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WahaUnavailableError);
+    expect((err as Error).message).toBe("WAHA request timed out.");
+  });
+
+  it("qr is null when the QR JSON lacks mimetype or data", async () => {
+    for (const qr of [{ data: "QUJD" }, { mimetype: "image/png" }, {}]) {
+      const { fn } = fakeFetch((r) =>
+        r.url.includes("/auth/qr") ? json(qr) : json({ status: "SCAN_QR_CODE" }),
+      );
+      expect(await make(fn).qr("t_abc")).toBeNull();
+    }
+  });
 });

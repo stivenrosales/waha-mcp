@@ -2,9 +2,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { TenantStore, User } from "../../domain/ports/TenantStore.js";
+import type { TenantStore } from "../../domain/ports/TenantStore.js";
+import { authenticateLogin } from "./login.js";
 import { HTML_SECURITY_HEADERS, loginPage, logoutPage, messagePage } from "./loginPage.js";
-import { type LoginLimiter, loginLimitKeys } from "./rateLimit.js";
+import type { LoginLimiter } from "./rateLimit.js";
 import type { AuthStore } from "./store.js";
 
 export const MAX_CLIENTS = 50;
@@ -81,25 +82,8 @@ export function createOAuthRoutes(deps: {
       c.json({ error: "invalid_request", error_description: "Request body too large." }, 413),
   });
 
-  /**
-   * Checks a username/password form against the limiter (per address and per username) and the
-   * tenant store. A success clears both keys' counters; the global budget is never reset.
-   */
-  const authenticate = async (
-    c: Context,
-    form: URLSearchParams,
-  ): Promise<"blocked" | "invalid" | User> => {
-    const username = form.get("username") ?? "";
-    const keys = loginLimitKeys(c, username);
-    if (keys.some((k) => limiter.isBlocked(k))) return "blocked";
-    const user = await tenants.verifyPassword(username, form.get("password") ?? "");
-    if (!user) {
-      limiter.recordFailure(keys);
-      return "invalid";
-    }
-    for (const k of keys) limiter.reset(k);
-    return user;
-  };
+  const authenticate = (c: Context, form: URLSearchParams) =>
+    authenticateLogin(c, form, { tenants, limiter });
 
   const isOwnResource = (value: string): boolean =>
     URL.canParse(value) &&
@@ -327,6 +311,17 @@ export function createOAuthRoutes(deps: {
       resource: request.resource,
     });
     if (code === null) {
+      // null means the client vanished (logout, prune) or belongs to another user.
+      if (!store.getClient(request.clientId)) {
+        return html(
+          c,
+          messagePage(
+            "Authorization error",
+            "Unknown client. Remove the connector and add it again.",
+          ),
+          400,
+        );
+      }
       return renderLogin(
         c,
         request,

@@ -211,6 +211,22 @@ describe("invite", () => {
     expect(ctx.tenants.getUserByTenant(tenant.id)).toBeNull();
   });
 
+  it("a tenant revoked during sign-up stays revoked and gets no cookie", async () => {
+    const ctx = setup();
+    const { tenant, token } = ctx.invite();
+    const createUser = ctx.tenants.createUser;
+    ctx.tenants.createUser = async (q) => {
+      const user = await createUser.call(ctx.tenants, q);
+      ctx.tenants.setStatus(tenant.id, "revoked");
+      return user;
+    };
+    const res = await ctx.signUp(token);
+    expect(res.status).toBe(410);
+    expect(await res.text()).toContain("This invite is no longer valid.");
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(ctx.tenants.getTenant(tenant.id)?.status).toBe("revoked");
+  });
+
   it("rejects cross-site and origin-less form posts", async () => {
     const ctx = setup();
     const { tenant, token } = ctx.invite();
@@ -459,6 +475,33 @@ describe("pair", () => {
 });
 
 describe("secrecy", () => {
+  it("pages never contain the WAHA API key, even when WAHA errors carry it", async () => {
+    const ctx = setup();
+    const { tenant, token, cookie } = await ctx.onboarded();
+    const KEY = "waha-api-key-sentinel-0123456789";
+    const fail = async () => {
+      throw new Error(`GET http://waha:3000/api/sessions failed (X-Api-Key: ${KEY})`);
+    };
+    await ctx.request(`/invite/${token}`);
+    ctx.sessions.state = fail;
+    await ctx.pairPage(cookie);
+    ctx.sessions.state = async () => "SCAN_QR_CODE";
+    ctx.sessions.qr = fail;
+    await ctx.pairPage(cookie);
+    ctx.sessions.state = async () => "WORKING";
+    ctx.sessions.me = fail;
+    await ctx.pairPage(cookie);
+    ctx.sessions.me = async () => ({ id: "taken@c.us" });
+    const other = ctx.newTenant("Other");
+    ctx.tenants.setWaId(other.id, "taken@c.us");
+    ctx.sessions.logout = fail;
+    await ctx.pairPage(cookie);
+    await ctx.post("/pair", { username: "alice", password: PASSWORD });
+    expect(ctx.tenants.getTenant(tenant.id)?.status).toBe("pairing");
+    expect(ctx.seen.length).toBeGreaterThan(8);
+    for (const text of ctx.seen) expect(text).not.toContain(KEY);
+  });
+
   it("responses never contain link tokens or passwords", async () => {
     const ctx = setup();
     const { tenant, token, cookie } = await ctx.onboarded();

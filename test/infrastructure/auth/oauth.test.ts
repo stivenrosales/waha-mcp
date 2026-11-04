@@ -346,6 +346,23 @@ describe("authorization code flow", () => {
     expect(await revoked.text()).toContain("This account is disabled.");
   });
 
+  it("a client removed during login gets the unknown-client page, not the linked one", async () => {
+    const ctx = await setup();
+    const clientId = await registeredClient(ctx);
+    const { challenge } = pkce();
+    const saveCode = ctx.store.saveCode;
+    ctx.store.saveCode = (input) => {
+      ctx.store.revokeAll();
+      return saveCode.call(ctx.store, input);
+    };
+    const res = await login(ctx, authParams(clientId, challenge), PASSWORD);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("location")).toBeNull();
+    const html = await res.text();
+    expect(html).toContain("Unknown client. Remove the connector and add it again.");
+    expect(html).not.toContain("linked to another account");
+  });
+
   it("a client bound to one user refuses another user's login; revoking B leaves A", async () => {
     const ctx = await setup();
     const bob = await ctx.addUser("bob");

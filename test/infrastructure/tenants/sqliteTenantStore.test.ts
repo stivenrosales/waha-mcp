@@ -160,6 +160,15 @@ describe("sqlite tenant store", () => {
     expect(store.consumeLink(reset.token, "reset")).toEqual({ tenantId: tenant.id });
   });
 
+  it("transitionStatus changes the status only from the expected one", () => {
+    const { store, tenant } = setup();
+    expect(store.transitionStatus(tenant.id, "pairing", "active")).toBe(false);
+    expect(store.getTenant(tenant.id)?.status).toBe("invited");
+    expect(store.transitionStatus(tenant.id, "invited", "pairing")).toBe(true);
+    expect(store.getTenant(tenant.id)?.status).toBe("pairing");
+    expect(store.transitionStatus("missing", "invited", "pairing")).toBe(false);
+  });
+
   it("linkState tells valid, used and expired links apart", () => {
     const { store, tenant, advance } = setup();
     const used = store.issueLink(tenant.id, "reset", HOUR);

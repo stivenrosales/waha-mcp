@@ -148,6 +148,13 @@ export function createSqliteTenantStore(
       db.prepare("UPDATE tenants SET status = ? WHERE id = ?").run(status, id);
     },
 
+    transitionStatus(id, from, to) {
+      const result = db
+        .prepare("UPDATE tenants SET status = ? WHERE id = ? AND status = ?")
+        .run(to, id, from);
+      return Number(result.changes) === 1;
+    },
+
     setWaId(id, waId) {
       return transaction(() => {
         const holder = db

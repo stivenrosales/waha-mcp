@@ -5,8 +5,9 @@ import { getCookie } from "hono/cookie";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { SessionAdmin } from "../../domain/ports/SessionAdmin.js";
 import type { LinkKind, Tenant, TenantStore, User } from "../../domain/ports/TenantStore.js";
+import { authenticateLogin } from "../auth/login.js";
 import { HTML_SECURITY_HEADERS, messagePage } from "../auth/loginPage.js";
-import { type LoginLimiter, loginLimitKeys } from "../auth/rateLimit.js";
+import type { LoginLimiter } from "../auth/rateLimit.js";
 import type { AuthStore } from "../auth/store.js";
 import {
   invitePage,
@@ -29,6 +30,7 @@ const QR_MIMETYPE = /^image\/(png|jpeg)$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 const LINK_USED = "This link was already used.";
+const INVITE_GONE = "This invite is no longer valid.";
 const LINK_INVALID = "This link is invalid or has expired.";
 const NUMBER_TAKEN = "This WhatsApp number is already connected to another account.";
 
@@ -202,8 +204,21 @@ export function createOnboardingRoutes(deps: {
       // A concurrent sign-up with the same username won the race for this very tenant.
       return tenants.getUserByTenant(tenantId) ? used() : retry("This username is taken.");
     }
-    tenants.consumeLink(token, "invite");
-    tenants.setStatus(tenantId, "pairing");
+    // The UNIQUE insert above made this request the single winner, so consumeLink fails only when
+    // the link expired during hashing (the user exists by then: finish the sign-up) or when the
+    // link was removed or re-issued meanwhile (stop: the admin replaced it).
+    // Crash window: a crash between createUser and here leaves a user on an "invited" tenant with
+    // an unused link; retrying the link answers "already used" and the admin re-invites.
+    if (
+      !tenants.consumeLink(token, "invite") &&
+      tenants.linkState(token, "invite")?.state !== "expired"
+    ) {
+      return used();
+    }
+    // Conditional: the tenant may have been revoked while the password was hashed.
+    if (!tenants.transitionStatus(tenantId, "invited", "pairing")) {
+      return html(messagePage("Invite not valid", INVITE_GONE), 410);
+    }
     setPairCookie(c, user.id);
     return c.redirect(`${base}/pair`, 303);
   });
@@ -297,19 +312,16 @@ export function createOnboardingRoutes(deps: {
     if (!sameOrigin(c)) return crossSite(html);
     const form = await readForm(c);
     const username = form.get("username") ?? "";
-    const keys = loginLimitKeys(c, username);
-    if (keys.some((k) => limiter.isBlocked(k))) {
+    const user = await authenticateLogin(c, form, { tenants, limiter });
+    if (user === "blocked") {
       return html(
         messagePage("Too many attempts", "Too many failed attempts. Try again later."),
         429,
       );
     }
-    const user = await tenants.verifyPassword(username, form.get("password") ?? "");
-    if (!user) {
-      limiter.recordFailure(keys);
+    if (user === "invalid") {
       return html(pairLoginPage({ username, error: "Invalid username or password." }), 401);
     }
-    for (const k of keys) limiter.reset(k);
     const status = tenants.getTenant(user.tenantId)?.status;
     if (status === undefined || !PAIRABLE.has(status)) {
       return html(pairLoginPage({ username, error: "This account is disabled." }), 403);

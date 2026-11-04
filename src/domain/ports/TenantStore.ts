@@ -26,6 +26,8 @@ export interface TenantStore {
   getWrappedDek(id: string): string | null;
   setWrappedDek(id: string, wrapped: string): void;
   setStatus(id: string, status: TenantStatus): void;
+  /** Atomically moves the tenant from `from` to `to`; false (and no change) when it is not in `from`. */
+  transitionStatus(id: string, from: TenantStatus, to: TenantStatus): boolean;
   /** "taken" when another tenant already holds this WhatsApp id. */
   setWaId(id: string, waId: string): "ok" | "taken";
   /** Deletes tenant, its user and links. */

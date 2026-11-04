@@ -109,7 +109,7 @@ function migrateUserColumns(db: DatabaseSync): void {
   db.exec("DELETE FROM tokens WHERE user_id IS NULL");
 }
 
-/** Opens the auth database (WAL, busy timeout) and keeps its files private to the owner. */
+/** Opens the auth database (WAL, busy timeout, secure delete) and keeps its files private to the owner. */
 export function openAuthDatabase(dbPath: string): DatabaseSync {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA busy_timeout = 5000");

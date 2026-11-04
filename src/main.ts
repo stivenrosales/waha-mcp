@@ -30,7 +30,9 @@ async function main(): Promise<void> {
     apiKey: config.wahaApiKey,
   });
   try {
-    // Fails fast (nothing written) when MASTER_KEY does not open the stored tenant keys.
+    // Fails fast when MASTER_KEY does not open the stored tenant keys, before any key, cache file
+    // or row is changed. Opening the stores above already ran their schema setup: it only adds
+    // missing tables and columns (and drops pre-0.4.0 codes and tokens, revoked here anyway).
     await migrateToMultiTenant({
       authDb,
       tenants,

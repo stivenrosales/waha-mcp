@@ -187,6 +187,9 @@ function sealLegacyRows(deps: MigrateDeps, tenantId: string): void {
       valueColumn: "text",
       aad: transcriptAad,
     });
+    // The plaintext rows survive in free pages and WAL frames until the file is rebuilt.
+    db.exec("VACUUM");
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     deps.logger.info(`migration: sealed ${messages} message(s), ${transcripts} transcript(s)`);
   } finally {
     db.close();

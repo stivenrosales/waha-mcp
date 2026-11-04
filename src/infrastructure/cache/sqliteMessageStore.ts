@@ -53,6 +53,8 @@ export function openCacheDatabase(dbPath: string): DatabaseSync {
   }
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA busy_timeout = 5000");
+  // Deleted and overwritten rows are zeroed instead of lingering in free pages.
+  db.exec("PRAGMA secure_delete = ON");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec(SCHEMA);
   if (onDisk)

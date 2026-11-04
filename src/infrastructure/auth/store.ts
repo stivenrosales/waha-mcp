@@ -106,6 +106,8 @@ function migrateUserColumns(db: DatabaseSync): void {
 export function openAuthDatabase(dbPath: string): DatabaseSync {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA busy_timeout = 5000");
+  // Deleted rows (e.g. a deleted tenant's wrapped key) are zeroed instead of lingering.
+  db.exec("PRAGMA secure_delete = ON");
   db.exec("PRAGMA journal_mode = WAL");
   if (dbPath !== ":memory:") {
     // The database holds token and password hashes: keep it, and its WAL side files, private.

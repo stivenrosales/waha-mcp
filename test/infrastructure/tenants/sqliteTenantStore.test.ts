@@ -33,6 +33,24 @@ describe("sqlite tenant store", () => {
     for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
   });
 
+  it("leaves no trace of a deleted tenant's wrapped key in auth.db", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-tenants-"));
+    dirs.push(dir);
+    const file = path.join(dir, "auth.db");
+    const db = openAuthDatabase(file);
+    const store = createSqliteTenantStore(db);
+    const tenant = store.createTenant({
+      displayName: "Gone",
+      wahaSession: "t_bbbbbbbbbb",
+      wrappedDek: "v1.WRAPPEDMARKER9c2e",
+    });
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    store.deleteTenant(tenant.id);
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    db.close();
+    expect(fs.readFileSync(file).includes("WRAPPEDMARKER")).toBe(false);
+  });
+
   it("creates and reads tenants, wrapped DEK and status", () => {
     const { store, tenant } = setup();
     expect(tenant).toMatchObject({

@@ -219,6 +219,36 @@ describe("migrateToMultiTenant", () => {
     }
   });
 
+  it("leaves no 0.3.0 plaintext anywhere in the migrated cache files", async () => {
+    const dir = build030DataDir();
+    const cache = openCacheDatabase(path.join(dir, "cache.db"));
+    cache
+      .prepare("INSERT INTO messages (chat_id, id, ts, raw) VALUES (?, ?, ?, ?)")
+      .run(
+        CHAT,
+        "marker",
+        1_800_000_000,
+        JSON.stringify({ id: "marker", body: "PLAINMARKER-msg-7f3a" }),
+      );
+    cache
+      .prepare(
+        "INSERT INTO transcripts (chat_id, message_id, text, created_at) VALUES (?, ?, ?, 0)",
+      )
+      .run(CHAT, "marker", "PLAINMARKER-tr-7f3a");
+    cache.close();
+    await migrate(dir);
+
+    const o = open(dir);
+    const tenantDir = path.join(dir, "tenants", o.tenants.getAdmin()?.tenantId as string);
+    o.auth.close();
+    const files = ["cache.db", "cache.db-wal"].map((f) => path.join(tenantDir, f));
+    for (const file of files.filter((f) => fs.existsSync(f))) {
+      const bytes = fs.readFileSync(file);
+      expect(bytes.includes("PLAINMARKER")).toBe(false);
+      expect(bytes.includes("nos vemos")).toBe(false);
+    }
+  });
+
   it("seeds the admin on a fresh DATA_DIR, with wa_id null when WAHA is unreachable", async () => {
     const dir = scratch();
     const unreachable = new FakeSessionAdmin();

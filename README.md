@@ -134,7 +134,7 @@ Each tenant is one WhatsApp account with one user. Tenant #1 is the admin's: it 
 2. The friend opens it, picks a username and a password (12 characters or more), then scans the QR code at `<base>/pair` with WhatsApp. Each tenant gets its own WAHA session (`t_` + 10 random characters); a WhatsApp number can belong to one tenant only.
 3. The friend adds `<base>/mcp` to their client and logs in with that username and password. Every tool works on their own account only: there is no session or tenant argument.
 
-If WhatsApp disconnects later, tools say so and point to `<base>/pair` to scan again. A forgotten password is reset with `reset_password` (a single-use link); the admin's own password can also be reset by starting once with `ADMIN_PASSWORD_RESET=1` and the new `ADMIN_PASSWORD`.
+If WhatsApp disconnects later, tools say so and point to `<base>/pair` to scan again. A forgotten password is reset with `reset_password` (a single-use link); the admin's own password can also be reset by starting with `ADMIN_PASSWORD_RESET=1` and the new `ADMIN_PASSWORD`, which also signs the admin out of every client. It applies on every start while it is set, so remove `ADMIN_PASSWORD_RESET` once you have logged in again.
 
 Admin tools, listed only for the admin (members never see them):
 
@@ -233,9 +233,9 @@ All configuration is through environment variables.
 | `PUBLIC_BASE_URL`            | yes      |             | Public HTTPS origin of this server, no path (`http` only for localhost).    |
 | `MASTER_KEY`                 | yes      |             | 32 bytes in base64 (`openssl rand -base64 32`); wraps every tenant key.     |
 | `MASTER_KEY_PREVIOUS`        | no       |             | Old master key, only for the start that rotates `MASTER_KEY`.               |
-| `ADMIN_USERNAME`             | yes      |             | Admin username, created on first start.                                     |
+| `ADMIN_USERNAME`             | yes      |             | Admin username, 3-32 of `A-Z a-z 0-9 . - _`; created on first start.        |
 | `ADMIN_PASSWORD`             | yes      |             | Admin password (12+ characters); read only to create the admin or reset it. |
-| `ADMIN_PASSWORD_RESET`       | no       | `false`     | `1`/`true`: overwrite the admin's password with `ADMIN_PASSWORD` at start.  |
+| `ADMIN_PASSWORD_RESET`       | no       | `false`     | `1`/`true`: reset admin password and sessions on every start; then unset.   |
 | `WAHA_SESSION`               | no       | `default`   | WAHA session of the admin's tenant (tenant #1).                             |
 | `DATA_DIR`                   | no       | `/data`     | `auth.db` (users, tenants, OAuth), media secret, `tenants/<id>/` data.      |
 | `PORT`                       | no       | `3000`      | HTTP port.                                                                  |

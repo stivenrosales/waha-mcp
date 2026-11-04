@@ -32,7 +32,7 @@ export interface MigrateDeps {
   /** The auth database; its `meta` table records the migration. */
   authDb: DatabaseSync;
   tenants: TenantStore;
-  auth: Pick<AuthStore, "revokeAll">;
+  auth: Pick<AuthStore, "revokeAll" | "revokeUser">;
   config: Config;
   /** `MASTER_KEY`. */
   kek: Buffer;
@@ -53,7 +53,8 @@ export interface MigrateDeps {
  *    `WAHA_SESSION` with the admin user, moves the 0.3.0 `DATA_DIR/cache.db` into
  *    `DATA_DIR/tenants/<id>/`, seals its plaintext rows in batches, deletes the 0.3.0 uploads
  *    (plaintext, 15-minute slots) and revokes every OAuth client and token.
- * 3. `ADMIN_PASSWORD_RESET` overwrites the admin's password with `ADMIN_PASSWORD`.
+ * 3. `ADMIN_PASSWORD_RESET` overwrites the admin's password with `ADMIN_PASSWORD` and revokes the
+ *    admin's OAuth clients and tokens, on every start while it is set.
  */
 export async function migrateToMultiTenant(deps: MigrateDeps): Promise<void> {
   const { authDb, tenants, config, logger } = deps;
@@ -81,7 +82,8 @@ export async function migrateToMultiTenant(deps: MigrateDeps): Promise<void> {
   const admin = tenants.getAdmin();
   if (admin && config.adminPasswordReset && !seeded) {
     await tenants.setPassword(admin.id, config.adminPassword);
-    logger.info("admin password reset from ADMIN_PASSWORD");
+    deps.auth.revokeUser(admin.id);
+    logger.info("admin password reset from ADMIN_PASSWORD; admin sessions revoked");
   }
 }
 

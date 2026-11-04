@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { USERNAME_PATTERN, USERNAME_RULE } from "./domain/username.js";
 import { parseMasterKey } from "./infrastructure/crypto/envelope.js";
 
 /**
@@ -163,7 +164,11 @@ const envSchema = z
       .transform(stripTrailingSlashes),
     MASTER_KEY: masterKeyVar("MASTER_KEY", false),
     MASTER_KEY_PREVIOUS: masterKeyVar("MASTER_KEY_PREVIOUS", true),
-    ADMIN_USERNAME: required("ADMIN_USERNAME"),
+    ADMIN_USERNAME: z
+      .string("ADMIN_USERNAME is required.")
+      .trim()
+      .min(1, "ADMIN_USERNAME is required.")
+      .regex(USERNAME_PATTERN, `ADMIN_USERNAME must be ${USERNAME_RULE}.`),
     ADMIN_PASSWORD: required("ADMIN_PASSWORD").min(
       ADMIN_PASSWORD_MIN,
       `ADMIN_PASSWORD must be at least ${ADMIN_PASSWORD_MIN} characters.`,

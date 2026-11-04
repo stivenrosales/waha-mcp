@@ -5,6 +5,7 @@ import { getCookie } from "hono/cookie";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { SessionAdmin } from "../../domain/ports/SessionAdmin.js";
 import type { LinkKind, Tenant, TenantStore, User } from "../../domain/ports/TenantStore.js";
+import { USERNAME_PATTERN, USERNAME_RULE } from "../../domain/username.js";
 import { authenticateLogin } from "../auth/login.js";
 import { HTML_SECURITY_HEADERS, messagePage } from "../auth/loginPage.js";
 import type { LoginLimiter } from "../auth/rateLimit.js";
@@ -23,7 +24,6 @@ const MAX_BODY_BYTES = 16 * 1024;
 const MIN_PASSWORD = 12;
 /** Upper bound so a huge password cannot make scrypt hash megabytes. */
 const MAX_PASSWORD = 1024;
-const USERNAME = /^[A-Za-z0-9._-]{3,32}$/;
 const PAIR_COOKIE = "waha_pair";
 const PAIR_COOKIE_TTL_MS = 15 * 60_000;
 const QR_MIMETYPE = /^image\/(png|jpeg)$/;
@@ -182,8 +182,8 @@ export function createOnboardingRoutes(deps: {
     const form = await readForm(c);
     const username = form.get("username") ?? "";
     const retry = (error: string) => html(invitePage({ username, error }), 400);
-    if (!USERNAME.test(username)) {
-      return retry("Username must be 3 to 32 letters, digits, dots, dashes or underscores.");
+    if (!USERNAME_PATTERN.test(username)) {
+      return retry(`Username must be ${USERNAME_RULE}.`);
     }
     const problem = passwordError(form);
     if (problem) return retry(problem);

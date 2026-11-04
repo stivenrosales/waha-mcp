@@ -258,6 +258,19 @@ describe("loadConfig", () => {
       expect(c.adminPasswordReset).toBe(false);
     });
 
+    it("trims ADMIN_USERNAME and holds it to the invite form's username rules", () => {
+      expect(loadConfig({ ...minimal, ADMIN_USERNAME: "  admin.one  " }).adminUsername).toBe(
+        "admin.one",
+      );
+      const rule = "ADMIN_USERNAME must be 3 to 32 letters, digits, dots, dashes or underscores.";
+      for (const bad of ["ad", "a".repeat(33), "bad name", "admin@home", "   "]) {
+        expect(() => loadConfig({ ...minimal, ADMIN_USERNAME: bad })).toThrow(rule);
+      }
+      expect(loadConfig({ ...minimal, ADMIN_USERNAME: "a".repeat(32) }).adminUsername).toBe(
+        "a".repeat(32),
+      );
+    });
+
     it("rejects ADMIN_PASSWORD shorter than 12 chars", () => {
       expect(() => loadConfig({ ...minimal, ADMIN_PASSWORD: "short-pass1" })).toThrow(
         /ADMIN_PASSWORD must be at least 12 characters/,

@@ -351,15 +351,47 @@ describe("migrateToMultiTenant", () => {
     await migrate(dir, { env: { MASTER_KEY: KEY_B.toString("base64") } });
   });
 
-  it("ADMIN_PASSWORD_RESET overwrites the admin's password on every start", async () => {
+  it("ADMIN_PASSWORD_RESET overwrites the admin's password and revokes its tokens on every start", async () => {
     const dir = scratch();
     await migrate(dir);
-    await migrate(dir, {
-      env: { ADMIN_PASSWORD_RESET: "1", ADMIN_PASSWORD: "another long password" },
-    });
+    /** Signs the admin in on one client and returns its access token. */
+    const signIn = () => {
+      const o = open(dir);
+      const userId = o.tenants.getAdmin()?.id as string;
+      const { clientId } = o.auth.registerClient({ redirectUris: ["https://claude.ai/cb"] });
+      o.auth.saveCode({
+        clientId,
+        redirectUri: "https://claude.ai/cb",
+        codeChallenge: "c",
+        scope: "mcp",
+        resource: null,
+        userId,
+      });
+      const { accessToken } = o.auth.issueTokens(clientId, "mcp", userId);
+      o.auth.close();
+      return accessToken;
+    };
+    const verifies = (token: string) => {
+      const o = open(dir);
+      const ok = o.auth.verifyAccessToken(token) !== null;
+      o.auth.close();
+      return ok;
+    };
+    const reset = { ADMIN_PASSWORD_RESET: "1", ADMIN_PASSWORD: "another long password" };
+
+    const first = signIn();
+    const logs: string[] = [];
+    await migrate(dir, { env: reset, logs });
     const o = open(dir);
     expect(await o.tenants.verifyPassword("admin", "correct horse battery")).toBeNull();
     expect(await o.tenants.verifyPassword("admin", "another long password")).not.toBeNull();
     o.auth.close();
+    expect(verifies(first)).toBe(false);
+    expect(logs).toContain("admin password reset from ADMIN_PASSWORD; admin sessions revoked");
+
+    // Still set on the next start: applied (and sessions revoked) again.
+    const second = signIn();
+    await migrate(dir, { env: reset });
+    expect(verifies(second)).toBe(false);
   });
 });

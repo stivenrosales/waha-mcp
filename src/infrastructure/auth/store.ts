@@ -5,8 +5,10 @@ import { DatabaseSync } from "node:sqlite";
 const CODE_TTL_MS = 60_000;
 const ACCESS_TTL_S = 3600;
 const REFRESH_TTL_S = 30 * 24 * 3600;
-/** A registered client with no live token is dropped after this long. */
+/** A client bound to a user that holds no live token is dropped after this long. */
 const STALE_CLIENT_MS = 24 * 3600 * 1000;
+/** A client no user ever logged in with is dropped after this long. */
+const UNBOUND_CLIENT_MS = 3600 * 1000;
 
 export interface AuthorizationCodeData {
   clientId: string;
@@ -27,7 +29,12 @@ export interface AuthStore {
   registerClient(c: { redirectUris: string[]; clientName?: string }): { clientId: string };
   getClient(clientId: string): { clientId: string; redirectUris: string[] } | null;
   countClients(): number;
-  /** Deletes clients older than 24 h that hold no live token or pending code; returns how many. */
+  /** Clients not yet bound to a user (no login completed on them): the registration cap counts these. */
+  countUnboundClients(): number;
+  /**
+   * Deletes unbound clients older than 1 h, and bound clients older than 24 h that hold no live
+   * token or pending code; returns how many.
+   */
   pruneStaleClients(): number;
   /**
    * Binds the stored sessions to the current WAHA API key (only its sha256 is kept). When the key
@@ -47,7 +54,7 @@ export interface AuthStore {
   rotateRefreshToken(token: string, clientId: string): IssuedTokens | null;
   /** Removes the clients, codes and tokens of one user; other users are untouched. */
   revokeUser(userId: string): void;
-  /** Removes every client, code and token (migrations, legacy logout). */
+  /** Removes every client, code and token (the 0.4.0 migration). */
   revokeAll(): void;
   /** Closes the database; the store must not be used afterwards. */
   close(): void;
@@ -185,16 +192,24 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
       return Number(row.n);
     },
 
+    countUnboundClients() {
+      const row = db.prepare("SELECT COUNT(*) AS n FROM clients WHERE user_id IS NULL").get() as {
+        n: number;
+      };
+      return Number(row.n);
+    },
+
     pruneStaleClients() {
       const t = now();
       const result = db
         .prepare(
           `DELETE FROM clients
-           WHERE created_at < ?
-             AND client_id NOT IN (SELECT client_id FROM tokens WHERE expires_at > ?)
-             AND client_id NOT IN (SELECT client_id FROM codes WHERE expires_at > ?)`,
+           WHERE (user_id IS NULL AND created_at < ?)
+              OR (created_at < ?
+                  AND client_id NOT IN (SELECT client_id FROM tokens WHERE expires_at > ?)
+                  AND client_id NOT IN (SELECT client_id FROM codes WHERE expires_at > ?))`,
         )
-        .run(t - STALE_CLIENT_MS, t, t);
+        .run(t - UNBOUND_CLIENT_MS, t - STALE_CLIENT_MS, t, t);
       return Number(result.changes);
     },
 

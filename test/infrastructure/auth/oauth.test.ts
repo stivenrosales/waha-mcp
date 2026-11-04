@@ -192,16 +192,47 @@ describe("dynamic client registration", () => {
     expect(ctx.store.countClients()).toBe(0);
   });
 
-  it("caps registered clients at 50 until logout", async () => {
+  it("caps unbound clients at 50 without pointing to /logout", async () => {
     const ctx = await setup();
     for (let i = 0; i < 50; i++) expect((await register(ctx)).status).toBe(201);
     const res = await register(ctx);
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string; error_description: string };
     expect(body.error).toBe("invalid_client_metadata");
-    expect(body.error_description).toMatch(/limit/i);
-    expect(body.error_description).toMatch(/logout/i);
+    expect(body.error_description).toBe(
+      "Client limit reached (50). Unused registrations expire after 1 hour; try again later.",
+    );
     expect(ctx.store.countClients()).toBe(50);
+  });
+
+  it("lets a new client register once 50 anonymous registrations are over an hour old", async () => {
+    let t = 1_800_000_000_000;
+    const ctx = await setup({ storeNow: () => t });
+    for (let i = 0; i < 50; i++) expect((await register(ctx)).status).toBe(201);
+    t += 59 * 60 * 1000;
+    expect((await register(ctx)).status).toBe(400);
+    t += 2 * 60 * 1000;
+    expect((await register(ctx)).status).toBe(201);
+    expect(ctx.store.countClients()).toBe(1);
+  });
+
+  it("does not count clients bound to a user toward the cap", async () => {
+    const ctx = await setup();
+    for (let i = 0; i < 50; i++) {
+      const clientId = await registeredClient(ctx);
+      const code = ctx.store.saveCode({
+        clientId,
+        redirectUri: REDIRECT,
+        codeChallenge: "challenge",
+        scope: "mcp",
+        resource: null,
+        userId: ctx.adminUserId,
+      });
+      ctx.store.issueTokens(clientId, "mcp", ctx.adminUserId);
+      expect(code).not.toBeNull();
+    }
+    expect((await register(ctx)).status).toBe(201);
+    expect(ctx.store.countClients()).toBe(51);
   });
 
   it("prunes day-old clients without live tokens before checking the cap", async () => {

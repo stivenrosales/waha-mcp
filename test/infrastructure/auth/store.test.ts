@@ -260,21 +260,43 @@ describe("auth store", () => {
     expect(dump).not.toContain("key-two");
   });
 
-  it("prunes only old clients that hold no live token", () => {
+  it("prunes bound clients older than 24 h that hold no live token", () => {
     let t = T0;
     const store = createAuthStore(openAuthDatabase(":memory:"), () => t);
     const uris = ["https://app.example/cb"];
+    const bind = (clientId: string) =>
+      store.saveCode({ ...codeInput(clientId), redirectUri: uris[0] as string });
     const idle = store.registerClient({ redirectUris: uris }).clientId;
+    bind(idle);
     const active = store.registerClient({ redirectUris: uris }).clientId;
+    bind(active);
     store.issueTokens(active, "mcp", "u1");
     t += 23 * 3600 * 1000;
     const fresh = store.registerClient({ redirectUris: uris }).clientId;
+    bind(fresh);
     expect(store.pruneStaleClients()).toBe(0);
     t += 2 * 3600 * 1000;
     expect(store.pruneStaleClients()).toBe(1);
     expect(store.getClient(idle)).toBeNull();
     expect(store.getClient(active)).not.toBeNull();
     expect(store.getClient(fresh)).not.toBeNull();
+  });
+
+  it("prunes unbound clients after one hour and counts only unbound ones", () => {
+    let t = T0;
+    const store = createAuthStore(openAuthDatabase(":memory:"), () => t);
+    const uris = ["https://app.example/cb"];
+    const anonymous = store.registerClient({ redirectUris: uris }).clientId;
+    const bound = store.registerClient({ redirectUris: uris }).clientId;
+    store.saveCode({ ...codeInput(bound), redirectUri: uris[0] as string });
+    expect(store.countUnboundClients()).toBe(1);
+    t += 59 * 60 * 1000;
+    expect(store.pruneStaleClients()).toBe(0);
+    t += 2 * 60 * 1000;
+    expect(store.pruneStaleClients()).toBe(1);
+    expect(store.getClient(anonymous)).toBeNull();
+    expect(store.getClient(bound)).not.toBeNull();
+    expect(store.countUnboundClients()).toBe(0);
   });
 
   it("keeps auth.db and its WAL files private to the owner", () => {

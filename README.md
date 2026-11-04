@@ -320,7 +320,7 @@ To sign out everywhere, open `<base>/logout` and log in: it revokes every client
 - Rotating `WAHA_API_KEY` revokes every issued token at the next start: only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
 - The message cache is a copy of the conversations you read: see [Message cache](#message-cache).
 - Transcription is off by default; when on, voice notes go to the configured provider: see [Voice-note transcription](#voice-note-transcription-optional). `TRANSCRIPTION_API_KEY` is never logged or returned; provider errors are reported with fixed messages.
-- At most 50 OAuth clients can be registered (all users together). Clients older than 24 h with no live token are pruned automatically when a new one registers; `<base>/logout` clears the signed-in user's.
+- At most 50 OAuth clients can wait unbound (registered, but nobody has logged in through them yet), all users together; clients bound to a user do not count. Unbound registrations are pruned after 1 hour, and bound clients older than 24 h with no live token after 24 hours, whenever a new client registers.
 
 > [!WARNING]
 > The login (OAuth, logout, invite, reset and pairing pages share one limiter) is rate limited per client address (IPv6 grouped by /64) and with a global failure budget. An attacker can therefore lock users out temporarily, and logout is also blocked during that window.

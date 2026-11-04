@@ -249,11 +249,11 @@ export function createOAuthRoutes(deps: {
       return oauthError(c, "invalid_client_metadata", "client_name must be a short string.");
     }
     store.pruneStaleClients();
-    if (store.countClients() >= MAX_CLIENTS) {
+    if (store.countUnboundClients() >= MAX_CLIENTS) {
       return oauthError(
         c,
         "invalid_client_metadata",
-        `Client limit reached (${MAX_CLIENTS}). Log out at ${base}/logout to remove your clients; unused registrations expire after 24 hours.`,
+        `Client limit reached (${MAX_CLIENTS}). Unused registrations expire after 1 hour; try again later.`,
       );
     }
     const redirectUris = [...new Set(uris as string[])];

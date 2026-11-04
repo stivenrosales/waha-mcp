@@ -156,7 +156,7 @@ Every admin tool call is logged with the tool, the target tenant and the outcome
 **Operational requirements:**
 
 - Set `WHATSAPP_DEFAULT_ENGINE=GOWS` on the WAHA container: tenant sessions are created without an engine, so WAHA uses its default, and only GOWS is supported.
-- A tenant whose WhatsApp session is `STOPPED` or `FAILED` (shown by `list_tenants`) cannot fix it from `<base>/pair`, which only asks them to contact you. Restart the session in the WAHA dashboard or with `POST /api/sessions/<session>/start` on the WAHA API; tenant sessions are named `t_` + 10 characters, tenant #1 uses `WAHA_SESSION`.
+- WAHA marks a session `FAILED` when nobody scans its QR in time (for example an invite opened hours later). Opening `<base>/pair` restarts a `STOPPED` or `FAILED` session and shows a fresh QR on the next refresh, so the tenant needs nothing from you. Tenant sessions are named `t_` + 10 characters; tenant #1 uses `WAHA_SESSION`.
 - Take WAHA off its public domain: waha-mcp reaches it over the internal network (EasyPanel's project network), and only waha-mcp has a public URL. WAHA holds every tenant's WhatsApp session.
 - Keep `MASTER_KEY` only in the deployment's environment, with an offline backup. A lost key loses the cached data of every tenant (WhatsApp itself is not affected; the cache rebuilds from WAHA).
 - Transcription uses the single `TRANSCRIPTION_API_KEY`, so every tenant's voice notes are billed to the admin. It stays one global switch.

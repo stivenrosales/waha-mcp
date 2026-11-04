@@ -106,6 +106,9 @@ export function createWahaSessionAdmin(opts: WahaSessionAdminOptions): SessionAd
     async create(name) {
       await request("POST", "/api/sessions", { body: { name, start: true } });
     },
+    async start(name) {
+      await request("POST", `${sessionPath(name)}/start`);
+    },
     state,
     async qr(name) {
       if ((await state(name)) !== "SCAN_QR_CODE") return null;

@@ -325,6 +325,30 @@ describe("pair", () => {
     expect(res.headers.get("x-frame-options")).toBe("DENY");
   });
 
+  for (const stopped of ["STOPPED", "FAILED"] as const) {
+    it(`pair restarts a ${stopped} session and waits for its QR`, async () => {
+      const ctx = setup();
+      const { tenant, cookie } = await ctx.onboarded();
+      ctx.sessions.setState(tenant.wahaSession, stopped);
+      const res = await ctx.pairPage(cookie);
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(ctx.sessions.calls).toContain(`start:${tenant.wahaSession}`);
+      expect(html).toContain("Preparando tu sesión de WhatsApp…");
+      expect(html).toContain('<meta http-equiv="refresh" content="5">');
+      expect(html).not.toContain("Pide al administrador");
+      expect(await ctx.sessions.state(tenant.wahaSession)).toBe("STARTING");
+    });
+  }
+
+  it("pair does not restart a session that is already starting", async () => {
+    const ctx = setup();
+    const { tenant, cookie } = await ctx.onboarded();
+    ctx.sessions.setState(tenant.wahaSession, "STARTING");
+    await ctx.pairPage(cookie);
+    expect(ctx.sessions.calls).not.toContain(`start:${tenant.wahaSession}`);
+  });
+
   it("other pages do not allow data: images", async () => {
     const ctx = setup();
     const { token } = ctx.invite();

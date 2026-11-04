@@ -289,12 +289,9 @@ export function createOnboardingRoutes(deps: {
           return html(pairDonePage(`${base}/mcp`));
         }
       } else if (state === "STOPPED" || state === "FAILED") {
-        return html(
-          pairWaitPage(
-            "La sesión de WhatsApp está detenida",
-            "Tu sesión de WhatsApp no está en ejecución. Pide al administrador que la reinicie.",
-          ),
-        );
+        // WAHA fails a session whose QR nobody scanned in time (e.g. an invite opened days
+        // later): start it again; the next refresh shows a fresh QR.
+        await sessions.start(name);
       }
       return html(pairWaitPage("Conectando", "Preparando tu sesión de WhatsApp…"));
     } catch {

@@ -35,6 +35,11 @@ export class FakeSessionAdmin implements SessionAdmin {
     s.state = "STARTING";
   }
 
+  async start(name: string): Promise<void> {
+    this.calls.push(`start:${name}`);
+    this.ensure(name).state = "STARTING";
+  }
+
   async state(name: string): Promise<SessionState> {
     this.calls.push(`state:${name}`);
     return this.sessions.get(name)?.state ?? "UNKNOWN";

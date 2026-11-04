@@ -13,6 +13,7 @@ import {
   openCacheDatabase,
 } from "./infrastructure/cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "./infrastructure/cache/sqliteTranscriptStore.js";
+import { createTenantCipher } from "./infrastructure/crypto/envelope.js";
 import { createApp } from "./infrastructure/http/app.js";
 import { SERVER_INSTRUCTIONS } from "./infrastructure/mcp/instructions.js";
 import { createMcpServer } from "./infrastructure/mcp/server.js";
@@ -54,11 +55,14 @@ async function main(): Promise<void> {
   const tenants = createSqliteTenantStore(authDb);
   // The message cache is a copy of conversations at rest; logout does not clear it. Voice-note
   // transcripts live in the same file (even with the message cache off) and share its owner.
+  // interim: replaced in Task 11 — the masterKey is the DEK of the single "legacy" tenant.
+  const legacyCipher = createTenantCipher(config.masterKey, "legacy");
   const cacheDb =
     config.cacheEnabled || config.transcription
       ? openCacheDatabase(join(config.dataDir, "cache.db"))
       : null;
-  const messageStore = config.cacheEnabled && cacheDb ? createSqliteMessageStore(cacheDb) : null;
+  const messageStore =
+    config.cacheEnabled && cacheDb ? createSqliteMessageStore(cacheDb, legacyCipher) : null;
   const gateway = messageStore
     ? createCachedGateway(wahaGateway, messageStore, {
         refreshHours: config.cacheRefreshHours,
@@ -71,7 +75,7 @@ async function main(): Promise<void> {
       ? createTranscriptionService({
           gateway,
           audio: createWahaAudioSource(gateway, { maxBytes: config.mediaMaxBytes }),
-          store: createSqliteTranscriptStore(cacheDb),
+          store: createSqliteTranscriptStore(cacheDb, legacyCipher),
           transcriber: createOpenAiCompatibleTranscriber(config.transcription),
           session: config.wahaSession,
           maxSeconds: config.transcription.maxSeconds,
@@ -87,6 +91,7 @@ async function main(): Promise<void> {
     dir: join(config.dataDir, "uploads"),
     ttlSeconds: config.uploadTtlSeconds,
     maxBytes: config.uploadMaxBytes,
+    cipher: legacyCipher,
   });
   uploads.sweep();
   setInterval(() => uploads.sweep(), UPLOAD_SWEEP_INTERVAL_MS).unref();

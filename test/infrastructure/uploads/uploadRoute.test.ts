@@ -7,6 +7,7 @@ import type { SignedLinks } from "../../../src/infrastructure/media/signedLink.j
 import { createFsUploadStore } from "../../../src/infrastructure/uploads/fsUploadStore.js";
 import { createUploadLinks } from "../../../src/infrastructure/uploads/uploadLinks.js";
 import { createUploadHandler } from "../../../src/infrastructure/uploads/uploadRoute.js";
+import { testCipher } from "../../fakes/testCipher.js";
 
 const MAX = 10;
 let root: string;
@@ -16,7 +17,12 @@ let handle: (req: Request, token: string) => Promise<Response>;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "upload-route-"));
-  store = createFsUploadStore({ dir: join(root, "uploads"), ttlSeconds: 900, maxBytes: MAX });
+  store = createFsUploadStore({
+    dir: join(root, "uploads"),
+    ttlSeconds: 900,
+    maxBytes: MAX,
+    cipher: testCipher(),
+  });
   links = createUploadLinks(new Uint8Array(32).fill(3), 900);
   handle = createUploadHandler({ store, links, maxBytes: MAX });
 });

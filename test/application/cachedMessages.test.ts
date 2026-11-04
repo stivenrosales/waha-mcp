@@ -8,6 +8,7 @@ import {
 } from "../../src/infrastructure/cache/sqliteMessageStore.js";
 import { getEngineMapper } from "../../src/infrastructure/waha/engines/index.js";
 import { InMemoryWahaGateway, rawReaction, rawText } from "../fakes/InMemoryWahaGateway.js";
+import { testCipher } from "../fakes/testCipher.js";
 
 const m = getEngineMapper("GOWS");
 const CHAT = "100000000000009@g.us";
@@ -33,7 +34,7 @@ function setup(
 ) {
   const data = { messages: { [CHAT]: messages } };
   const waha = new InMemoryWahaGateway(data);
-  const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+  const store = createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher());
   let t = (NEWEST + 60) * 1000;
   const gw = createCachedGateway(waha, store, {
     refreshHours: o.refreshHours ?? 48,
@@ -75,7 +76,7 @@ describe("cached gateway: account identity", () => {
   const calls = (w: InMemoryWahaGateway) => w.count("getMessages");
 
   it("keeps the cache for the same session and account", async () => {
-    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher());
     const data = { messages: { [CHAT]: history(5) } };
     await fetchRange(make(new InMemoryWahaGateway(data), store), m, { chatId: CHAT, cap: 10 });
     const again = new InMemoryWahaGateway(data);
@@ -85,7 +86,7 @@ describe("cached gateway: account identity", () => {
   });
 
   it("wipes the cache when the WAHA session changes", async () => {
-    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher());
     await fetchRange(
       make(new InMemoryWahaGateway({ messages: { [CHAT]: history(5) } }), store),
       m,
@@ -101,7 +102,7 @@ describe("cached gateway: account identity", () => {
   });
 
   it("wipes the cache when another phone is paired (different me.id)", async () => {
-    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher());
     await fetchRange(
       make(new InMemoryWahaGateway({ messages: { [CHAT]: history(5) } }), store),
       m,
@@ -119,7 +120,7 @@ describe("cached gateway: account identity", () => {
   });
 
   it("never serves cached rows while the account is unknown", async () => {
-    const store = createSqliteMessageStore(openCacheDatabase(":memory:"));
+    const store = createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher());
     await fetchRange(
       make(new InMemoryWahaGateway({ messages: { [CHAT]: history(5) } }), store),
       m,

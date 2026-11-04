@@ -15,10 +15,12 @@ import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqli
 import { createWahaAudioSource } from "../../src/infrastructure/transcription/wahaAudioSource.js";
 import { gowsMapper } from "../../src/infrastructure/waha/engines/gows.js";
 import { type InMemoryData, rawText, rawVoice } from "../fakes/InMemoryWahaGateway.js";
+import { testCipher } from "../fakes/testCipher.js";
 import { ANA, gateway, ME_PHONE, type Raw } from "./helpers.js";
 
 const URL_OF = (id: string) => `http://waha/api/files/${id}`;
 const T0 = 1793286000;
+const cipher = testCipher();
 
 /** Voice notes `v1..vN` in ANA's chat, newest first (v1 is the newest). */
 function voices(n: number, seconds = 5): Raw[] {
@@ -72,7 +74,7 @@ function setup(
 ) {
   const gw = gateway({ messages: { [ANA]: raws }, media: filesFor(raws), ...data });
   const db = over.store ? null : openCacheDatabase(":memory:");
-  const store = over.store ?? createSqliteTranscriptStore(db as NonNullable<typeof db>);
+  const store = over.store ?? createSqliteTranscriptStore(db as NonNullable<typeof db>, cipher);
   const transcriber = (over.transcriber as FakeTranscriber | undefined) ?? new FakeTranscriber();
   const service = createTranscriptionService({
     gateway: gw,
@@ -252,10 +254,12 @@ describe("transcription service: automatic voice notes", () => {
     const file = path.join(dir, "cache.db");
     const raws = voices(1);
     const db1 = openCacheDatabase(file);
-    const first = setup(raws, { store: createSqliteTranscriptStore(db1) });
+    const first = setup(raws, { store: createSqliteTranscriptStore(db1, cipher) });
     await first.service.annotate(first.messages());
     db1.close();
-    const second = setup(raws, { store: createSqliteTranscriptStore(openCacheDatabase(file)) });
+    const second = setup(raws, {
+      store: createSqliteTranscriptStore(openCacheDatabase(file), cipher),
+    });
     const ms = second.messages();
     await second.service.annotate(ms);
     expect(second.transcriber.calls).toBe(0);
@@ -264,7 +268,7 @@ describe("transcription service: automatic voice notes", () => {
 
   it("a different WhatsApp account wipes the stored transcripts before any is served", async () => {
     const raws = voices(1);
-    const store = createSqliteTranscriptStore(openCacheDatabase(":memory:"));
+    const store = createSqliteTranscriptStore(openCacheDatabase(":memory:"), cipher);
     store.resetForOwner("default|someone-else@c.us");
     const key = gowsMapper.message(raws[0] as Raw).attachment?.mediaId as string;
     const parsed = JSON.parse(Buffer.from(key, "base64url").toString()) as { c: string; m: string };

@@ -5,6 +5,7 @@ import type {
   MessageStore,
   RawMessageRow,
 } from "../../domain/ports/MessageStore.js";
+import { isSealedText, type TenantCipher } from "../crypto/envelope.js";
 
 /**
  * `cache.db` schema: the message cache and the voice-note transcripts share one file and one
@@ -106,7 +107,12 @@ function rangeWhere(q: { fromTs?: number; toTs?: number }): { sql: string; args:
   return { sql, args };
 }
 
-export function createSqliteMessageStore(db: DatabaseSync): MessageStore {
+/**
+ * Message rows are sealed per tenant (AAD `messages:<chatId>:<id>`); a value that is not sealed
+ * text is a pre-encryption row and is read as plaintext until it is rewritten.
+ */
+export function createSqliteMessageStore(db: DatabaseSync, cipher: TenantCipher): MessageStore {
+  const aad = (chatId: string, id: string) => `messages:${chatId}:${id}`;
   const transaction = <T>(fn: () => T): T => inTransaction(db, fn);
 
   // ON CONFLICT ... DO UPDATE keeps the rowid, which orders messages that share a second
@@ -120,7 +126,8 @@ export function createSqliteMessageStore(db: DatabaseSync): MessageStore {
     upsertRaw(chatId, rows: RawMessageRow[]) {
       if (rows.length === 0) return;
       transaction(() => {
-        for (const r of rows) upsert.run(chatId, r.id, r.ts, JSON.stringify(r.raw));
+        for (const r of rows)
+          upsert.run(chatId, r.id, r.ts, cipher.sealText(JSON.stringify(r.raw), aad(chatId, r.id)));
       });
     },
 
@@ -128,10 +135,15 @@ export function createSqliteMessageStore(db: DatabaseSync): MessageStore {
       const { sql, args } = rangeWhere(q);
       const rows = db
         .prepare(
-          `SELECT raw FROM messages WHERE ${sql} ORDER BY ts DESC, rowid ASC LIMIT ? OFFSET ?`,
+          `SELECT id, raw FROM messages WHERE ${sql} ORDER BY ts DESC, rowid ASC LIMIT ? OFFSET ?`,
         )
-        .all(chatId, ...args, q.limit, q.offset) as { raw: string }[];
-      return rows.map((r) => JSON.parse(r.raw) as unknown);
+        .all(chatId, ...args, q.limit, q.offset) as { id: string; raw: string }[];
+      return rows.map(
+        (r) =>
+          JSON.parse(
+            isSealedText(r.raw) ? cipher.openText(r.raw, aad(chatId, r.id)) : r.raw,
+          ) as unknown,
+      );
     },
 
     countRange(chatId, q) {

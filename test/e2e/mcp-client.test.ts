@@ -40,6 +40,7 @@ import {
   rawText,
   rawVoice,
 } from "../fakes/InMemoryWahaGateway.js";
+import { testCipher } from "../fakes/testCipher.js";
 
 /**
  * End to end: the official MCP client talks to `createApp` (OAuth bearer guard,
@@ -180,11 +181,15 @@ function setup(
   sender = new RecordingSender(),
 ): Setup {
   const served = cacheOn
-    ? createCachedGateway(gateway, createSqliteMessageStore(openCacheDatabase(":memory:")), {
-        refreshHours: 48,
-        maxAgeDays: 0,
-        session: "default",
-      })
+    ? createCachedGateway(
+        gateway,
+        createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher()),
+        {
+          refreshHours: 48,
+          maxAgeDays: 0,
+          session: "default",
+        },
+      )
     : gateway;
   const config = loadConfig({
     WAHA_API_URL: WAHA_URL,
@@ -220,6 +225,7 @@ function setup(
     dir: join(scratch(), "uploads"),
     ttlSeconds: config.uploadTtlSeconds,
     maxBytes: config.uploadMaxBytes,
+    cipher: testCipher(),
   });
   const mcp = createMcpServer({
     tools: createTools(),
@@ -1038,7 +1044,7 @@ for (const cache of [false, true])
         createTranscriptionService({
           gateway: served,
           audio: createWahaAudioSource(served, { maxBytes: MAX_BYTES, idleTimeoutMs: IDLE_MS }),
-          store: createSqliteTranscriptStore(openCacheDatabase(":memory:")),
+          store: createSqliteTranscriptStore(openCacheDatabase(":memory:"), testCipher()),
           transcriber: createOpenAiCompatibleTranscriber({
             apiUrl: "https://stt.example/v1",
             apiKey: "stt-secret",

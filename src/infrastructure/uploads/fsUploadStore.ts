@@ -8,9 +8,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { open, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { UploadSlot, UploadStore, WriteResult } from "../../domain/ports/UploadStore.js";
+import { DecryptionError, type TenantCipher } from "../crypto/envelope.js";
 
 const ID = /^[A-Za-z0-9_-]{32}$/;
 const GENERIC = "application/octet-stream";
@@ -57,19 +58,31 @@ interface Meta extends UploadSlot {
 
 /**
  * Upload slots on disk: `<id>.json` holds the metadata (so slots survive a restart),
- * `<id>.part` is an upload in progress, `<id>.bin` the finished file. All mode 0600
+ * `<id>.part` is an upload in progress, `<id>.bin` the finished file, both sealed
+ * (`nonce|ciphertext|tag`, AAD `uploads:<id>`); plaintext never touches the disk. All mode 0600
  * inside a 0700 directory.
  */
 export function createFsUploadStore(opts: {
   dir: string;
   ttlSeconds: number;
+  /** Plaintext bytes allowed per upload. */
   maxBytes: number;
+  cipher: TenantCipher;
   now?: () => number;
 }): UploadStore {
   const now = opts.now ?? Date.now;
   mkdirSync(opts.dir, { recursive: true, mode: 0o700 });
   chmodSync(opts.dir, 0o700);
 
+  const aad = (id: string) => `uploads:${id}`;
+  const unseal = (id: string, file: Buffer): Uint8Array | null => {
+    try {
+      return new Uint8Array(opts.cipher.open(file, aad(id)));
+    } catch (err) {
+      if (err instanceof DecryptionError) return null;
+      throw err;
+    }
+  };
   const path = (id: string, ext: string) => join(opts.dir, `${id}.${ext}`);
   const saveMeta = (m: Meta) =>
     writeFileSync(path(m.id, "json"), JSON.stringify(m), { mode: 0o600 });
@@ -124,34 +137,26 @@ export function createFsUploadStore(opts: {
         await body.cancel().catch(() => {});
         return "already_uploaded";
       }
-      let handle: Awaited<ReturnType<typeof open>>;
-      try {
-        // "wx": a concurrent upload to the same slot loses instead of interleaving.
-        handle = await open(path(id, "part"), "wx", 0o600);
-      } catch (err) {
-        await body.cancel().catch(() => {});
-        if ((err as NodeJS.ErrnoException).code === "EEXIST") return "already_uploaded";
-        throw err;
-      }
+      // Buffered in memory (bounded by maxBytes) so the file is sealed once, as one GCM message.
+      const chunks: Uint8Array[] = [];
       let size = 0;
       const reader = body.getReader();
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          size += value.byteLength;
-          if (size > opts.maxBytes) {
-            await reader.cancel().catch(() => {});
-            await handle.close();
-            rmSync(path(id, "part"), { force: true });
-            return "too_large";
-          }
-          await handle.write(value);
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > opts.maxBytes) {
+          await reader.cancel().catch(() => {});
+          return "too_large";
         }
-        await handle.close();
+        chunks.push(value);
+      }
+      const sealed = opts.cipher.seal(Buffer.concat(chunks), aad(id));
+      try {
+        // "wx": a concurrent upload to the same slot loses instead of interleaving.
+        writeFileSync(path(id, "part"), sealed, { flag: "wx", mode: 0o600 });
       } catch (err) {
-        await handle.close().catch(() => {});
-        rmSync(path(id, "part"), { force: true });
+        if ((err as NodeJS.ErrnoException).code === "EEXIST") return "already_uploaded";
         throw err;
       }
       renameSync(path(id, "part"), path(id, "bin"));
@@ -168,7 +173,8 @@ export function createFsUploadStore(opts: {
     async read(id) {
       const m = live(id);
       if (!m?.uploaded) return null;
-      const data = new Uint8Array(await readFile(path(id, "bin")));
+      const data = unseal(id, await readFile(path(id, "bin")));
+      if (!data) return null;
       return {
         data,
         filename: m.filename,
@@ -185,7 +191,12 @@ export function createFsUploadStore(opts: {
       } catch {
         return null;
       }
-      const data = new Uint8Array(await readFile(path(id, "sending")));
+      const data = unseal(id, await readFile(path(id, "sending")));
+      if (!data) {
+        // Unreadable (tampered) file: put it back so the slot is not left half-claimed.
+        renameSync(path(id, "sending"), path(id, "bin"));
+        return null;
+      }
       return { data, filename: m.filename, mimetype: resolveMimetype(m) };
     },
 

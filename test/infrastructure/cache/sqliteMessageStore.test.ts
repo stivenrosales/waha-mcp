@@ -7,7 +7,14 @@ import {
   openCacheDatabase,
 } from "../../../src/infrastructure/cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../../../src/infrastructure/cache/sqliteTranscriptStore.js";
+import {
+  createTenantCipher,
+  DecryptionError,
+  generateDek,
+} from "../../../src/infrastructure/crypto/envelope.js";
+import { testCipher } from "../../fakes/testCipher.js";
 
+const cipher = testCipher();
 const CHAT = "100000000000009@g.us";
 const row = (id: string, ts: number, text = id) => ({ id, ts, raw: { id, timestamp: ts, text } });
 
@@ -17,14 +24,14 @@ describe("sqlite message store", () => {
     for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
   });
 
-  const memory = () => createSqliteMessageStore(openCacheDatabase(":memory:"));
+  const memory = () => createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher());
 
   it("creates DATA_DIR/cache.db readable only by the owner, WAL side files included", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-cache-"));
     dirs.push(dir);
     const file = path.join(dir, "cache.db");
     const db = openCacheDatabase(file);
-    const store = createSqliteMessageStore(db);
+    const store = createSqliteMessageStore(db, cipher);
     store.upsertRaw(CHAT, [row("a", 10)]);
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     for (const side of [`${file}-wal`, `${file}-shm`])
@@ -101,11 +108,11 @@ describe("sqlite message store", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-cache-"));
     dirs.push(dir);
     const file = path.join(dir, "cache.db");
-    const first = createSqliteMessageStore(openCacheDatabase(file));
+    const first = createSqliteMessageStore(openCacheDatabase(file), cipher);
     first.resetForOwner("default|me");
     first.upsertRaw(CHAT, [row("a", 10)]);
     first.close();
-    const second = createSqliteMessageStore(openCacheDatabase(file));
+    const second = createSqliteMessageStore(openCacheDatabase(file), cipher);
     expect(second.getOwner()).toBe("default|me");
     expect(second.countRange(CHAT, {})).toBe(1);
     second.close();
@@ -139,21 +146,21 @@ describe("sqlite message store", () => {
     dirs.push(dir);
     const file = path.join(dir, "cache.db");
     const db = openCacheDatabase(file);
-    const transcripts = createSqliteTranscriptStore(db);
+    const transcripts = createSqliteTranscriptStore(db, cipher);
     expect(transcripts.get(CHAT, "m1")).toBeNull();
     transcripts.put(CHAT, "m1", "hola");
     transcripts.put(CHAT, "m1", "hola otra vez");
     expect(transcripts.get(CHAT, "m1")).toBe("hola otra vez");
     expect(transcripts.get("other@g.us", "m1")).toBeNull();
     db.close();
-    const again = createSqliteTranscriptStore(openCacheDatabase(file));
+    const again = createSqliteTranscriptStore(openCacheDatabase(file), cipher);
     expect(again.get(CHAT, "m1")).toBe("hola otra vez");
   });
 
   it("an owner change wipes transcripts together with messages, from either store", () => {
     const db = openCacheDatabase(":memory:");
-    const messages = createSqliteMessageStore(db);
-    const transcripts = createSqliteTranscriptStore(db);
+    const messages = createSqliteMessageStore(db, cipher);
+    const transcripts = createSqliteTranscriptStore(db, cipher);
     messages.resetForOwner("default|a");
     messages.upsertRaw(CHAT, [row("a", 10)]);
     transcripts.put(CHAT, "a", "hola");
@@ -167,5 +174,48 @@ describe("sqlite message store", () => {
     expect(transcripts.get(CHAT, "a")).toBeNull();
     expect(messages.countRange(CHAT, {})).toBe(0);
     expect(messages.getOwner()).toBe("default|c");
+  });
+  it('raw column on disk starts with "v1." and does not contain the message text', () => {
+    const db = openCacheDatabase(":memory:");
+    createSqliteMessageStore(db, cipher).upsertRaw(CHAT, [row("a", 10, "secret plans")]);
+    const { raw } = db.prepare("SELECT raw FROM messages").get() as { raw: string };
+    expect(raw.startsWith("v1.")).toBe(true);
+    expect(raw).not.toContain("secret");
+  });
+
+  it("a store with another tenant's cipher cannot read rows", () => {
+    const db = openCacheDatabase(":memory:");
+    createSqliteMessageStore(db, cipher).upsertRaw(CHAT, [row("a", 10)]);
+    const other = createSqliteMessageStore(db, createTenantCipher(generateDek(), "t2"));
+    expect(() => other.readRange(CHAT, { limit: 10, offset: 0 })).toThrow(DecryptionError);
+  });
+
+  it("a legacy plaintext row is still readable", () => {
+    const db = openCacheDatabase(":memory:");
+    db.prepare("INSERT INTO messages (chat_id, id, ts, raw) VALUES (?, ?, ?, ?)").run(
+      CHAT,
+      "old",
+      5,
+      JSON.stringify({ id: "old", text: "legacy" }),
+    );
+    expect(createSqliteMessageStore(db, cipher).readRange(CHAT, { limit: 10, offset: 0 })).toEqual([
+      { id: "old", text: "legacy" },
+    ]);
+  });
+
+  it("transcript text on disk is sealed, bound to its tenant, and legacy plaintext still reads", () => {
+    const db = openCacheDatabase(":memory:");
+    const store = createSqliteTranscriptStore(db, cipher);
+    store.put(CHAT, "m1", "private words");
+    const { text } = db.prepare("SELECT text FROM transcripts").get() as { text: string };
+    expect(text.startsWith("v1.")).toBe(true);
+    expect(text).not.toContain("private");
+    expect(store.get(CHAT, "m1")).toBe("private words");
+    const other = createSqliteTranscriptStore(db, createTenantCipher(generateDek(), "t2"));
+    expect(() => other.get(CHAT, "m1")).toThrow(DecryptionError);
+    db.prepare(
+      "INSERT INTO transcripts (chat_id, message_id, text, created_at) VALUES (?, 'old', 'plain', 1)",
+    ).run(CHAT);
+    expect(store.get(CHAT, "old")).toBe("plain");
   });
 });

@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,13 +14,15 @@ import {
   createFsUploadStore,
   mimetypeFromFilename,
 } from "../../../src/infrastructure/uploads/fsUploadStore.js";
+import { testCipher } from "../../fakes/testCipher.js";
 
 const T0 = 1_800_000_000_000;
 let dir: string;
 let clock: number;
+let cipher: ReturnType<typeof testCipher>;
 
 const store = (maxBytes = 100) =>
-  createFsUploadStore({ dir, ttlSeconds: 900, maxBytes, now: () => clock });
+  createFsUploadStore({ dir, ttlSeconds: 900, maxBytes, cipher, now: () => clock });
 
 const stream = (...chunks: string[]) =>
   new ReadableStream<Uint8Array>({
@@ -25,10 +35,41 @@ const stream = (...chunks: string[]) =>
 beforeEach(() => {
   dir = join(mkdtempSync(join(tmpdir(), "uploads-")), "uploads");
   clock = T0;
+  cipher = testCipher();
 });
 afterEach(() => rmSync(join(dir, ".."), { recursive: true, force: true }));
 
 describe("createFsUploadStore", () => {
+  it("the .bin file does not contain the uploaded bytes, and read returns the original", async () => {
+    const s = store();
+    const { id } = s.create({ filename: "a.txt", mimetype: null });
+    await s.write(id, stream("top secret ", "bytes"), null);
+    const onDisk = readFileSync(join(dir, `${id}.bin`));
+    expect(onDisk.includes(Buffer.from("top secret"))).toBe(false);
+    expect(new TextDecoder().decode((await s.read(id))?.data)).toBe("top secret bytes");
+    expect(readdirSync(dir).some((f) => f.endsWith(".part"))).toBe(false);
+  });
+
+  it("a tampered .bin reads as null", async () => {
+    const s = store();
+    const { id } = s.create({ filename: "a.txt", mimetype: null });
+    await s.write(id, stream("payload"), null);
+    const file = join(dir, `${id}.bin`);
+    const bytes = readFileSync(file);
+    bytes[bytes.length - 20] = (bytes[bytes.length - 20] ?? 0) ^ 0xff;
+    writeFileSync(file, bytes);
+    expect(await s.read(id)).toBeNull();
+  });
+
+  it("too_large counts plaintext bytes: exactly maxBytes passes, one more fails", async () => {
+    const s = store(4);
+    const a = s.create({ filename: "a.bin", mimetype: null });
+    expect(await s.write(a.id, stream("abcd"), null)).toBe("ok");
+    const b = s.create({ filename: "b.bin", mimetype: null });
+    expect(await s.write(b.id, stream("abcde"), null)).toBe("too_large");
+    expect(existsSync(join(dir, `${b.id}.part`))).toBe(false);
+  });
+
   it("creates a pending slot with a private metadata file", () => {
     const slot = store().create({ filename: "Cotización Ñandú 🎉.pdf", mimetype: null });
     expect(slot.id).toMatch(/^[A-Za-z0-9_-]{32}$/);

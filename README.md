@@ -149,12 +149,14 @@ Admin tools, listed only for the admin (members never see them):
 
 Every admin tool call is logged with the tool, the target tenant and the outcome, never secrets.
 
-**Encryption.** Each tenant has its own random data key, stored wrapped by `MASTER_KEY` in `auth.db`. Message bodies, transcripts and uploaded files are encrypted with it (AES-256-GCM) in `DATA_DIR/tenants/<id>/`. Chat ids, message ids and timestamps stay in plaintext (indexes and sync). Deleting a tenant deletes its key, so leftover copies (backups) are unreadable. This protects tenant content against theft of the data volume, backups, or a leaked `cache.db`. It does **not** protect against the server operator, who holds the master key and the WAHA API key, and whose WAHA instance stores each WhatsApp session. The invite page tells friends this in one sentence.
+**Encryption.** Each tenant has its own random data key, stored wrapped by `MASTER_KEY` in `auth.db`. Message bodies, transcripts and uploaded files are encrypted with it (AES-256-GCM) in `DATA_DIR/tenants/<id>/`. Chat ids, message ids and timestamps stay in plaintext (indexes and sync). Deleting a tenant deletes its key from `auth.db`, so leftover copies of its files are unreadable without `MASTER_KEY` and an older copy of `auth.db`: a backup that holds both `auth.db` and `MASTER_KEY` can still decrypt everything in it. This protects tenant content against theft of the data volume, of backups kept apart from `MASTER_KEY`, or of a leaked `cache.db`. It does **not** protect against the server operator, who holds the master key and the WAHA API key, and whose WAHA instance stores each WhatsApp session. The invite page tells friends this in one sentence.
 
 **Rotating `MASTER_KEY`.** Start once with the new key in `MASTER_KEY` and the old one in `MASTER_KEY_PREVIOUS`: every tenant key is rewrapped under the new one. Then remove `MASTER_KEY_PREVIOUS`. If `MASTER_KEY` opens no stored key, the server refuses to start with `MASTER_KEY does not match the stored tenant keys.` and changes nothing.
 
 **Operational requirements:**
 
+- Set `WHATSAPP_DEFAULT_ENGINE=GOWS` on the WAHA container: tenant sessions are created without an engine, so WAHA uses its default, and only GOWS is supported.
+- A tenant whose WhatsApp session is `STOPPED` or `FAILED` (shown by `list_tenants`) cannot fix it from `<base>/pair`, which only asks them to contact you. Restart the session in the WAHA dashboard or with `POST /api/sessions/<session>/start` on the WAHA API; tenant sessions are named `t_` + 10 characters, tenant #1 uses `WAHA_SESSION`.
 - Take WAHA off its public domain: waha-mcp reaches it over the internal network (EasyPanel's project network), and only waha-mcp has a public URL. WAHA holds every tenant's WhatsApp session.
 - Keep `MASTER_KEY` only in the deployment's environment, with an offline backup. A lost key loses the cached data of every tenant (WhatsApp itself is not affected; the cache rebuilds from WAHA).
 - Transcription uses the single `TRANSCRIPTION_API_KEY`, so every tenant's voice notes are billed to the admin. It stays one global switch.
@@ -162,7 +164,7 @@ Every admin tool call is logged with the tool, the target tenant and the outcome
 
 ### Upgrading from 0.3.0
 
-Set `MASTER_KEY`, `ADMIN_USERNAME` and `ADMIN_PASSWORD`, then start 0.4.0 on the same `DATA_DIR`. The first start, once and resumably:
+Stop the 0.3.0 container first: two servers must never run on the same `DATA_DIR`. Then set `MASTER_KEY`, `ADMIN_USERNAME` and `ADMIN_PASSWORD` and start 0.4.0 on that `DATA_DIR`. The first start, once and resumably:
 
 - creates tenant #1 for `WAHA_SESSION` with your admin user;
 - moves `DATA_DIR/cache.db` to `DATA_DIR/tenants/<id>/cache.db` and encrypts its messages and transcripts in place;
@@ -317,7 +319,7 @@ To sign out everywhere, open `<base>/logout` and log in: it revokes every client
 - The API key and WAHA URL are never logged or returned in errors.
 - Passwords are hashed with scrypt and a per-user salt; invite and reset links are single use and stored only as hashes.
 - `MASTER_KEY`, data keys, passwords and link tokens are never logged, stored in plaintext or returned in errors. See [Multi-tenant](#multi-tenant) for what the encryption does and does not protect against.
-- Rotating `WAHA_API_KEY` revokes every issued token at the next start: only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
+- Rotating `WAHA_API_KEY` signs every user out at the next start (every OAuth client, code and token is revoked; users log in again with their username and password): only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
 - The message cache is a copy of the conversations you read: see [Message cache](#message-cache).
 - Transcription is off by default; when on, voice notes go to the configured provider: see [Voice-note transcription](#voice-note-transcription-optional). `TRANSCRIPTION_API_KEY` is never logged or returned; provider errors are reported with fixed messages.
 - At most 50 OAuth clients can wait unbound (registered, but nobody has logged in through them yet), all users together; clients bound to a user do not count. Unbound registrations are pruned after 1 hour, and bound clients older than 24 h with no live token after 24 hours, whenever a new client registers.

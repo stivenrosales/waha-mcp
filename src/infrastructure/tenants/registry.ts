@@ -5,9 +5,16 @@ import type { Logger } from "../mcp/defineTool.js";
 import { buildTenantRuntime, type TenantRuntime } from "./runtime.js";
 
 export interface TenantRegistry {
-  /** Null when the tenant does not exist or is not active. Caller must call release(). */
+  /**
+   * Null when the tenant does not exist or is not active. Caller must call release().
+   * A runtime build that throws (e.g. disk errors) propagates and registers nothing.
+   */
   acquire(tenantId: string): { runtime: TenantRuntime; release(): void } | null;
   evict(tenantId: string): void;
+  /**
+   * Shutdown only: closes every live runtime at once, including runtimes still held by
+   * an unreleased acquire (their later `release()` is a no-op).
+   */
   closeAll(): void;
 }
 

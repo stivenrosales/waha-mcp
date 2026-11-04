@@ -135,6 +135,25 @@ describe("WahaHttpGateway", () => {
     );
   });
 
+  it("a 422 whose body stalls on a media download becomes WahaUnavailableError", async () => {
+    let cancelled = false;
+    const stalled = new ReadableStream<Uint8Array>({
+      start: () => {}, // never enqueues, never closes
+      cancel: () => {
+        cancelled = true;
+      },
+    });
+    const { fn } = fakeFetch(
+      () => new Response(stalled, { status: 422, headers: { "content-type": "application/json" } }),
+    );
+    const err = await make(fn, { timeoutMs: 20 })
+      .openMedia("/api/files/x.jpg")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(WahaUnavailableError);
+    expect(err).not.toBeInstanceOf(WhatsAppDisconnectedError);
+    expect(cancelled).toBe(true);
+  });
+
   it("error messages never contain apiKey or baseUrl", async () => {
     const cases: Array<typeof fetch> = [
       fakeFetch(() => new Response("x", { status: 401 })).fn,

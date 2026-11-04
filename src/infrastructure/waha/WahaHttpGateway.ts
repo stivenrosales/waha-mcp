@@ -18,6 +18,8 @@ export interface WahaHttpGatewayOptions {
 // Listing ~260 groups was measured at ~5 s on GOWS, so keep generous headroom.
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MEDIA_PATH_PREFIX = "/api/files/";
+/** Upper bound for reading a 422 error body (it is a small JSON object). */
+const ERROR_BODY_TIMEOUT_MS = 5_000;
 
 /**
  * Read-only WAHA client: GET requests only. Errors are mapped to domain errors
@@ -70,6 +72,43 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
   }
 
   /**
+   * Reads a (small) JSON error body within `ERROR_BODY_TIMEOUT_MS` (or `timeoutMs` if shorter):
+   * media requests no longer have a timer once headers arrive, so a stalled body would hang.
+   * Null when the body is not JSON; a stall cancels the body and is "unavailable".
+   */
+  async function readErrorBody(res: Response): Promise<unknown> {
+    const reader = res.body?.getReader();
+    if (!reader) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stalled = new Promise<"stalled">((resolve) => {
+      timer = setTimeout(() => resolve("stalled"), Math.min(timeoutMs, ERROR_BODY_TIMEOUT_MS));
+      timer.unref?.();
+    });
+    const chunks: Uint8Array[] = [];
+    try {
+      for (;;) {
+        const next = await Promise.race([
+          reader.read().catch(() => ({ done: true }) as const),
+          stalled,
+        ]);
+        if (next === "stalled") {
+          await reader.cancel().catch(() => {});
+          throw new WahaUnavailableError("WAHA did not finish its error response.");
+        }
+        if (next.done) break;
+        chunks.push(next.value);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    try {
+      return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Maps non-2xx statuses (reading the body only for 422, to spot "session not WORKING";
    * other error bodies are left unread). 404/410 are returned to the caller via `allowGone`.
    */
@@ -78,7 +117,7 @@ export function createWahaHttpGateway(opts: WahaHttpGatewayOptions): WahaGateway
     if (res.status === 401 || res.status === 403) throw new WahaAuthError();
     if (res.status === 404) throw new WahaNotFoundError(what);
     if (res.status === 422) {
-      const body: unknown = await res.json().catch(() => null);
+      const body = await readErrorBody(res);
       if (isSessionNotWorking(res.status, body)) throw new WhatsAppDisconnectedError();
     }
     throw new WahaUnavailableError(`WAHA responded with status ${res.status}.`);

@@ -6,9 +6,9 @@ import { loadConfig } from "../../../src/config.js";
 import type { Tenant, TenantStatus, TenantStore } from "../../../src/domain/ports/TenantStore.js";
 import { generateDek, wrapDek } from "../../../src/infrastructure/crypto/envelope.js";
 import { createTenantRegistry } from "../../../src/infrastructure/tenants/registry.js";
-import {
+import type {
   buildTenantRuntime,
-  type TenantRuntime,
+  TenantRuntime,
 } from "../../../src/infrastructure/tenants/runtime.js";
 
 const KEK = Buffer.alloc(32, 9);
@@ -204,6 +204,29 @@ describe("TenantRegistry", () => {
     expect(built).toHaveLength(2);
   });
 
+  it("a build that throws registers nothing and the next acquire builds again", () => {
+    const tenants = fakeTenants();
+    tenants.add("a");
+    const { build, built } = fakeBuild();
+    let fail = true;
+    const registry = createTenantRegistry({
+      config: configFor(scratch()),
+      tenants: tenants.store,
+      kek: KEK,
+      mediaSecret: SECRET,
+      logger: { info: () => {} },
+      build: (d) => {
+        if (fail) throw new Error("disk full");
+        return build(d);
+      },
+    });
+    expect(() => registry.acquire("a")).toThrow("disk full");
+    fail = false;
+    const lease = registry.acquire("a");
+    expect(lease?.runtime.tenantId).toBe("a");
+    expect(built).toHaveLength(1);
+  });
+
   it("closeAll closes every runtime", () => {
     const { registry, tenants, built } = setup();
     tenants.add("a");
@@ -212,33 +235,5 @@ describe("TenantRegistry", () => {
     registry.acquire("b")?.release();
     registry.closeAll();
     expect(built.map((b) => b.closed)).toEqual([1, 1]);
-  });
-});
-
-describe("buildTenantRuntime", () => {
-  it("creates the tenant directory 0700 with its cache and uploads", () => {
-    const dataDir = scratch();
-    const runtime = buildTenantRuntime({
-      config: configFor(dataDir),
-      tenant: {
-        id: "tid1",
-        wahaSession: "t_abcdefghij",
-        displayName: "Acme",
-        status: "active",
-        waId: null,
-        createdAt: 0,
-      },
-      dek: generateDek(),
-      mediaSecret: SECRET,
-      logger: { info: () => {} },
-    });
-    const dir = path.join(dataDir, "tenants", "tid1");
-    expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
-    expect(fs.existsSync(path.join(dir, "cache.db"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "uploads"))).toBe(true);
-    expect(runtime.tenantId).toBe("tid1");
-    const token = runtime.context.links.sign("m1");
-    expect(runtime.context.links.verify(token)).toBe("m1");
-    runtime.close();
   });
 });

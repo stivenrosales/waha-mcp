@@ -85,8 +85,12 @@ async function main(): Promise<void> {
       : DISABLED_TRANSCRIPTION;
   if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");
   const mediaSecret = loadOrCreateMediaSecret(config.dataDir);
-  const links = createSignedLinks({ secret: mediaSecret, ttlSeconds: config.mediaLinkTtlSeconds });
-  const uploadLinks = createUploadLinks(mediaSecret, config.uploadTtlSeconds);
+  const links = createSignedLinks({
+    secret: mediaSecret,
+    ttlSeconds: config.mediaLinkTtlSeconds,
+    tenantId: "legacy", // interim: replaced in Task 11
+  });
+  const uploadLinks = createUploadLinks(mediaSecret, config.uploadTtlSeconds, "legacy"); // interim: replaced in Task 11
   const uploads = createFsUploadStore({
     dir: join(config.dataDir, "uploads"),
     ttlSeconds: config.uploadTtlSeconds,

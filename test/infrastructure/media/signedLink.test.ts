@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createSignedLinks,
   loadOrCreateMediaSecret,
+  peekLinkTenant,
 } from "../../../src/infrastructure/media/signedLink.js";
 
 const secret = new Uint8Array(32).fill(7);
@@ -12,24 +14,24 @@ const T0 = 1_800_000_000_000;
 
 describe("createSignedLinks", () => {
   it("round-trips the media id", () => {
-    const links = createSignedLinks({ secret, ttlSeconds: 600, now: () => T0 });
+    const links = createSignedLinks({ secret, ttlSeconds: 600, tenantId: "A", now: () => T0 });
     const token = links.sign("bWVkaWEtaWQ");
     expect(token).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
     expect(links.verify(token)).toBe("bWVkaWEtaWQ");
   });
 
   it("issue returns the token and its ISO expiry", () => {
-    const links = createSignedLinks({ secret, ttlSeconds: 600, now: () => T0 });
+    const links = createSignedLinks({ secret, ttlSeconds: 600, tenantId: "A", now: () => T0 });
     const { token, expiresAt } = links.issue("m1");
     expect(links.verify(token)).toBe("m1");
     expect(expiresAt).toBe(new Date(T0 + 600_000).toISOString());
   });
 
   it("rejects tampered tokens", () => {
-    const links = createSignedLinks({ secret, ttlSeconds: 600, now: () => T0 });
+    const links = createSignedLinks({ secret, ttlSeconds: 600, tenantId: "A", now: () => T0 });
     const token = links.sign("m1");
     const [payload, sig] = token.split(".") as [string, string];
-    const forged = Buffer.from(JSON.stringify({ m: "m2", e: T0 / 1000 + 600 })).toString(
+    const forged = Buffer.from(JSON.stringify({ m: "m2", e: T0 / 1000 + 600, t: "A" })).toString(
       "base64url",
     );
     expect(links.verify(`${forged}.${sig}`)).toBeNull();
@@ -40,6 +42,7 @@ describe("createSignedLinks", () => {
     const other = createSignedLinks({
       secret: new Uint8Array(32).fill(8),
       ttlSeconds: 600,
+      tenantId: "A",
       now: () => T0,
     });
     expect(other.verify(token)).toBeNull();
@@ -47,12 +50,51 @@ describe("createSignedLinks", () => {
 
   it("rejects expired tokens (clock + ttl + 1)", () => {
     let now = T0;
-    const links = createSignedLinks({ secret, ttlSeconds: 600, now: () => now });
+    const links = createSignedLinks({ secret, ttlSeconds: 600, tenantId: "A", now: () => now });
     const token = links.sign("m1");
     now = T0 + 600_000;
     expect(links.verify(token)).toBe("m1");
     now = T0 + 601_000;
     expect(links.verify(token)).toBeNull();
+  });
+});
+
+describe("tenant binding", () => {
+  const mk = (tenantId: string) =>
+    createSignedLinks({ secret, ttlSeconds: 600, tenantId, now: () => T0 });
+
+  it("a link issued for tenant A does not verify with tenant B's links", () => {
+    const token = mk("A").sign("m1");
+    expect(mk("A").verify(token)).toBe("m1");
+    expect(mk("B").verify(token)).toBeNull();
+  });
+
+  it("peekLinkTenant returns A", () => {
+    expect(peekLinkTenant(mk("A").sign("m1"))).toBe("A");
+  });
+
+  it("peekLinkTenant returns null for garbage and tokens without a tenant", () => {
+    const legacy = Buffer.from(JSON.stringify({ m: "m1", e: 1 })).toString("base64url");
+    expect(peekLinkTenant("")).toBeNull();
+    expect(peekLinkTenant("not-a-token")).toBeNull();
+    expect(peekLinkTenant("%%%.%%%")).toBeNull();
+    expect(peekLinkTenant(`${legacy}.sig`)).toBeNull();
+  });
+
+  it("a payload edited to t=B fails verify on B (signature mismatch)", () => {
+    const [payload, sig] = mk("A").sign("m1").split(".") as [string, string];
+    const edited = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    edited.t = "B";
+    const forged = Buffer.from(JSON.stringify(edited)).toString("base64url");
+    expect(mk("B").verify(`${forged}.${sig}`)).toBeNull();
+  });
+
+  it("links without a tenant (issued before this change) do not verify", () => {
+    const payload = Buffer.from(JSON.stringify({ m: "m1", e: T0 / 1000 + 600 })).toString(
+      "base64url",
+    );
+    const sig = createHmac("sha256", secret).update(payload).digest("base64url");
+    expect(mk("A").verify(`${payload}.${sig}`)).toBeNull();
   });
 });
 

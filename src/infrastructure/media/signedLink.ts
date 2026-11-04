@@ -17,6 +17,7 @@ const SECRET_FILE = "media-secret";
 export function createSignedLinks(opts: {
   secret: Uint8Array;
   ttlSeconds: number;
+  tenantId: string;
   now?: () => number;
 }): SignedLinks {
   const now = opts.now ?? Date.now;
@@ -25,7 +26,9 @@ export function createSignedLinks(opts: {
 
   function issue(mediaId: string) {
     const exp = Math.floor(now() / 1000) + opts.ttlSeconds;
-    const payload = Buffer.from(JSON.stringify({ m: mediaId, e: exp })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ m: mediaId, e: exp, t: opts.tenantId })).toString(
+      "base64url",
+    );
     return { token: `${payload}.${mac(payload)}`, expiresAt: new Date(exp * 1000).toISOString() };
   }
 
@@ -50,9 +53,26 @@ export function createSignedLinks(opts: {
         unknown
       >;
       if (typeof o.m !== "string" || typeof o.e !== "number") return null;
+      if (o.t !== opts.tenantId) return null;
       return now() / 1000 > o.e ? null : o.m;
     },
   };
+}
+
+/**
+ * The tenant id claimed by a token, read from the unverified payload. For routing only
+ * (picking which tenant's links to verify with); authentication stays in `verify`.
+ */
+export function peekLinkTenant(token: string): string | null {
+  try {
+    const payload = token.split(".")[0] ?? "";
+    const parsed: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const t = (parsed as Record<string, unknown>).t;
+    return typeof t === "string" && t !== "" ? t : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

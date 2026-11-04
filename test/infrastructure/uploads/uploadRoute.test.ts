@@ -23,7 +23,7 @@ beforeEach(() => {
     maxBytes: MAX,
     cipher: testCipher(),
   });
-  links = createUploadLinks(new Uint8Array(32).fill(3), 900);
+  links = createUploadLinks(new Uint8Array(32).fill(3), 900, "legacy");
   handle = createUploadHandler({ store, links, maxBytes: MAX });
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));

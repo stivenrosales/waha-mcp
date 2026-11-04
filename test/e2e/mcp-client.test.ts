@@ -219,8 +219,13 @@ function setup(
   const links = createSignedLinks({
     secret: new Uint8Array(32).fill(3),
     ttlSeconds: config.mediaLinkTtlSeconds,
+    tenantId: "legacy",
   });
-  const uploadLinks = createUploadLinks(new Uint8Array(32).fill(3), config.uploadTtlSeconds);
+  const uploadLinks = createUploadLinks(
+    new Uint8Array(32).fill(3),
+    config.uploadTtlSeconds,
+    "legacy",
+  );
   const uploads = createFsUploadStore({
     dir: join(scratch(), "uploads"),
     ttlSeconds: config.uploadTtlSeconds,
@@ -1301,7 +1306,11 @@ for (const cache of [false, true])
     it("media links answer 404 for tampered tokens and for files gone from WAHA", async () => {
       const s = setup();
       expect((await s.app.fetch(new Request(`${BASE}/media/not.valid`))).status).toBe(404);
-      const links = createSignedLinks({ secret: new Uint8Array(32).fill(3), ttlSeconds: 60 });
+      const links = createSignedLinks({
+        secret: new Uint8Array(32).fill(3),
+        ttlSeconds: 60,
+        tenantId: "legacy",
+      });
       const client = await connect(s);
       const gone = (await mediaIds(client, GROUP))[1] as string;
       expect((await s.app.fetch(new Request(`${BASE}/media/${links.sign(gone)}`))).status).toBe(

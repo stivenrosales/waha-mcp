@@ -15,7 +15,7 @@ import type { UploadStore } from "../../src/domain/ports/UploadStore.js";
 import { bearerGuard } from "../../src/infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "../../src/infrastructure/auth/oauth.js";
 import { createLoginLimiter } from "../../src/infrastructure/auth/rateLimit.js";
-import { createAuthStore } from "../../src/infrastructure/auth/store.js";
+import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
 import {
   createSqliteMessageStore,
   openCacheDatabase,
@@ -196,7 +196,7 @@ function setup(
     MEDIA_INLINE_MAX_BYTES: String(INLINE_MAX),
     MEDIA_MAX_BYTES: String(MAX_BYTES),
   });
-  const store = createAuthStore(":memory:");
+  const store = createAuthStore(openAuthDatabase(":memory:"));
   const links = createSignedLinks({
     secret: new Uint8Array(32).fill(3),
     ttlSeconds: config.mediaLinkTtlSeconds,

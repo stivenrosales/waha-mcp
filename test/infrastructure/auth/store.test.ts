@@ -3,13 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { createAuthStore } from "../../../src/infrastructure/auth/store.js";
+import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
 
 const T0 = 1_800_000_000_000;
 
 function setup() {
   let t = T0;
-  const store = createAuthStore(":memory:", () => t);
+  const store = createAuthStore(openAuthDatabase(":memory:"), () => t);
   const client = store.registerClient({ redirectUris: ["https://app.example/cb"] });
   return {
     store,
@@ -127,7 +127,7 @@ describe("auth store", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-auth-"));
     dirs.push(dir);
     const file = path.join(dir, "auth.db");
-    const store = createAuthStore(file);
+    const store = createAuthStore(openAuthDatabase(file));
     const { clientId } = store.registerClient({ redirectUris: ["https://app.example/cb"] });
     const t = store.issueTokens(clientId, "mcp");
     const code = store.saveCode(codeInput(clientId));
@@ -146,10 +146,10 @@ describe("auth store", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-auth-"));
     dirs.push(dir);
     const file = path.join(dir, "auth.db");
-    const a = createAuthStore(file);
+    const a = createAuthStore(openAuthDatabase(file));
     const { clientId } = a.registerClient({ redirectUris: ["https://app.example/cb"] });
     const t = a.issueTokens(clientId, "mcp");
-    const b = createAuthStore(file);
+    const b = createAuthStore(openAuthDatabase(file));
     expect(b.getClient(clientId)).not.toBeNull();
     expect(b.verifyAccessToken(t.accessToken)).toEqual({ clientId, scope: "mcp" });
   });
@@ -158,18 +158,18 @@ describe("auth store", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-auth-"));
     dirs.push(dir);
     const file = path.join(dir, "auth.db");
-    const a = createAuthStore(file);
+    const a = createAuthStore(openAuthDatabase(file));
     expect(a.syncApiKey("key-one")).toBe(false);
     const { clientId } = a.registerClient({ redirectUris: ["https://app.example/cb"] });
     const t = a.issueTokens(clientId, "mcp");
     a.close();
 
-    const same = createAuthStore(file);
+    const same = createAuthStore(openAuthDatabase(file));
     expect(same.syncApiKey("key-one")).toBe(false);
     expect(same.verifyAccessToken(t.accessToken)).not.toBeNull();
     same.close();
 
-    const rotated = createAuthStore(file);
+    const rotated = createAuthStore(openAuthDatabase(file));
     expect(rotated.syncApiKey("key-two")).toBe(true);
     expect(rotated.verifyAccessToken(t.accessToken)).toBeNull();
     expect(rotated.getClient(clientId)).toBeNull();
@@ -185,7 +185,7 @@ describe("auth store", () => {
 
   it("prunes only old clients that hold no live token", () => {
     let t = T0;
-    const store = createAuthStore(":memory:", () => t);
+    const store = createAuthStore(openAuthDatabase(":memory:"), () => t);
     const uris = ["https://app.example/cb"];
     const idle = store.registerClient({ redirectUris: uris }).clientId;
     const active = store.registerClient({ redirectUris: uris }).clientId;
@@ -204,7 +204,7 @@ describe("auth store", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waha-auth-"));
     dirs.push(dir);
     const file = path.join(dir, "auth.db");
-    const store = createAuthStore(file);
+    const store = createAuthStore(openAuthDatabase(file));
     store.registerClient({ redirectUris: ["https://app.example/cb"] });
     for (const f of [file, `${file}-wal`, `${file}-shm`])
       if (fs.existsSync(f)) expect(fs.statSync(f).mode & 0o777).toBe(0o600);

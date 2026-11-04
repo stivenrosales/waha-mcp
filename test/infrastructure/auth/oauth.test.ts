@@ -7,7 +7,7 @@ import {
   createLoginLimiter,
   normalizeClientKey,
 } from "../../../src/infrastructure/auth/rateLimit.js";
-import { createAuthStore } from "../../../src/infrastructure/auth/store.js";
+import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
 
 const BASE = "https://mcp.example.com";
 const KEY = "waha-secret-key-0123456789";
@@ -17,7 +17,7 @@ const PRM_URL = `${BASE}/.well-known/oauth-protected-resource`;
 type Auth = { clientId: string; scope: string };
 
 function setup(opts: { now?: () => number; storeNow?: () => number } = {}) {
-  const store = createAuthStore(":memory:", opts.storeNow);
+  const store = createAuthStore(openAuthDatabase(":memory:"), opts.storeNow);
   const limiter = createLoginLimiter({ now: opts.now });
   const app = new Hono<{ Variables: { auth: Auth } }>();
   app.route("/", createOAuthRoutes({ store, wahaApiKey: KEY, publicBaseUrl: BASE, limiter }));

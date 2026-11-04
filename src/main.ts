@@ -7,7 +7,7 @@ import { loadConfig } from "./config.js";
 import { bearerGuard } from "./infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "./infrastructure/auth/oauth.js";
 import { createLoginLimiter } from "./infrastructure/auth/rateLimit.js";
-import { createAuthStore } from "./infrastructure/auth/store.js";
+import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import {
   createSqliteMessageStore,
   openCacheDatabase,
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     session: config.wahaSession,
   });
   mkdirSync(config.dataDir, { recursive: true });
-  const store = createAuthStore(join(config.dataDir, "auth.db"));
+  const store = createAuthStore(openAuthDatabase(join(config.dataDir, "auth.db")));
   // The message cache is a copy of conversations at rest; logout does not clear it. Voice-note
   // transcripts live in the same file (even with the message cache off) and share its owner.
   const cacheDb =

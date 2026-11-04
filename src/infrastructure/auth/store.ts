@@ -79,19 +79,25 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 `;
 
-/**
- * @param now clock in epoch milliseconds (injectable for tests).
- */
-export function createAuthStore(dbPath: string, now: () => number = Date.now): AuthStore {
+/** Opens the auth database (WAL, busy timeout) and keeps its files private to the owner. */
+export function openAuthDatabase(dbPath: string): DatabaseSync {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
-  db.exec(SCHEMA);
   if (dbPath !== ":memory:") {
-    // The database holds token hashes: keep it, and its WAL side files, private to the owner.
+    // The database holds token and password hashes: keep it, and its WAL side files, private.
     for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`])
       if (existsSync(file)) chmodSync(file, 0o600);
   }
+  return db;
+}
+
+/**
+ * @param db handle from {@link openAuthDatabase}; the store owns it and closes it on `close()`.
+ * @param now clock in epoch milliseconds (injectable for tests).
+ */
+export function createAuthStore(db: DatabaseSync, now: () => number = Date.now): AuthStore {
+  db.exec(SCHEMA);
 
   const transaction = <T>(fn: () => T): T => {
     db.exec("BEGIN IMMEDIATE");

@@ -34,8 +34,11 @@ export interface AuthStore {
    * differs from the one seen before, every client, code and token is revoked and `true` is returned.
    */
   syncApiKey(apiKey: string): boolean;
-  /** Returns the raw code. Valid for 60 s. */
-  saveCode(c: AuthorizationCodeData): string;
+  /**
+   * Returns the raw code (valid for 60 s). A client is bound to the first user that obtains a code
+   * on it; a code for another user is refused with `null` and nothing is stored.
+   */
+  saveCode(c: AuthorizationCodeData): string | null;
   /** Single use: the code is deleted atomically as it is read. */
   consumeCode(code: string): AuthorizationCodeData | null;
   issueTokens(clientId: string, scope: string, userId: string): IssuedTokens;
@@ -210,23 +213,31 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
     },
 
     saveCode(c) {
-      purgeExpired();
-      const code = randomToken();
-      db.prepare(
-        `INSERT INTO codes (hash, client_id, redirect_uri, code_challenge, scope, resource, user_id, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        sha256(code),
-        c.clientId,
-        c.redirectUri,
-        c.codeChallenge,
-        c.scope,
-        c.resource,
-        c.userId,
-        now() + CODE_TTL_MS,
-      );
-      db.prepare("UPDATE clients SET user_id = ? WHERE client_id = ?").run(c.userId, c.clientId);
-      return code;
+      return transaction(() => {
+        purgeExpired();
+        // First user wins: a client shared by two users would let revokeUser(B) remove A's client.
+        const bound = db
+          .prepare(
+            "UPDATE clients SET user_id = ? WHERE client_id = ? AND (user_id IS NULL OR user_id = ?)",
+          )
+          .run(c.userId, c.clientId, c.userId);
+        if (Number(bound.changes) === 0) return null;
+        const code = randomToken();
+        db.prepare(
+          `INSERT INTO codes (hash, client_id, redirect_uri, code_challenge, scope, resource, user_id, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          sha256(code),
+          c.clientId,
+          c.redirectUri,
+          c.codeChallenge,
+          c.scope,
+          c.resource,
+          c.userId,
+          now() + CODE_TTL_MS,
+        );
+        return code;
+      });
     },
 
     consumeCode(code) {

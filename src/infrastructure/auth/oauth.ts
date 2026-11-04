@@ -303,6 +303,14 @@ export function createOAuthRoutes(deps: {
       scope: GRANTED_SCOPE,
       resource: request.resource,
     });
+    if (code === null) {
+      return renderLogin(
+        c,
+        request,
+        403,
+        "This client is linked to another account. Reconnect from your MCP client.",
+      );
+    }
     const url = new URL(request.redirectUri);
     url.searchParams.set("code", code);
     if (request.state !== undefined) url.searchParams.set("state", request.state);

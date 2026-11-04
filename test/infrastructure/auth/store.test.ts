@@ -29,6 +29,13 @@ const codeInput = (clientId: string) => ({
   userId: "u1",
 });
 
+/** saveCode for a client that is free or already bound to the same user. */
+function save(store: ReturnType<typeof createAuthStore>, input: ReturnType<typeof codeInput>) {
+  const code = store.saveCode(input);
+  if (code === null) throw new Error("client bound to another user");
+  return code;
+}
+
 describe("auth store", () => {
   const dirs: string[] = [];
   afterEach(() => {
@@ -55,17 +62,17 @@ describe("auth store", () => {
 
   it("code is single use", () => {
     const { store, clientId } = setup();
-    const code = store.saveCode(codeInput(clientId));
+    const code = save(store, codeInput(clientId));
     expect(store.consumeCode(code)).toEqual(codeInput(clientId));
     expect(store.consumeCode(code)).toBeNull();
   });
 
   it("code expires after 60 s", () => {
     const { store, clientId, advance } = setup();
-    const fresh = store.saveCode(codeInput(clientId));
+    const fresh = save(store, codeInput(clientId));
     advance(59);
     expect(store.consumeCode(fresh)).not.toBeNull();
-    const stale = store.saveCode(codeInput(clientId));
+    const stale = save(store, codeInput(clientId));
     advance(60);
     expect(store.consumeCode(stale)).toBeNull();
   });
@@ -115,8 +122,8 @@ describe("auth store", () => {
     const other = store.registerClient({ redirectUris: ["https://other.example/cb"] });
     const a = store.issueTokens(clientId, "mcp", "u1");
     const b = store.issueTokens(other.clientId, "mcp", "u2");
-    const code = store.saveCode({ ...codeInput(clientId), userId: "u1" });
-    const otherCode = store.saveCode({ ...codeInput(other.clientId), userId: "u2" });
+    const code = save(store, { ...codeInput(clientId), userId: "u1" });
+    const otherCode = save(store, { ...codeInput(other.clientId), userId: "u2" });
     store.revokeUser("u1");
     expect(store.verifyAccessToken(a.accessToken)).toBeNull();
     expect(store.rotateRefreshToken(a.refreshToken, clientId)).toBeNull();
@@ -125,6 +132,21 @@ describe("auth store", () => {
     expect(store.verifyAccessToken(b.accessToken)?.userId).toBe("u2");
     expect(store.getClient(other.clientId)).not.toBeNull();
     expect(store.consumeCode(otherCode)).not.toBeNull();
+  });
+
+  it("binds a client to its first user: revokeUser(B) leaves A intact and B gets no code", () => {
+    const { store, clientId } = setup();
+    const codeA = store.saveCode({ ...codeInput(clientId), userId: "uA" });
+    expect(codeA).not.toBeNull();
+    const tokensA = store.issueTokens(clientId, "mcp", "uA");
+    expect(store.saveCode({ ...codeInput(clientId), userId: "uB" })).toBeNull();
+    // The same user may log in again on its own client.
+    expect(store.saveCode({ ...codeInput(clientId), userId: "uA" })).not.toBeNull();
+    store.revokeUser("uB");
+    expect(store.getClient(clientId)).not.toBeNull();
+    expect(store.verifyAccessToken(tokensA.accessToken)?.userId).toBe("uA");
+    expect(store.consumeCode(codeA as string)?.userId).toBe("uA");
+    expect(store.rotateRefreshToken(tokensA.refreshToken, clientId)).not.toBeNull();
   });
 
   it("drops legacy rows without user_id when migrating an existing auth.db", () => {
@@ -170,7 +192,7 @@ describe("auth store", () => {
   it("revokeAll invalidates every token and client", () => {
     const { store, clientId } = setup();
     const t = store.issueTokens(clientId, "mcp", "u1");
-    const code = store.saveCode(codeInput(clientId));
+    const code = save(store, codeInput(clientId));
     store.revokeAll();
     expect(store.verifyAccessToken(t.accessToken)).toBeNull();
     expect(store.rotateRefreshToken(t.refreshToken, clientId)).toBeNull();
@@ -185,7 +207,7 @@ describe("auth store", () => {
     const store = createAuthStore(openAuthDatabase(file));
     const { clientId } = store.registerClient({ redirectUris: ["https://app.example/cb"] });
     const t = store.issueTokens(clientId, "mcp", "u1");
-    const code = store.saveCode(codeInput(clientId));
+    const code = save(store, codeInput(clientId));
     const db = new DatabaseSync(file);
     const dump = JSON.stringify([
       ...db.prepare("SELECT * FROM tokens").all(),

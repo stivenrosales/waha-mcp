@@ -164,7 +164,9 @@ Every admin tool call is logged with the tool, the target tenant and the outcome
 
 ### Upgrading from 0.3.0
 
-Stop the 0.3.0 container first: two servers must never run on the same `DATA_DIR`. Then set `MASTER_KEY`, `ADMIN_USERNAME` and `ADMIN_PASSWORD` and start 0.4.0 on that `DATA_DIR`. The first start, once and resumably:
+Stop the 0.3.0 container first: two servers must never run on the same `DATA_DIR`. Then set `MASTER_KEY`, `ADMIN_USERNAME` and `ADMIN_PASSWORD` and start 0.4.0 on that `DATA_DIR`.
+
+`sh scripts/generate-secrets.sh <admin-username>` generates all three into `~/waha-mcp-secrets.env` (mode 600) without printing them, ready to paste into the deployment's environment. The first start, once and resumably:
 
 - creates tenant #1 for `WAHA_SESSION` with your admin user;
 - moves `DATA_DIR/cache.db` to `DATA_DIR/tenants/<id>/cache.db` and encrypts its messages and transcripts in place;

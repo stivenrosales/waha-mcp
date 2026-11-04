@@ -52,8 +52,10 @@ flowchart LR
   Client["Client<br/>(Claude / ChatGPT / Gemini CLI)"] -->|"OAuth 2.1 + MCP /mcp"| MCP["waha-mcp"]
   MCP -->|"read (GET) + send (POST)"| WAHA["WAHA (GOWS)"]
   WAHA --> WA["WhatsApp"]
-  MCP -.-> Data[("/data<br/>auth.db, cache.db, media secret, uploads")]
+  MCP -.-> Data[("/data<br/>auth.db, media secret,<br/>tenants/&lt;id&gt;/cache.db + uploads")]
 ```
+
+One server serves several WhatsApp accounts ("tenants"). The admin (you) owns tenant #1, the `WAHA_SESSION` account, and invites friends from the admin tools; each friend signs up with a username and password, pairs their own WhatsApp with a QR code, and only ever sees their own chats. See [Multi-tenant](#multi-tenant).
 
 ## Requirements
 
@@ -63,8 +65,14 @@ flowchart LR
 
 ## Quick start
 
-1. **Have WAHA running** with the GOWS engine and a working session.
-2. **Run the server** (replace the values):
+1. **Have WAHA running** with the GOWS engine and a working session (WAHA Plus, or WAHA 2026.6.1+, to create one session per tenant).
+2. **Generate a master key** and keep an offline copy of it (losing it loses every tenant's cached data):
+
+   ```bash
+   openssl rand -base64 32
+   ```
+
+3. **Run the server** (replace the values):
 
    ```bash
    docker build -t waha-mcp .
@@ -72,12 +80,15 @@ flowchart LR
      -e WAHA_API_URL=http://<waha-host>:3000 \
      -e WAHA_API_KEY=<your-waha-api-key> \
      -e PUBLIC_BASE_URL=https://<your-public-domain> \
+     -e MASTER_KEY=<output-of-openssl-rand> \
+     -e ADMIN_USERNAME=<your-username> \
+     -e ADMIN_PASSWORD=<at-least-12-characters> \
      -v waha-mcp-data:/data \
      waha-mcp
    ```
 
-3. **Put it behind HTTPS** at `PUBLIC_BASE_URL` (a reverse proxy such as Traefik) and check `<base>/health`.
-4. **Add `<base>/mcp` to your client** and log in with your WAHA API key. See [Connect your client](#connect-your-client).
+4. **Put it behind HTTPS** at `PUBLIC_BASE_URL` (a reverse proxy such as Traefik) and check `<base>/health`.
+5. **Add `<base>/mcp` to your client** and log in with `ADMIN_USERNAME` and `ADMIN_PASSWORD`. See [Connect your client](#connect-your-client).
 
 ## Tools
 
@@ -115,14 +126,59 @@ flowchart LR
 | `pending-to-todoist` | Turns pending replies into to-do tasks. |
 | `group-summary`      | Summarizes a group.                     |
 
+## Multi-tenant
+
+Each tenant is one WhatsApp account with one user. Tenant #1 is the admin's: it uses `WAHA_SESSION` and is created on first start from `ADMIN_USERNAME` and `ADMIN_PASSWORD`. It cannot be revoked, restored or deleted.
+
+1. The admin asks the model to `create_invite` for a friend and sends them the link (single use, valid 72 hours).
+2. The friend opens it, picks a username and a password (12 characters or more), then scans the QR code at `<base>/pair` with WhatsApp. Each tenant gets its own WAHA session (`t_` + 10 random characters); a WhatsApp number can belong to one tenant only.
+3. The friend adds `<base>/mcp` to their client and logs in with that username and password. Every tool works on their own account only: there is no session or tenant argument.
+
+If WhatsApp disconnects later, tools say so and point to `<base>/pair` to scan again. A forgotten password is reset with `reset_password` (a single-use link); the admin's own password can also be reset by starting once with `ADMIN_PASSWORD_RESET=1` and the new `ADMIN_PASSWORD`.
+
+Admin tools, listed only for the admin (members never see them):
+
+| Tool             | What it does                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `list_tenants`   | Every tenant with its status, WhatsApp connection state, creation date and last login. No message data. |
+| `create_invite`  | New tenant + invite link; with `tenant_id`, a new link for a tenant that has not signed up yet.         |
+| `reset_password` | Single-use password reset link (72 hours) for a tenant's user.                                          |
+| `revoke_tenant`  | Blocks a tenant: its tokens stop working at once and its links answer 404. Data is kept.                |
+| `restore_tenant` | Undoes `revoke_tenant`.                                                                                 |
+| `delete_tenant`  | Permanent: account, encryption key, cache and WAHA session. Needs the exact display name.               |
+
+Every admin tool call is logged with the tool, the target tenant and the outcome, never secrets.
+
+**Encryption.** Each tenant has its own random data key, stored wrapped by `MASTER_KEY` in `auth.db`. Message bodies, transcripts and uploaded files are encrypted with it (AES-256-GCM) in `DATA_DIR/tenants/<id>/`. Chat ids, message ids and timestamps stay in plaintext (indexes and sync). Deleting a tenant deletes its key, so leftover copies (backups) are unreadable. This protects tenant content against theft of the data volume, backups, or a leaked `cache.db`. It does **not** protect against the server operator, who holds the master key and the WAHA API key, and whose WAHA instance stores each WhatsApp session. The invite page tells friends this in one sentence.
+
+**Rotating `MASTER_KEY`.** Start once with the new key in `MASTER_KEY` and the old one in `MASTER_KEY_PREVIOUS`: every tenant key is rewrapped under the new one. Then remove `MASTER_KEY_PREVIOUS`. If `MASTER_KEY` opens no stored key, the server refuses to start with `MASTER_KEY does not match the stored tenant keys.` and changes nothing.
+
+**Operational requirements:**
+
+- Take WAHA off its public domain: waha-mcp reaches it over the internal network (EasyPanel's project network), and only waha-mcp has a public URL. WAHA holds every tenant's WhatsApp session.
+- Keep `MASTER_KEY` only in the deployment's environment, with an offline backup. A lost key loses the cached data of every tenant (WhatsApp itself is not affected; the cache rebuilds from WAHA).
+- Transcription uses the single `TRANSCRIPTION_API_KEY`, so every tenant's voice notes are billed to the admin. It stays one global switch.
+- `PUBLIC_BASE_URL` must be an origin without a path (`https://mcp.example.com`, not `https://example.com/waha`): the login, invite, reset and pairing pages are served at the root.
+
+### Upgrading from 0.3.0
+
+Set `MASTER_KEY`, `ADMIN_USERNAME` and `ADMIN_PASSWORD`, then start 0.4.0 on the same `DATA_DIR`. The first start, once and resumably:
+
+- creates tenant #1 for `WAHA_SESSION` with your admin user;
+- moves `DATA_DIR/cache.db` to `DATA_DIR/tenants/<id>/cache.db` and encrypts its messages and transcripts in place;
+- deletes `DATA_DIR/uploads` (pending 0.3.0 uploads, which expire within 15 minutes anyway);
+- revokes every existing OAuth client and token.
+
+Your clients are signed out once: log in again with `ADMIN_USERNAME` and `ADMIN_PASSWORD` (the WAHA API key is no longer the login). Back up `DATA_DIR` before upgrading; there is no way back to 0.3.0 once the cache is encrypted.
+
 ## Message cache
 
-Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the messages it reads in `DATA_DIR/cache.db`, so repeated questions about a chat do not re-read its whole history from WAHA. A chat is cached the first time a tool reads it. Later reads ask WAHA only for messages newer than (newest cached message minus `CACHE_REFRESH_HOURS`), and a chat read less than 60 s ago is answered without calling WAHA. `CACHE_MAX_AGE_DAYS` prunes old messages (`0` keeps them forever). Media files are never cached. Set `CACHE_ENABLED=false` to turn it off.
+Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the messages it reads in `DATA_DIR/tenants/<id>/cache.db` (one per tenant, encrypted), so repeated questions about a chat do not re-read its whole history from WAHA. A chat is cached the first time a tool reads it. Later reads ask WAHA only for messages newer than (newest cached message minus `CACHE_REFRESH_HOURS`), and a chat read less than 60 s ago is answered without calling WAHA. `CACHE_MAX_AGE_DAYS` prunes old messages (`0` keeps them forever). Media files are never cached. Set `CACHE_ENABLED=false` to turn it off.
 
 Sizing: every message read is kept, so on a busy account `cache.db` grows without limit by default. Set a retention such as `CACHE_MAX_AGE_DAYS=90` there; older messages are simply read from WAHA again when asked for.
 
 > [!WARNING]
-> The cache is a copy of your conversations at rest on the server (`cache.db`, `0600`). It is wiped when the server sees a different WhatsApp account after the next restart (the account is checked once per process, so restart the server after re-linking WAHA to another number), but logout does not clear it: delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Edits and deletions older than the refresh window are not picked up, so a deleted message can stay cached.
+> The cache is a copy of your conversations at rest on the server (`cache.db`, `0600`, message bodies encrypted with the tenant's key). It is wiped when the server sees a different WhatsApp account after the next restart (the account is checked once per process, so restart the server after re-linking WAHA to another number), but logout does not clear it: delete `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Edits and deletions older than the refresh window are not picked up, so a deleted message can stay cached.
 
 ## Voice-note transcription (optional)
 
@@ -173,10 +229,15 @@ All configuration is through environment variables.
 | Variable                     | Required | Default     | Description                                                                 |
 | ---------------------------- | -------- | ----------- | --------------------------------------------------------------------------- |
 | `WAHA_API_URL`               | yes      |             | Base URL of WAHA (internal URL when deployed next to it).                   |
-| `WAHA_API_KEY`               | yes      |             | WAHA API key. Also the OAuth login secret.                                  |
-| `PUBLIC_BASE_URL`            | yes      |             | Public HTTPS URL of this server (`http` only for localhost).                |
-| `WAHA_SESSION`               | no       | `default`   | WAHA session name.                                                          |
-| `DATA_DIR`                   | no       | `/data`     | OAuth state (`auth.db`), message cache (`cache.db`), media secret, uploads. |
+| `WAHA_API_KEY`               | yes      |             | WAHA API key (never shown to users).                                        |
+| `PUBLIC_BASE_URL`            | yes      |             | Public HTTPS origin of this server, no path (`http` only for localhost).    |
+| `MASTER_KEY`                 | yes      |             | 32 bytes in base64 (`openssl rand -base64 32`); wraps every tenant key.     |
+| `MASTER_KEY_PREVIOUS`        | no       |             | Old master key, only for the start that rotates `MASTER_KEY`.               |
+| `ADMIN_USERNAME`             | yes      |             | Admin username, created on first start.                                     |
+| `ADMIN_PASSWORD`             | yes      |             | Admin password (12+ characters); read only to create the admin or reset it. |
+| `ADMIN_PASSWORD_RESET`       | no       | `false`     | `1`/`true`: overwrite the admin's password with `ADMIN_PASSWORD` at start.  |
+| `WAHA_SESSION`               | no       | `default`   | WAHA session of the admin's tenant (tenant #1).                             |
+| `DATA_DIR`                   | no       | `/data`     | `auth.db` (users, tenants, OAuth), media secret, `tenants/<id>/` data.      |
 | `PORT`                       | no       | `3000`      | HTTP port.                                                                  |
 | `TIMEZONE`                   | no       | `UTC`       | IANA time zone for dates and day boundaries (`America/Lima`).               |
 | `STATS_MAX_MESSAGES`         | no       | `5000`      | Per-chat message cap; fan-out tools read up to 100 chats each.              |
@@ -195,7 +256,7 @@ All configuration is through environment variables.
 | `TRANSCRIPTION_MAX_SECONDS`  | no       | `300`       | Longer voice notes are not transcribed automatically.                       |
 | `TRANSCRIPTION_MAX_PER_CALL` | no       | `20`        | New automatic transcriptions per tool call (`0` = only `transcribe_audio`). |
 
-Transcription is off unless `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL` are all set (setting only some of them is a startup error). The server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions` with OpenAI-style multipart (`file`, `model`, `language`), which OpenRouter, OpenAI and Groq accept. When on, voice notes in `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` get a `transcript` (within the limits above; coverage notes report the skipped ones), `search_messages` also matches stored transcripts, and each transcript is stored in `cache.db` so it is never paid twice.
+Transcription is off unless `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL` are all set (setting only some of them is a startup error). The server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions` with OpenAI-style multipart (`file`, `model`, `language`), which OpenRouter, OpenAI and Groq accept. When on, voice notes in `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` get a `transcript` (within the limits above; coverage notes report the skipped ones), `search_messages` also matches stored transcripts, and each transcript is stored in the tenant's `cache.db` so it is never paid twice. One provider key serves every tenant, so all transcription is billed to the admin.
 
 </details>
 
@@ -207,8 +268,8 @@ Transcription is off unless `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and
 <br>
 
 1. Create a service in the **same project as WAHA**, from this repository (Dockerfile build) or from a published image.
-2. Set `WAHA_API_URL` to the internal service URL, `http://<project>_<service>:3000`, so traffic never leaves the project network. Set `WAHA_API_KEY`, `PUBLIC_BASE_URL` (the domain you assign in step 3) and the optional variables above.
-3. Give **only this service** a public HTTPS domain. WAHA stays private.
+2. Set `WAHA_API_URL` to the internal service URL, `http://<project>_<service>:3000`, so traffic never leaves the project network. Set `WAHA_API_KEY`, `PUBLIC_BASE_URL` (the domain you assign in step 3), `MASTER_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` and the optional variables above. Keep an offline copy of `MASTER_KEY`.
+3. Give **only this service** a public HTTPS domain. Remove WAHA's public domain: it stays private.
 4. Mount a volume at `/data`, so logins and media links survive redeploys. If `/data` is a root-owned bind mount, run `chown -R 1000:1000` on it (the container runs as the `node` user).
 5. Check `https://<your-domain>/health`; it answers `{"status":"ok"}`.
 
@@ -223,7 +284,7 @@ The Docker healthcheck probes `/health` on port 3000; if you change `PORT`, adju
 
 <br>
 
-Let `<base>` be your `PUBLIC_BASE_URL`. On the login page, paste your WAHA API key.
+Let `<base>` be your `PUBLIC_BASE_URL`. On the login page, enter your username and password (the admin's are `ADMIN_USERNAME` and `ADMIN_PASSWORD`; friends use the ones they chose on their invite).
 
 - **claude.ai**: Settings > Connectors > add custom connector, URL `<base>/mcp`; complete the OAuth login.
 - **Claude Code**: `claude mcp add --transport http waha <base>/mcp`, then authenticate from `/mcp`.
@@ -240,7 +301,7 @@ Let `<base>` be your `PUBLIC_BASE_URL`. On the login page, paste your WAHA API k
 
   then authenticate with `/mcp auth waha`.
 
-To sign out everywhere, open `<base>/logout` and paste the key: it revokes every client and session.
+To sign out everywhere, open `<base>/logout` and log in: it revokes every client and token of that user (other users are not affected).
 
 </details>
 
@@ -254,13 +315,15 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 - OAuth 2.1 with PKCE (S256). Tokens are opaque random values stored only as hashes.
 - Direct chats are private data. Use a client you trust with them.
 - The API key and WAHA URL are never logged or returned in errors.
+- Passwords are hashed with scrypt and a per-user salt; invite and reset links are single use and stored only as hashes.
+- `MASTER_KEY`, data keys, passwords and link tokens are never logged, stored in plaintext or returned in errors. See [Multi-tenant](#multi-tenant) for what the encryption does and does not protect against.
 - Rotating `WAHA_API_KEY` revokes every issued token at the next start: only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
 - The message cache is a copy of the conversations you read: see [Message cache](#message-cache).
 - Transcription is off by default; when on, voice notes go to the configured provider: see [Voice-note transcription](#voice-note-transcription-optional). `TRANSCRIPTION_API_KEY` is never logged or returned; provider errors are reported with fixed messages.
-- At most 50 OAuth clients can be registered. Clients older than 24 h with no live token are pruned automatically when a new one registers; `<base>/logout` clears them all.
+- At most 50 OAuth clients can be registered (all users together). Clients older than 24 h with no live token are pruned automatically when a new one registers; `<base>/logout` clears the signed-in user's.
 
 > [!WARNING]
-> The login is rate limited per client address (IPv6 grouped by /64) and with a global failure budget. An attacker can therefore lock the owner out temporarily, and logout is also blocked during that window.
+> The login (OAuth, logout, invite, reset and pairing pages share one limiter) is rate limited per client address (IPv6 grouped by /64) and with a global failure budget. An attacker can therefore lock users out temporarily, and logout is also blocked during that window.
 
 > [!WARNING]
 > The client address is the last hop of `X-Forwarded-For`, which is only trustworthy behind a reverse proxy that appends it (Traefik on EasyPanel). Do not expose the server directly to the internet.
@@ -269,10 +332,10 @@ To sign out everywhere, open `<base>/logout` and paste the key: it revokes every
 > Any client you connect can send WhatsApp messages from your number, subject to the approval prompt of that client. Only connect clients you trust, and keep approvals on for the sending tools.
 
 > [!WARNING]
-> Upload links work once, expire after `UPLOAD_TTL_SECONDS`, are capped at `UPLOAD_MAX_BYTES` and never talk to WAHA; until used, anyone holding one can put one file in that slot. Uploaded files are stored with `0600` permissions in `DATA_DIR/uploads` and deleted after sending or expiry.
+> Upload links work once, expire after `UPLOAD_TTL_SECONDS`, are capped at `UPLOAD_MAX_BYTES` and never talk to WAHA; until used, anyone holding one can put one file in that slot. Uploaded files are stored encrypted with `0600` permissions in `DATA_DIR/tenants/<id>/uploads` and deleted after sending or expiry.
 
 > [!WARNING]
-> Signed media links expire after `MEDIA_LINK_TTL_SECONDS` and behave like bearer credentials until then: anyone holding the link can download that file.
+> Signed media links expire after `MEDIA_LINK_TTL_SECONDS` and behave like bearer credentials until then: anyone holding the link can download that file. Links are bound to their tenant: a revoked tenant's links answer 404, the same answer as a forged or unknown link.
 
 </details>
 

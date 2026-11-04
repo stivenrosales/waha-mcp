@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+One server, many WhatsApp accounts: the admin invites friends, each with their own login, WhatsApp session and encrypted data.
+
+### Features
+
+- Multi-tenant: each tenant is one WhatsApp account (its own WAHA session) with one user. Tenant #1 is the admin's (`WAHA_SESSION`); members sign up from an invite link (`/invite/:token`), pair WhatsApp with a QR code at `/pair`, and reset passwords from single-use links (`/reset/:token`). One WhatsApp number belongs to one tenant only.
+- Login with username and password (scrypt) instead of the WAHA API key; `/logout` revokes only the signed-in user's clients and tokens.
+- Admin tools, listed only for the admin: `list_tenants`, `create_invite`, `reset_password`, `revoke_tenant`, `restore_tenant`, `delete_tenant`. Every call is logged (tool, target tenant, outcome).
+- Encryption at rest: message bodies, transcripts and uploads are encrypted (AES-256-GCM) with a per-tenant key wrapped by `MASTER_KEY`, in `DATA_DIR/tenants/<id>/`. `delete_tenant` crypto-shreds the tenant. `MASTER_KEY_PREVIOUS` rewraps every key under a new `MASTER_KEY` at start.
+- Media and upload links are bound to their tenant: a revoked tenant's links, forged links and unknown tenants all answer the same 404.
+
+### Upgrade
+
+- New required variables: `MASTER_KEY` (`openssl rand -base64 32`), `ADMIN_USERNAME`, `ADMIN_PASSWORD`; optional `ADMIN_PASSWORD_RESET` and `MASTER_KEY_PREVIOUS`.
+- The first start migrates a 0.3.0 `DATA_DIR` once (resumable): creates the admin tenant, moves and encrypts `cache.db`, deletes pending uploads, and revokes every OAuth session. Log in again with `ADMIN_USERNAME`/`ADMIN_PASSWORD`.
+- A wrong `MASTER_KEY` stops the start with `MASTER_KEY does not match the stored tenant keys.` and changes nothing.
+- `PUBLIC_BASE_URL` with a path prefix is not supported.
+
 ## 0.3.0
 
 waha-mcp is no longer read-only: it can send messages from the owner's number.

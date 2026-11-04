@@ -24,6 +24,8 @@ ENV NODE_ENV=production
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 COPY --from=build /app/dist ./dist
+# Font served to the HTML pages (resolved as ../../../assets from dist/infrastructure/http).
+COPY assets ./assets
 
 # OAuth state (auth.db) and the media-link secret live here; mount a volume so
 # they survive redeploys. Owned by `node`, the user the process runs as.

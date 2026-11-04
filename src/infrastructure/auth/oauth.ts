@@ -120,21 +120,21 @@ export function createOAuthRoutes(deps: {
   const validateAuthorize = (source: URLSearchParams): Validation => {
     for (const name of AUTHORIZE_PARAMS) {
       if (source.getAll(name).length > 1)
-        return { ok: false, page: `Duplicate parameter: ${name}.` };
+        return { ok: false, page: `Parámetro duplicado: ${name}.` };
     }
     const get = (name: string): string | undefined => source.get(name) ?? undefined;
     const clientId = get("client_id");
     const client = clientId ? store.getClient(clientId) : null;
     if (!clientId || !client) {
-      return { ok: false, page: "Unknown client. Remove the connector and add it again." };
+      return { ok: false, page: "Cliente desconocido. Elimina el conector y vuelve a agregarlo." };
     }
     const redirectUri = get("redirect_uri");
     if (!redirectUri || !client.redirectUris.includes(redirectUri)) {
-      return { ok: false, page: "The redirect_uri is not registered for this client." };
+      return { ok: false, page: "El redirect_uri no está registrado para este cliente." };
     }
     const state = get("state");
     if (state !== undefined && state.length > MAX_STATE_LENGTH) {
-      return { ok: false, page: "The state parameter is too long." };
+      return { ok: false, page: "El parámetro state es demasiado largo." };
     }
     const fail = (error: string, description: string): Validation => ({
       ok: false,
@@ -189,11 +189,15 @@ export function createOAuthRoutes(deps: {
 
   const rejectAuthorize = (c: Context, result: Exclude<Validation, { ok: true }>) =>
     "page" in result
-      ? html(c, messagePage("Authorization error", result.page), 400)
+      ? html(c, messagePage("Error de autorización", result.page), 400)
       : c.redirect(result.redirect, 302);
 
   const tooManyAttempts = (c: Context) =>
-    html(c, messagePage("Too many attempts", "Too many failed attempts. Try again later."), 429);
+    html(
+      c,
+      messagePage("Demasiados intentos", "Demasiados intentos fallidos. Inténtalo más tarde."),
+      429,
+    );
 
   // --- Discovery (RFC 9728, RFC 8414) ---
 
@@ -291,14 +295,14 @@ export function createOAuthRoutes(deps: {
     const user = await authenticate(c, form);
     if (user === "blocked") return tooManyAttempts(c);
     if (user === "invalid") {
-      return renderLogin(c, request, 401, "Invalid username or password.", username);
+      return renderLogin(c, request, 401, "Usuario o contraseña incorrectos.", username);
     }
     const status = tenants.getTenant(user.tenantId)?.status;
     if (status !== "active") {
       const reason =
         status === "pairing" || status === "invited"
-          ? `This account is not active yet. Finish connecting WhatsApp at ${base}/pair.`
-          : "This account is disabled.";
+          ? `Esta cuenta todavía no está activa. Termina de conectar WhatsApp en ${base}/pair.`
+          : "Esta cuenta está desactivada.";
       return renderLogin(c, request, 403, reason, username);
     }
 
@@ -316,8 +320,8 @@ export function createOAuthRoutes(deps: {
         return html(
           c,
           messagePage(
-            "Authorization error",
-            "Unknown client. Remove the connector and add it again.",
+            "Error de autorización",
+            "Cliente desconocido. Elimina el conector y vuelve a agregarlo.",
           ),
           400,
         );
@@ -326,7 +330,7 @@ export function createOAuthRoutes(deps: {
         c,
         request,
         403,
-        "This client is linked to another account. Reconnect from your MCP client.",
+        "Este cliente está vinculado a otra cuenta. Vuelve a conectar desde tu cliente MCP.",
         username,
       );
     }
@@ -349,7 +353,7 @@ export function createOAuthRoutes(deps: {
     const form = new URLSearchParams(await c.req.text());
     for (const name of new Set(form.keys())) {
       if (form.getAll(name).length > 1) {
-        return oauthError(c, "invalid_request", `Duplicate parameter: ${name}.`);
+        return oauthError(c, "invalid_request", `Parámetro duplicado: ${name}.`);
       }
     }
     const get = (name: string): string | undefined => form.get(name) || undefined;
@@ -426,14 +430,14 @@ export function createOAuthRoutes(deps: {
     const user = await authenticate(c, form);
     if (user === "blocked") return tooManyAttempts(c);
     if (user === "invalid") {
-      return html(c, logoutPage({ username, error: "Invalid username or password." }), 401);
+      return html(c, logoutPage({ username, error: "Usuario o contraseña incorrectos." }), 401);
     }
     store.revokeUser(user.id);
     return html(
       c,
       messagePage(
-        "Logged out",
-        "Your tokens and clients were revoked. Your connected apps must sign in again.",
+        "Sesión cerrada",
+        "Se revocaron tus accesos. Tus aplicaciones conectadas tendrán que iniciar sesión otra vez.",
       ),
     );
   });

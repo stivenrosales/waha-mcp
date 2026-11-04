@@ -319,7 +319,7 @@ describe("authorization code flow", () => {
       const res = await login(ctx, params, password, {}, username);
       expect(res.status).toBe(401);
       expect(res.headers.get("location")).toBeNull();
-      expect(await res.text()).toContain("Invalid username or password.");
+      expect(await res.text()).toContain("Usuario o contraseña incorrectos.");
     }
     const res = await login(ctx, params, "wrong-password");
     const html = await res.text();
@@ -329,7 +329,7 @@ describe("authorization code flow", () => {
     expect(html).not.toContain("waha_key");
     expect(html).not.toContain("code=");
     // The consent text must say the client can send, not only read.
-    expect(html).toContain("send messages from your number");
+    expect(html).toContain("enviar mensajes desde tu número");
     expect(html).not.toMatch(/read-only/i);
   });
 
@@ -370,11 +370,11 @@ describe("authorization code flow", () => {
     expect(pairing.status).toBe(403);
     expect(pairing.headers.get("location")).toBeNull();
     expect(await pairing.text()).toContain(
-      `This account is not active yet. Finish connecting WhatsApp at ${BASE}/pair.`,
+      `Esta cuenta todavía no está activa. Termina de conectar WhatsApp en ${BASE}/pair.`,
     );
     const revoked = await login(ctx, params, PASSWORD, {}, "gone");
     expect(revoked.status).toBe(403);
-    expect(await revoked.text()).toContain("This account is disabled.");
+    expect(await revoked.text()).toContain("Esta cuenta está desactivada.");
   });
 
   it("a client removed during login gets the unknown-client page, not the linked one", async () => {
@@ -390,8 +390,8 @@ describe("authorization code flow", () => {
     expect(res.status).toBe(400);
     expect(res.headers.get("location")).toBeNull();
     const html = await res.text();
-    expect(html).toContain("Unknown client. Remove the connector and add it again.");
-    expect(html).not.toContain("linked to another account");
+    expect(html).toContain("Cliente desconocido. Elimina el conector y vuelve a agregarlo.");
+    expect(html).not.toContain("vinculado a otra cuenta");
   });
 
   it("a client bound to one user refuses another user's login; revoking B leaves A", async () => {
@@ -414,7 +414,7 @@ describe("authorization code flow", () => {
     expect(refused.status).toBe(403);
     expect(refused.headers.get("location")).toBeNull();
     expect(await refused.text()).toContain(
-      "This client is linked to another account. Reconnect from your MCP client.",
+      "Este cliente está vinculado a otra cuenta. Vuelve a conectar desde tu cliente MCP.",
     );
 
     ctx.store.revokeUser(bob.id);

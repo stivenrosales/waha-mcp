@@ -87,7 +87,7 @@ describe("upload route", () => {
     const res = await handle(req, token);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
-    expect(await res.text()).toContain("Uploaded");
+    expect(await res.text()).toContain("Archivo subido");
     expect((await store.read(id))?.mimetype).toBe("application/pdf");
   });
 
@@ -119,7 +119,9 @@ describe("upload route", () => {
     expect(page.headers.get("x-content-type-options")).toBe("nosniff");
     expect(page.headers.get("content-security-policy")).toContain("form-action 'self'");
     await handle(put("x"), token);
-    expect(await (await handle(new Request(URL_), token)).text()).toContain("Already uploaded");
+    expect(await (await handle(new Request(URL_), token)).text()).toContain(
+      "Este enlace ya se usó",
+    );
   });
 
   it("escapes the filename in the page", async () => {

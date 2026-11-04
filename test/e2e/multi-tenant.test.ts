@@ -46,7 +46,7 @@ const ADMIN_PASSWORD = "correct horse battery";
 const ADMIN_WA = "51900000001@c.us";
 const MEDIA_SECRET = new Uint8Array(32).fill(3);
 const TRUST_NOTICE =
-  "The administrator of this server can technically access your WhatsApp data. Only continue if you trust them.";
+  "El administrador de este servidor puede acceder técnicamente a tus datos de WhatsApp. Continúa solo si confías en quien lo administra.";
 
 type Raw = Record<string, unknown>;
 const fixture = (path: string): Raw[] =>

@@ -4,6 +4,7 @@ import type { TenantAdmin } from "../../../src/application/tenantAdmin.js";
 import { DISABLED_TRANSCRIPTION } from "../../../src/application/transcripts.js";
 import { loadConfig } from "../../../src/config.js";
 import type { AuthInfo } from "../../../src/infrastructure/auth/bearer.js";
+import { FONT_PATH } from "../../../src/infrastructure/auth/loginPage.js";
 import { createApp } from "../../../src/infrastructure/http/app.js";
 import { createMcpServer } from "../../../src/infrastructure/mcp/server.js";
 import { createSignedLinks } from "../../../src/infrastructure/media/signedLink.js";
@@ -134,6 +135,17 @@ describe("createApp tenant routing", () => {
   it("mounts the onboarding routes at the root", async () => {
     const { app } = appWith({});
     expect(await (await app.fetch(new Request(`${BASE}/pair`))).text()).toBe("pair page");
+  });
+
+  it("serves the page font with long-lived caching and no auth", async () => {
+    const { app } = appWith({});
+    const res = await app.fetch(new Request(`${BASE}${FONT_PATH}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("font/woff2");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe("wOF2");
   });
 });
 

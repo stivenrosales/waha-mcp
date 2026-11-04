@@ -29,10 +29,10 @@ const PAIR_COOKIE_TTL_MS = 15 * 60_000;
 const QR_MIMETYPE = /^image\/(png|jpeg)$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
-const LINK_USED = "This link was already used.";
-const INVITE_GONE = "This invite is no longer valid.";
-const LINK_INVALID = "This link is invalid or has expired.";
-const NUMBER_TAKEN = "This WhatsApp number is already connected to another account.";
+const LINK_USED = "Este enlace ya se usó.";
+const INVITE_GONE = "Esta invitación ya no es válida.";
+const LINK_INVALID = "Este enlace no es válido o ya venció.";
+const NUMBER_TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
 
 /** Statuses whose user may open the pairing page. */
 const PAIRABLE = new Set(["pairing", "active"]);
@@ -92,8 +92,8 @@ export function createOnboardingRoutes(deps: {
   const crossSite = (html: Html) =>
     html(
       messagePage(
-        "Request blocked",
-        "This form must be sent from this server's own page. Reload the page and try again.",
+        "Solicitud bloqueada",
+        "Este formulario debe enviarse desde la página de este servidor. Recarga la página e inténtalo de nuevo.",
       ),
       403,
     );
@@ -103,9 +103,9 @@ export function createOnboardingRoutes(deps: {
   /** The error for a chosen password, or null when it is acceptable. */
   const passwordError = (form: URLSearchParams): string | null => {
     const password = form.get("password") ?? "";
-    if (password.length < MIN_PASSWORD) return "Password must be at least 12 characters.";
-    if (password.length > MAX_PASSWORD) return "Password is too long.";
-    if (password !== form.get("password_confirm")) return "Passwords do not match.";
+    if (password.length < MIN_PASSWORD) return "La contraseña debe tener al menos 12 caracteres.";
+    if (password.length > MAX_PASSWORD) return "La contraseña es demasiado larga.";
+    if (password !== form.get("password_confirm")) return "Las contraseñas no coinciden.";
     return null;
   };
 
@@ -117,9 +117,10 @@ export function createOnboardingRoutes(deps: {
   ): { response: Response } | { tenantId: string } => {
     const link = tenants.linkState(token, kind);
     if (!link || link.state === "expired") {
-      return { response: html(messagePage("Link not valid", LINK_INVALID), 404) };
+      return { response: html(messagePage("Enlace no válido", LINK_INVALID), 404) };
     }
-    if (link.state === "used") return { response: html(messagePage("Link used", LINK_USED), 410) };
+    if (link.state === "used")
+      return { response: html(messagePage("Enlace ya usado", LINK_USED), 410) };
     return { tenantId: link.tenantId };
   };
 
@@ -176,7 +177,7 @@ export function createOnboardingRoutes(deps: {
     const link = linkProblem(html, token, "invite");
     if ("response" in link) return link.response;
     const { tenantId } = link;
-    const used = () => html(messagePage("Link used", LINK_USED), 410);
+    const used = () => html(messagePage("Enlace ya usado", LINK_USED), 410);
     if (tenants.getTenant(tenantId)?.status !== "invited") return used();
 
     const form = await readForm(c);
@@ -204,7 +205,7 @@ export function createOnboardingRoutes(deps: {
     }
     if (user === "username_taken") {
       // A concurrent sign-up with the same username won the race for this very tenant.
-      return tenants.getUserByTenant(tenantId) ? used() : retry("This username is taken.");
+      return tenants.getUserByTenant(tenantId) ? used() : retry("Ese usuario ya está en uso.");
     }
     // The UNIQUE insert above made this request the single winner, so consumeLink fails only when
     // the link expired during hashing (the user exists by then: finish the sign-up) or when the
@@ -219,7 +220,7 @@ export function createOnboardingRoutes(deps: {
     }
     // Conditional: the tenant may have been revoked while the password was hashed.
     if (!tenants.transitionStatus(tenantId, "invited", "pairing")) {
-      return html(messagePage("Invite not valid", INVITE_GONE), 410);
+      return html(messagePage("Invitación no válida", INVITE_GONE), 410);
     }
     setPairCookie(c, user.id);
     return c.redirect(`${base}/pair`, 303);
@@ -243,16 +244,16 @@ export function createOnboardingRoutes(deps: {
     const problem = passwordError(form);
     if (problem) return html(resetPage({ error: problem }), 400);
     const user = tenants.getUserByTenant(link.tenantId);
-    if (!user) return html(messagePage("Link not valid", LINK_INVALID), 404);
+    if (!user) return html(messagePage("Enlace no válido", LINK_INVALID), 404);
     if (!tenants.consumeLink(token, "reset")) {
-      return html(messagePage("Link used", LINK_USED), 410);
+      return html(messagePage("Enlace ya usado", LINK_USED), 410);
     }
     await tenants.setPassword(user.id, form.get("password") ?? "");
     auth.revokeUser(user.id);
     return html(
       messagePage(
-        "Password changed",
-        "Your password was changed and every connected app was signed out. Sign in again from your MCP client.",
+        "Contraseña cambiada",
+        "Tu contraseña se cambió y se cerró la sesión en todas las aplicaciones conectadas. Vuelve a iniciar sesión desde tu cliente MCP.",
       ),
     );
   });
@@ -290,16 +291,19 @@ export function createOnboardingRoutes(deps: {
       } else if (state === "STOPPED" || state === "FAILED") {
         return html(
           pairWaitPage(
-            "WhatsApp session not running",
-            "Your WhatsApp session is not running. Ask the administrator to restart it.",
+            "La sesión de WhatsApp está detenida",
+            "Tu sesión de WhatsApp no está en ejecución. Pide al administrador que la reinicie.",
           ),
         );
       }
-      return html(pairWaitPage("Connecting", "Preparing your WhatsApp session…"));
+      return html(pairWaitPage("Conectando", "Preparando tu sesión de WhatsApp…"));
     } catch {
       // Never echo the error: it may name the WAHA URL.
       return html(
-        pairWaitPage("WhatsApp unavailable", "WhatsApp is not reachable right now."),
+        pairWaitPage(
+          "WhatsApp no disponible",
+          "No se puede conectar con WhatsApp en este momento.",
+        ),
         502,
       );
     }
@@ -320,16 +324,16 @@ export function createOnboardingRoutes(deps: {
     const user = await authenticateLogin(c, form, { tenants, limiter });
     if (user === "blocked") {
       return html(
-        messagePage("Too many attempts", "Too many failed attempts. Try again later."),
+        messagePage("Demasiados intentos", "Demasiados intentos fallidos. Inténtalo más tarde."),
         429,
       );
     }
     if (user === "invalid") {
-      return html(pairLoginPage({ username, error: "Invalid username or password." }), 401);
+      return html(pairLoginPage({ username, error: "Usuario o contraseña incorrectos." }), 401);
     }
     const status = tenants.getTenant(user.tenantId)?.status;
     if (status === undefined || !PAIRABLE.has(status)) {
-      return html(pairLoginPage({ username, error: "This account is disabled." }), 403);
+      return html(pairLoginPage({ username, error: "Esta cuenta está desactivada." }), 403);
     }
     setPairCookie(c, user.id);
     return c.redirect(`${base}/pair`, 303);

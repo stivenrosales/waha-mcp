@@ -9,9 +9,9 @@ const BASE = "https://mcp.example.com";
 const HOUR = 3600_000;
 const PASSWORD = "a long enough password";
 const TRUST =
-  "The administrator of this server can technically access your WhatsApp data. Only continue if you trust them.";
-const USED = "This link was already used.";
-const TAKEN = "This WhatsApp number is already connected to another account.";
+  "El administrador de este servidor puede acceder técnicamente a tus datos de WhatsApp. Continúa solo si confías en quien lo administra.";
+const USED = "Este enlace ya se usó.";
+const TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
 
 function setup() {
   let t = 1_800_000_000_000;
@@ -130,7 +130,7 @@ describe("invite", () => {
     }
   });
 
-  it('second POST of the same invite → "This link was already used."', async () => {
+  it('second POST of the same invite → "Este enlace ya se usó."', async () => {
     const ctx = setup();
     const { tenant, token } = ctx.invite();
     expect((await ctx.signUp(token)).status).toBe(303);
@@ -163,7 +163,7 @@ describe("invite", () => {
     ctx.advance(72 * HOUR);
     for (const res of [await ctx.request(`/invite/${token}`), await ctx.signUp(token)]) {
       expect(res.status).toBe(404);
-      expect(await res.text()).toContain("This link is invalid or has expired.");
+      expect(await res.text()).toContain("Este enlace no es válido o ya venció.");
     }
     expect((await ctx.request("/invite/unknown-token")).status).toBe(404);
     expect(ctx.tenants.getUserByTenant(tenant.id)).toBeNull();
@@ -175,7 +175,7 @@ describe("invite", () => {
     const short = await ctx.signUp(token, "alice", "short-pass1");
     expect(short.status).toBe(400);
     const html = await short.text();
-    expect(html).toContain("Password must be at least 12 characters.");
+    expect(html).toContain("La contraseña debe tener al menos 12 caracteres.");
     expect(html).toContain('value="alice"');
     expect(html).not.toContain("short-pass1");
     const mismatch = await ctx.post(`/invite/${token}`, {
@@ -184,7 +184,7 @@ describe("invite", () => {
       password_confirm: `${PASSWORD}!`,
     });
     expect(mismatch.status).toBe(400);
-    expect(await mismatch.text()).toContain("Passwords do not match.");
+    expect(await mismatch.text()).toContain("Las contraseñas no coinciden.");
     const badName = await ctx.signUp(token, "no spaces allowed");
     expect(badName.status).toBe(400);
     expect(await badName.text()).toContain(
@@ -200,7 +200,7 @@ describe("invite", () => {
     const { tenant, token } = ctx.invite("Second");
     const res = await ctx.signUp(token, "ALICE");
     expect(res.status).toBe(400);
-    expect(await res.text()).toContain("This username is taken.");
+    expect(await res.text()).toContain("Ese usuario ya está en uso.");
     expect(ctx.tenants.getUserByTenant(tenant.id)).toBeNull();
     expect((await ctx.signUp(token, "bob")).status).toBe(303);
   });
@@ -225,7 +225,7 @@ describe("invite", () => {
     };
     const res = await ctx.signUp(token);
     expect(res.status).toBe(410);
-    expect(await res.text()).toContain("This invite is no longer valid.");
+    expect(await res.text()).toContain("Esta invitación ya no es válida.");
     expect(res.headers.get("set-cookie")).toBeNull();
     expect(ctx.tenants.getTenant(tenant.id)?.status).toBe("revoked");
   });
@@ -269,12 +269,12 @@ describe("reset", () => {
       password_confirm: "short",
     });
     expect(short.status).toBe(400);
-    expect(await short.text()).toContain("Password must be at least 12 characters.");
+    expect(await short.text()).toContain("La contraseña debe tener al menos 12 caracteres.");
 
     const fresh = "a brand new long password";
     const res = await ctx.post(`/reset/${token}`, { password: fresh, password_confirm: fresh });
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("Password changed");
+    expect(await res.text()).toContain("Contraseña cambiada");
     expect(await ctx.tenants.verifyPassword("alice", fresh)).not.toBeNull();
     expect(await ctx.tenants.verifyPassword("alice", PASSWORD)).toBeNull();
     expect(ctx.auth.verifyAccessToken(tokens.accessToken)).toBeNull();
@@ -340,7 +340,7 @@ describe("pair", () => {
     const res = await ctx.pairPage(cookie);
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("WhatsApp is connected");
+    expect(html).toContain("Tu WhatsApp está conectado");
     expect(html).not.toContain("http-equiv");
     expect(ctx.tenants.getTenant(tenant.id)).toMatchObject({
       status: "active",
@@ -394,7 +394,7 @@ describe("pair", () => {
     await ctx.pairPage(cookie);
     const res = await ctx.pairPage(cookie);
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("WhatsApp is connected");
+    expect(await res.text()).toContain("Tu WhatsApp está conectado");
     expect(ctx.tenants.getTenant(tenant.id)?.status).toBe("active");
   });
 
@@ -422,7 +422,7 @@ describe("pair", () => {
     ctx.sessions.setState(tenant.wahaSession, "SCAN_QR_CODE");
     const wrong = await ctx.post("/pair", { username: "alice", password: "wrong password!" });
     expect(wrong.status).toBe(401);
-    expect(await wrong.text()).toContain("Invalid username or password.");
+    expect(await wrong.text()).toContain("Usuario o contraseña incorrectos.");
     expect(wrong.headers.get("set-cookie")).toBeNull();
     const res = await ctx.post("/pair", { username: "Alice", password: PASSWORD });
     expect(res.status).toBe(303);
@@ -447,7 +447,7 @@ describe("pair", () => {
     ctx.tenants.setStatus(tenant.id, "revoked");
     const res = await ctx.post("/pair", { username: "alice", password: PASSWORD });
     expect(res.status).toBe(403);
-    expect(await res.text()).toContain("This account is disabled.");
+    expect(await res.text()).toContain("Esta cuenta está desactivada.");
     expect(res.headers.get("set-cookie")).toBeNull();
     const page = await ctx.pairPage(cookie);
     expect(await page.text()).toContain('name="password"');

@@ -257,4 +257,74 @@ describe("sqlite tenant store", () => {
     const row = db.prepare("SELECT hash FROM invites").get() as { hash: string };
     expect(row.hash).not.toBe(token);
   });
+  describe("transcription usage", () => {
+    const use = (tenantId: string, at: string, seconds: number | null, costUsd: number | null) => ({
+      tenantId,
+      at,
+      model: "openai/whisper-large-v3-turbo",
+      seconds,
+      costUsd,
+    });
+    const RANGE = { fromIso: "2026-11-01T00:00:00.000Z", toIso: "2026-11-30T23:59:59.999Z" };
+
+    it("records usage and sums it per tenant in a range", () => {
+      const { store, tenant } = setup();
+      const b = store.createTenant({
+        displayName: "B",
+        wahaSession: "t_bbbbbbbbbb",
+        wrappedDek: "w",
+      });
+      store.recordTranscriptionUsage(use(tenant.id, "2026-11-02T10:00:00.000Z", 10, 0.01));
+      store.recordTranscriptionUsage(use(tenant.id, "2026-11-03T10:00:00.000Z", 20, 0.02));
+      store.recordTranscriptionUsage(use(b.id, "2026-11-04T10:00:00.000Z", 5, 0.05));
+      const rows = store.transcriptionUsage(RANGE);
+      expect(rows.map((r) => r.tenantId)).toEqual([b.id, tenant.id]);
+      const a = rows[1];
+      expect(a?.count).toBe(2);
+      expect(a?.seconds).toBe(30);
+      expect(a?.costUsd).toBeCloseTo(0.03, 10);
+      expect(a?.rowsWithoutCost).toBe(0);
+      expect(rows[0]?.costUsd).toBeCloseTo(0.05, 10);
+    });
+
+    it("counts rows without cost and never treats them as zero cost", () => {
+      const { store, tenant } = setup();
+      store.recordTranscriptionUsage(use(tenant.id, "2026-11-02T10:00:00.000Z", null, null));
+      store.recordTranscriptionUsage(use(tenant.id, "2026-11-02T11:00:00.000Z", 4, 0.01));
+      const [row] = store.transcriptionUsage(RANGE);
+      expect(row).toMatchObject({ count: 2, seconds: 4, rowsWithoutCost: 1 });
+      expect(row?.costUsd).toBeCloseTo(0.01, 10);
+    });
+
+    it("filters by range bounds and tenant", () => {
+      const { store, tenant } = setup();
+      const b = store.createTenant({
+        displayName: "B",
+        wahaSession: "t_bbbbbbbbbb",
+        wrappedDek: "w",
+      });
+      store.recordTranscriptionUsage(use(tenant.id, "2026-10-31T23:59:59.999Z", 1, 1));
+      store.recordTranscriptionUsage(use(tenant.id, RANGE.fromIso, 1, 0.1));
+      store.recordTranscriptionUsage(use(tenant.id, RANGE.toIso, 1, 0.2));
+      store.recordTranscriptionUsage(use(tenant.id, "2026-12-01T00:00:00.000Z", 1, 1));
+      store.recordTranscriptionUsage(use(b.id, "2026-11-10T00:00:00.000Z", 1, 0.5));
+      const all = store.transcriptionUsage(RANGE);
+      expect(all.find((r) => r.tenantId === tenant.id)?.count).toBe(2);
+      const one = store.transcriptionUsage({ ...RANGE, tenantId: tenant.id });
+      expect(one).toHaveLength(1);
+      expect(one[0]?.costUsd).toBeCloseTo(0.3, 10);
+    });
+
+    it("keeps usage after deleteTenant", () => {
+      const { store, tenant } = setup();
+      store.recordTranscriptionUsage(use(tenant.id, "2026-11-02T10:00:00.000Z", 3, 0.004));
+      store.deleteTenant(tenant.id);
+      expect(store.transcriptionUsage(RANGE)).toMatchObject([{ tenantId: tenant.id, count: 1 }]);
+    });
+
+    it("returns nothing for an empty range", () => {
+      const { store } = setup();
+      expect(store.transcriptionUsage(RANGE)).toEqual([]);
+    });
+  });
 });

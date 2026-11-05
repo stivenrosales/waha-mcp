@@ -19,6 +19,16 @@ export interface User {
   lastLoginAt: number | null;
 }
 
+/** One tenant's paid transcriptions in a range (sums skip unknown values). */
+export interface TranscriptionUsageRow {
+  tenantId: string;
+  count: number;
+  seconds: number;
+  costUsd: number;
+  /** Transcriptions whose provider reported no cost: `costUsd` does not include them. */
+  rowsWithoutCost: number;
+}
+
 export interface TenantStore {
   createTenant(q: { displayName: string; wahaSession: string; wrappedDek: string }): Tenant;
   getTenant(id: string): Tenant | null;
@@ -55,4 +65,18 @@ export interface TenantStore {
   ): { tenantId: string; state: "valid" | "used" | "expired" } | null;
   /** Atomic single use. */
   consumeLink(token: string, kind: LinkKind): { tenantId: string } | null;
+  /** One paid transcription; kept after the tenant is deleted (internal accounting). */
+  recordTranscriptionUsage(q: {
+    tenantId: string;
+    at: string;
+    model: string;
+    seconds: number | null;
+    costUsd: number | null;
+  }): void;
+  /** Per tenant, most expensive first; both ISO bounds inclusive. */
+  transcriptionUsage(q: {
+    fromIso: string;
+    toIso: string;
+    tenantId?: string;
+  }): TranscriptionUsageRow[];
 }

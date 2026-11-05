@@ -6,6 +6,7 @@ import type {
   Tenant,
   TenantStatus,
   TenantStore,
+  TranscriptionUsageRow,
   User,
 } from "../../domain/ports/TenantStore.js";
 import { hashPassword, verifyPasswordHash } from "../auth/passwords.js";
@@ -36,6 +37,16 @@ CREATE TABLE IF NOT EXISTS invites (
   expires_at INTEGER NOT NULL,
   used_at INTEGER
 );
+-- No foreign key: usage outlives a deleted tenant (internal accounting).
+CREATE TABLE IF NOT EXISTS transcription_usage (
+  id INTEGER PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  at TEXT NOT NULL,
+  model TEXT NOT NULL,
+  seconds REAL,
+  cost_usd REAL
+);
+CREATE INDEX IF NOT EXISTS transcription_usage_at ON transcription_usage (at, tenant_id);
 `;
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
@@ -110,6 +121,39 @@ export function createSqliteTenantStore(
     db.prepare("SELECT 1 FROM users WHERE username = ?").get(username) !== undefined;
 
   return {
+    recordTranscriptionUsage({ tenantId, at, model, seconds, costUsd }) {
+      db.prepare(
+        "INSERT INTO transcription_usage (tenant_id, at, model, seconds, cost_usd) VALUES (?, ?, ?, ?, ?)",
+      ).run(tenantId, at, model, seconds, costUsd);
+    },
+
+    transcriptionUsage({ fromIso, toIso, tenantId }) {
+      const rows = db
+        .prepare(
+          `SELECT tenant_id, COUNT(*) AS count, COALESCE(SUM(seconds), 0) AS seconds,
+             COALESCE(SUM(cost_usd), 0) AS cost, COUNT(*) - COUNT(cost_usd) AS without_cost
+           FROM transcription_usage
+           WHERE at >= ? AND at <= ? AND (? IS NULL OR tenant_id = ?)
+           GROUP BY tenant_id ORDER BY cost DESC, tenant_id`,
+        )
+        .all(fromIso, toIso, tenantId ?? null, tenantId ?? null) as {
+        tenant_id: string;
+        count: number;
+        seconds: number;
+        cost: number;
+        without_cost: number;
+      }[];
+      return rows.map(
+        (r): TranscriptionUsageRow => ({
+          tenantId: r.tenant_id,
+          count: Number(r.count),
+          seconds: Number(r.seconds),
+          costUsd: Number(r.cost),
+          rowsWithoutCost: Number(r.without_cost),
+        }),
+      );
+    },
+
     createTenant({ displayName, wahaSession, wrappedDek }) {
       const id = newId();
       db.prepare(

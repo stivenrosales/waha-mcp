@@ -397,6 +397,13 @@ describe("transcriptionUsage", () => {
     expect(report.tenants.map((t) => t.id)).toEqual([adminTenant.id]);
   });
 
+  it("a to before the current month starts the range at that month", async () => {
+    const { admin } = await setup();
+    const report = await admin.transcriptionUsage({ to: "2026-10-15" });
+    expect(report.from).toBe("2026-10-01T05:00:00.000Z");
+    expect(report.to).toBe("2026-10-16T04:59:59.999Z");
+  });
+
   it("rejects from after to", async () => {
     const { admin } = await setup();
     await expect(

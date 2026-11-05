@@ -65,7 +65,10 @@ export interface TenantAdmin {
     localCleanup: "ok" | "failed";
     wahaSession?: string;
   }>;
-  /** Paid transcriptions per tenant; the range defaults to the current month in `timezone`. */
+  /**
+   * Paid transcriptions per tenant. Without `from`, the range starts on the 1st of the month
+   * holding `to` (the current month when both are omitted), in `timezone`.
+   */
   transcriptionUsage(q: {
     from?: string;
     to?: string;
@@ -181,14 +184,15 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
       const timezone = deps.timezone ?? "UTC";
       const now = (deps.now ?? Date.now)();
       const range = parseRange({ from: q.from, to: q.to }, timezone);
-      let from = range.from;
-      if (from === undefined) {
-        const fmt = zoneFormatter(timezone);
-        const p = zoneParts(fmt, now);
-        from = localMidnight(fmt, p.year ?? 1970, p.month ?? 1, 1);
-      }
       // A bound is read to the second: count everything inside its last second.
       const to = range.to === undefined ? now : range.to + 999;
+      let from = range.from;
+      if (from === undefined) {
+        // The month that holds the end of the range (the current one when `to` is omitted).
+        const fmt = zoneFormatter(timezone);
+        const p = zoneParts(fmt, to);
+        from = localMidnight(fmt, p.year ?? 1970, p.month ?? 1, 1);
+      }
       if (from > to) throw new InvalidInputError('"from" must not be later than "to".');
       const rows = tenants.transcriptionUsage({
         fromIso: new Date(from).toISOString(),

@@ -14,7 +14,10 @@ import { createTenantCipher } from "../crypto/envelope.js";
 import type { Logger, ToolRunContext } from "../mcp/defineTool.js";
 import { createMediaHandler } from "../media/mediaRoute.js";
 import { createSignedLinks } from "../media/signedLink.js";
-import { createOpenAiCompatibleTranscriber } from "../transcription/openaiCompatible.js";
+import {
+  createOpenAiCompatibleTranscriber,
+  type TranscriptionUsage,
+} from "../transcription/openaiCompatible.js";
 import { createWahaAudioSource } from "../transcription/wahaAudioSource.js";
 import { createFsUploadStore } from "../uploads/fsUploadStore.js";
 import { createUploadLinks } from "../uploads/uploadLinks.js";
@@ -54,12 +57,34 @@ export interface TenantRuntime {
  * `DATA_DIR/tenants/<id>/uploads`, all encrypted with the tenant's DEK, and links
  * bound to the tenant id. The tenant directory is created with mode 0700.
  */
+/**
+ * Wraps the usage recorder so a failed write (e.g. a locked database) only logs a line naming
+ * the tenant: accounting must never cost a tenant its transcript, and the error text may carry
+ * provider details.
+ */
+export function guardUsageRecorder(
+  record: ((usage: TranscriptionUsage) => void) | undefined,
+  logger: Logger,
+  tenantId: string,
+): (usage: TranscriptionUsage) => void {
+  return (usage) => {
+    if (!record) return;
+    try {
+      record(usage);
+    } catch {
+      logger.info(`tenant=${tenantId} transcription usage not recorded`);
+    }
+  };
+}
+
 export function buildTenantRuntime(deps: {
   config: Config;
   tenant: Tenant;
   dek: Buffer;
   mediaSecret: Uint8Array;
   logger: Logger;
+  /** Stores one paid transcription for this tenant (the registry writes it to the central store). */
+  recordUsage?: (usage: TranscriptionUsage) => void;
 }): TenantRuntime {
   const { config, tenant, dek, mediaSecret, logger } = deps;
   if (!TENANT_ID.test(tenant.id)) throw new Error("Invalid tenant id.");
@@ -97,7 +122,10 @@ export function buildTenantRuntime(deps: {
             gateway,
             audio: createWahaAudioSource(gateway, { maxBytes: config.mediaMaxBytes }),
             store: createSqliteTranscriptStore(cacheDb, cipher),
-            transcriber: createOpenAiCompatibleTranscriber(config.transcription),
+            transcriber: createOpenAiCompatibleTranscriber({
+              ...config.transcription,
+              onUsage: guardUsageRecorder(deps.recordUsage, logger, tenant.id),
+            }),
             session,
             maxSeconds: config.transcription.maxSeconds,
             maxPerCall: config.transcription.maxPerCall,

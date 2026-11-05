@@ -290,4 +290,40 @@ describe("revoke through the admin service", () => {
     expect(registry.acquire(tenantId)).toBeNull();
     expect(built[0]?.closed).toBe(1);
   });
+  it("gives each runtime a usage recorder that writes rows for its tenant", () => {
+    const tenants = fakeTenants();
+    tenants.add("a");
+    const recorded: unknown[] = [];
+    (
+      tenants.store as unknown as { recordTranscriptionUsage: (q: unknown) => void }
+    ).recordTranscriptionUsage = (q) => recorded.push(q);
+    const { build } = fakeBuild();
+    let recordUsage: ((u: { seconds: number | null; costUsd: number | null }) => void) | undefined;
+    const registry = createTenantRegistry({
+      config: configFor(scratch(), {
+        TRANSCRIPTION_API_URL: "https://openrouter.ai/api/v1",
+        TRANSCRIPTION_API_KEY: "sk-or-x",
+        TRANSCRIPTION_MODEL: "openai/whisper-large-v3-turbo",
+      }),
+      tenants: tenants.store,
+      kek: KEK,
+      mediaSecret: SECRET,
+      logger: { info: () => {} },
+      build: (d) => {
+        recordUsage = d.recordUsage;
+        return build(d);
+      },
+    });
+    registry.acquire("a");
+    recordUsage?.({ seconds: 5, costUsd: 0.002 });
+    expect(recorded).toEqual([
+      {
+        tenantId: "a",
+        at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/),
+        model: "openai/whisper-large-v3-turbo",
+        seconds: 5,
+        costUsd: 0.002,
+      },
+    ]);
+  });
 });

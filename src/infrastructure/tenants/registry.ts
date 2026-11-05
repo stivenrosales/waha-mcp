@@ -82,6 +82,16 @@ export function createTenantRegistry(deps: {
       dek,
       mediaSecret: deps.mediaSecret,
       logger: deps.logger,
+      recordUsage: (usage) => {
+        const model = deps.config.transcription?.model;
+        if (!model) return;
+        deps.tenants.recordTranscriptionUsage({
+          tenantId,
+          at: new Date().toISOString(),
+          model,
+          ...usage,
+        });
+      },
     });
     const entry: Entry = { runtime, refs: 0, evicted: false, closed: false };
     live.set(tenantId, entry);

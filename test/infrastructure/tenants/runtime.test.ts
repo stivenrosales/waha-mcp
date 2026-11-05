@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../../../src/config.js";
 import type { Tenant } from "../../../src/domain/ports/TenantStore.js";
 import { generateDek } from "../../../src/infrastructure/crypto/envelope.js";
-import { buildTenantRuntime } from "../../../src/infrastructure/tenants/runtime.js";
+import {
+  buildTenantRuntime,
+  guardUsageRecorder,
+} from "../../../src/infrastructure/tenants/runtime.js";
 
 /** Every cache database the runtime opens, so tests can check it was closed. */
 const opened = vi.hoisted(() => [] as DatabaseSync[]);
@@ -109,5 +112,33 @@ describe("buildTenantRuntime", () => {
     }
     expect(fs.existsSync(path.join(dataDir, "x"))).toBe(false);
     expect(opened).toHaveLength(0);
+  });
+});
+
+describe("guardUsageRecorder", () => {
+  it("passes usage through to the recorder", () => {
+    const seen: unknown[] = [];
+    const onUsage = guardUsageRecorder((u) => seen.push(u), { info: () => {} }, "abc");
+    onUsage({ seconds: 2, costUsd: 0.001 });
+    expect(seen).toEqual([{ seconds: 2, costUsd: 0.001 }]);
+  });
+
+  it("a failing usage write only logs a line naming the tenant", () => {
+    const lines: string[] = [];
+    const onUsage = guardUsageRecorder(
+      () => {
+        throw new Error("database is locked https://openrouter.ai sk-or-x");
+      },
+      { info: (m) => lines.push(m) },
+      "abc",
+    );
+    expect(() => onUsage({ seconds: 1, costUsd: 0.1 })).not.toThrow();
+    expect(lines).toEqual(["tenant=abc transcription usage not recorded"]);
+  });
+
+  it("is a no-op without a recorder", () => {
+    expect(() =>
+      guardUsageRecorder(undefined, { info: () => {} }, "abc")({ seconds: null, costUsd: null }),
+    ).not.toThrow();
   });
 });

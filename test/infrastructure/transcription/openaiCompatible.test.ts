@@ -137,4 +137,62 @@ describe("OpenAI-compatible transcription client", () => {
     );
     expect(new TranscriptionError("config", 404).kind).toBe("config");
   });
+  describe("usage", () => {
+    const make = (respond: () => Response) => {
+      const p = fakeProvider(respond);
+      const usages: unknown[] = [];
+      const t = createOpenAiCompatibleTranscriber({
+        apiUrl: "https://openrouter.ai/api/v1",
+        apiKey: KEY,
+        model: "m",
+        language: null,
+        fetch: p.fetch,
+        onUsage: (u) => usages.push(u),
+      });
+      return { t, usages };
+    };
+
+    it("reports usage cost and seconds from the response", async () => {
+      const { t, usages } = make(() =>
+        json({ text: "hola", usage: { seconds: 9.2, cost: 0.000508 } }),
+      );
+      expect(await t.transcribe(audio)).toBe("hola");
+      expect(usages).toEqual([{ seconds: 9.2, costUsd: 0.000508 }]);
+    });
+
+    it("reports null usage when the provider sends none", async () => {
+      const { t, usages } = make(() => json({ text: "hola" }));
+      await t.transcribe(audio);
+      expect(usages).toEqual([{ seconds: null, costUsd: null }]);
+    });
+
+    it("reports null cost when cost is not a finite number", async () => {
+      const { t, usages } = make(() => json({ text: "hola", usage: { seconds: 3, cost: "0.1" } }));
+      await t.transcribe(audio);
+      expect(usages).toEqual([{ seconds: 3, costUsd: null }]);
+    });
+
+    it("does not report usage when the transcription fails", async () => {
+      for (const res of [json({ error: "boom" }, 500), json({ usage: { cost: 1 } })]) {
+        const { t, usages } = make(() => res);
+        await expect(t.transcribe(audio)).rejects.toBeInstanceOf(TranscriptionError);
+        expect(usages).toEqual([]);
+      }
+    });
+
+    it("still returns the transcript when onUsage throws", async () => {
+      const p = fakeProvider(() => json({ text: "hola", usage: { cost: 0.1 } }));
+      const t = createOpenAiCompatibleTranscriber({
+        apiUrl: "https://x.example/v1",
+        apiKey: KEY,
+        model: "m",
+        language: null,
+        fetch: p.fetch,
+        onUsage: () => {
+          throw new Error("db locked");
+        },
+      });
+      expect(await t.transcribe(audio)).toBe("hola");
+    });
+  });
 });

@@ -288,10 +288,13 @@ export function createOnboardingRoutes(deps: {
           if (current === "pairing") tenants.setStatus(tenant.id, "active");
           return html(pairDonePage(`${base}/mcp`));
         }
-      } else if (state === "STOPPED" || state === "FAILED") {
-        // WAHA fails a session whose QR nobody scanned in time (e.g. an invite opened days
-        // later): start it again; the next refresh shows a fresh QR.
+      } else if (state === "STOPPED") {
         await sessions.start(name);
+      } else if (state === "FAILED") {
+        // WAHA fails a session whose QR nobody scanned in time (e.g. an invite opened days
+        // later). It still counts as running, so only restart (stop + start) revives it;
+        // the next refresh shows a fresh QR.
+        await sessions.restart(name);
       }
       return html(pairWaitPage("Conectando", "Preparando tu sesión de WhatsApp…"));
     } catch {

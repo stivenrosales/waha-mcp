@@ -107,6 +107,12 @@ describe("WahaSessionAdmin", () => {
     expect(calls[0]).toMatchObject({ url: `${BASE}/api/sessions/t_abc/start`, method: "POST" });
   });
 
+  it("restart posts to the restart path", async () => {
+    const { fn, calls } = fakeFetch(() => json({ name: "t_abc", status: "STARTING" }, 201));
+    await make(fn).restart("t_abc");
+    expect(calls[0]).toMatchObject({ url: `${BASE}/api/sessions/t_abc/restart`, method: "POST" });
+  });
+
   it("remove deletes the session and treats 404 as success", async () => {
     const { fn, calls } = fakeFetch(() => json({}));
     await make(fn).remove("t_abc");

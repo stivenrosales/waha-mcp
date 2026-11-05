@@ -325,15 +325,22 @@ describe("pair", () => {
     expect(res.headers.get("x-frame-options")).toBe("DENY");
   });
 
-  for (const stopped of ["STOPPED", "FAILED"] as const) {
-    it(`pair restarts a ${stopped} session and waits for its QR`, async () => {
+  // WAHA still counts a FAILED session as running: /start is a no-op there, only /restart
+  // stops and starts it.
+  for (const [stopped, action] of [
+    ["STOPPED", "start"],
+    ["FAILED", "restart"],
+  ] as const) {
+    it(`pair ${action}s a ${stopped} session and waits for its QR`, async () => {
       const ctx = setup();
       const { tenant, cookie } = await ctx.onboarded();
       ctx.sessions.setState(tenant.wahaSession, stopped);
       const res = await ctx.pairPage(cookie);
       expect(res.status).toBe(200);
       const html = await res.text();
-      expect(ctx.sessions.calls).toContain(`start:${tenant.wahaSession}`);
+      expect(ctx.sessions.calls).toContain(`${action}:${tenant.wahaSession}`);
+      const other = action === "start" ? "restart" : "start";
+      expect(ctx.sessions.calls).not.toContain(`${other}:${tenant.wahaSession}`);
       expect(html).toContain("Preparando tu sesión de WhatsApp…");
       expect(html).toContain('<meta http-equiv="refresh" content="5">');
       expect(html).not.toContain("Pide al administrador");
@@ -347,6 +354,7 @@ describe("pair", () => {
     ctx.sessions.setState(tenant.wahaSession, "STARTING");
     await ctx.pairPage(cookie);
     expect(ctx.sessions.calls).not.toContain(`start:${tenant.wahaSession}`);
+    expect(ctx.sessions.calls).not.toContain(`restart:${tenant.wahaSession}`);
   });
 
   it("other pages do not allow data: images", async () => {

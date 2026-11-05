@@ -36,6 +36,8 @@ async function setup() {
     dataDir,
     publicBaseUrl: "https://mcp.example.com/",
     logger: { info: (m) => void logs.push(m) },
+    timezone: "America/Lima",
+    now: () => T0,
   });
   const adminTenant = tenants.createTenant({
     displayName: "Owner",
@@ -343,5 +345,62 @@ describe("list_tenants", () => {
     };
     const list = await s.admin.listTenants();
     expect(list[0]?.whatsapp).toBe("UNKNOWN");
+  });
+});
+
+describe("transcriptionUsage", () => {
+  // T0 is 2027-01-15T08:00:00Z, i.e. 03:00 on 2027-01-15 in Lima (UTC-5).
+  const use = (tenantId: string, at: string, costUsd: number | null) => ({
+    tenantId,
+    at,
+    model: "m",
+    seconds: 10,
+    costUsd,
+  });
+
+  it("defaults to the current month in the timezone", async () => {
+    const { admin } = await setup();
+    const report = await admin.transcriptionUsage({});
+    expect(report.from).toBe("2027-01-01T05:00:00.000Z");
+    expect(report.to).toBe(new Date(T0).toISOString());
+    expect(report.tenants).toEqual([]);
+    expect(report.total).toEqual({ count: 0, seconds: 0, costUsd: 0, rowsWithoutCost: 0 });
+  });
+
+  it("names tenants and totals them, keeping deleted tenants", async () => {
+    const { admin, tenants, adminTenant } = await setup();
+    const jose = tenants.createTenant({
+      displayName: "Jose",
+      wahaSession: "t_josejosejo",
+      wrappedDek: "x",
+    });
+    tenants.recordTranscriptionUsage(use(adminTenant.id, "2027-01-10T12:00:00.000Z", 0.01));
+    tenants.recordTranscriptionUsage(use(jose.id, "2027-01-11T12:00:00.000Z", 0.04));
+    tenants.recordTranscriptionUsage(use("gone-tenant", "2027-01-12T12:00:00.000Z", null));
+    const report = await admin.transcriptionUsage({ from: "2027-01-01", to: "2027-01-31" });
+    expect(report.tenants.map((t) => [t.id, t.displayName])).toEqual([
+      [jose.id, "Jose"],
+      [adminTenant.id, "Owner"],
+      ["gone-tenant", null],
+    ]);
+    expect(report.total.count).toBe(3);
+    expect(report.total.seconds).toBe(30);
+    expect(report.total.costUsd).toBeCloseTo(0.05, 10);
+    expect(report.total.rowsWithoutCost).toBe(1);
+  });
+
+  it("filters one tenant", async () => {
+    const { admin, tenants, adminTenant } = await setup();
+    tenants.recordTranscriptionUsage(use(adminTenant.id, "2027-01-10T12:00:00.000Z", 0.01));
+    tenants.recordTranscriptionUsage(use("other", "2027-01-10T12:00:00.000Z", 0.02));
+    const report = await admin.transcriptionUsage({ tenantId: adminTenant.id });
+    expect(report.tenants.map((t) => t.id)).toEqual([adminTenant.id]);
+  });
+
+  it("rejects from after to", async () => {
+    const { admin } = await setup();
+    await expect(
+      admin.transcriptionUsage({ from: "2027-01-10", to: "2027-01-01" }),
+    ).rejects.toBeInstanceOf(InvalidInputError);
   });
 });

@@ -64,6 +64,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     dataDir: config.dataDir,
     publicBaseUrl: config.publicBaseUrl,
     logger,
+    timezone: config.timezone,
   });
   const tools = createTools();
   const mcp = createMcpServer({

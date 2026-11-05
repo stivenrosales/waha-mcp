@@ -138,14 +138,15 @@ If WhatsApp disconnects later, tools say so and point to `<base>/pair` to scan a
 
 Admin tools, listed only for the admin (members never see them):
 
-| Tool             | What it does                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------- |
-| `list_tenants`   | Every tenant with its status, WhatsApp connection state, creation date and last login. No message data. |
-| `create_invite`  | New tenant + invite link; with `tenant_id`, a new link for a tenant that has not signed up yet.         |
-| `reset_password` | Single-use password reset link (72 hours) for a tenant's user.                                          |
-| `revoke_tenant`  | Blocks a tenant: its tokens stop working at once and its links answer 404. Data is kept.                |
-| `restore_tenant` | Undoes `revoke_tenant`.                                                                                 |
-| `delete_tenant`  | Permanent: account, encryption key, cache and WAHA session. Needs the exact display name.               |
+| Tool                      | What it does                                                                                                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_tenants`            | Every tenant with its status, WhatsApp connection state, creation date and last login. No message data.                                                                      |
+| `get_transcription_usage` | Transcription spend per tenant for a range (default: the current month): count, audio seconds and USD cost, plus the total. See [transcription usage](#transcription-usage). |
+| `create_invite`           | New tenant + invite link; with `tenant_id`, a new link for a tenant that has not signed up yet.                                                                              |
+| `reset_password`          | Single-use password reset link (72 hours) for a tenant's user.                                                                                                               |
+| `revoke_tenant`           | Blocks a tenant: its tokens stop working at once and its links answer 404. Data is kept.                                                                                     |
+| `restore_tenant`          | Undoes `revoke_tenant`.                                                                                                                                                      |
+| `delete_tenant`           | Permanent: account, encryption key, cache and WAHA session. Needs the exact display name.                                                                                    |
 
 Every admin tool call is logged with the tool, the target tenant and the outcome, never secrets.
 
@@ -199,6 +200,10 @@ TRANSCRIPTION_LANGUAGE=es
 OpenAI and Groq endpoints also work (the server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions`). When on, voice notes returned by `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` carry a `transcript`, `search_messages` also matches stored transcripts, and `transcribe_audio` transcribes any audio or voice note on demand. Automatic transcription is limited by `TRANSCRIPTION_MAX_SECONDS` and `TRANSCRIPTION_MAX_PER_CALL`; coverage notes say which voice notes were skipped (`TRANSCRIPTION_MAX_PER_CALL=0` leaves everything to `transcribe_audio`). Each transcript is stored in `cache.db`, also when `CACHE_ENABLED=false`, so it is never paid twice. Transcripts are not pruned by `CACHE_MAX_AGE_DAYS` and stay after their message is deleted in WhatsApp; they are wiped with the rest of `cache.db` when the account changes (see the message cache warning above), or when you delete the file.
 
 New automatic transcriptions stop starting after 25 s within one tool call so answers stay fast; the coverage note lists the ones "not transcribed yet (time budget)", and the next call picks them up. Each failure is logged as one line `transcription failed status=<code> kind=<kind>` (never the audio, the URL or the key). `kind=auth` means the key was rejected, `kind=config` (HTTP 400/404/405/422) a wrong `TRANSCRIPTION_API_URL` or `TRANSCRIPTION_MODEL`, `kind=rateLimited` a provider limit; the coverage note names the same kind.
+
+### Transcription usage
+
+Every transcription the provider answers is recorded in the central store (`auth.db`, table `transcription_usage`) with its tenant, time, model, audio seconds and cost. Cached transcripts and failed calls cost nothing and are not recorded. Costs come from the provider's `usage.cost`, which OpenRouter returns; with a provider that sends no cost (OpenAI, Groq) the row has no cost, and `get_transcription_usage` reports how many transcriptions it could not price instead of counting them as free. Rows are kept after `delete_tenant` (the tenant shows as deleted) so past spend stays accountable. Recording starts with this version; earlier spend is only in the provider's dashboard. A failed write is logged as `tenant=<id> transcription usage not recorded` and never blocks the transcript.
 
 > [!WARNING]
 > With transcription on, the audio of your voice notes is sent to the configured provider (a third party such as OpenRouter). Check its data policy before enabling it.

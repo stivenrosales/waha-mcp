@@ -19,11 +19,12 @@ const tools = createAdminTools();
 const byName = (n: string) => tools.find((t) => t.name === n);
 
 describe("admin tools", () => {
-  it("exposes the six tools with the right annotations", () => {
+  it("exposes the seven tools with the right annotations", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "create_invite",
         "delete_tenant",
+        "get_transcription_usage",
         "list_tenants",
         "reset_password",
         "restore_tenant",
@@ -32,6 +33,7 @@ describe("admin tools", () => {
     );
     expect(byName("delete_tenant")?.annotations?.destructiveHint).toBe(true);
     expect(byName("list_tenants")?.annotations?.readOnlyHint).toBe(true);
+    expect(byName("get_transcription_usage")?.annotations?.readOnlyHint).toBe(true);
     for (const n of ["create_invite", "reset_password", "revoke_tenant", "restore_tenant"]) {
       expect(byName(n)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     }
@@ -75,6 +77,8 @@ describe("admin tool output through run()", () => {
       dataDir,
       publicBaseUrl: "https://mcp.example.com",
       logger: { info: () => {} },
+      timezone: "UTC",
+      now: () => Date.parse("2027-01-15T08:00:00.000Z"),
     });
     const owner = store.createTenant({ displayName: "Owner", wahaSession: "t_o", wrappedDek: "x" });
     await store.createUser({
@@ -91,7 +95,7 @@ describe("admin tool output through run()", () => {
         data: Record<string, unknown>;
       }>;
     };
-    return { run, store, sessions };
+    return { run, store, sessions, owner };
   }
 
   it("create_invite, revoke_tenant, restore_tenant and delete_tenant report clean text and data", async () => {
@@ -145,6 +149,52 @@ describe("admin tool output through run()", () => {
   it("keeps the full revoke description", () => {
     expect(byName("revoke_tenant")?.description).toBe(
       "Revokes a tenant's access: its sessions and tokens stop working immediately and its data is kept. Reversible with restore_tenant. The admin tenant cannot be revoked.",
+    );
+  });
+
+  it("get_transcription_usage lists each tenant, the total and missing costs", async () => {
+    const { run, store, owner } = await world();
+    store.recordTranscriptionUsage({
+      tenantId: owner.id,
+      at: "2027-01-10T00:00:00.000Z",
+      model: "m",
+      seconds: 12,
+      costUsd: 0.03,
+    });
+    store.recordTranscriptionUsage({
+      tenantId: owner.id,
+      at: "2027-01-11T00:00:00.000Z",
+      model: "m",
+      seconds: 3,
+      costUsd: null,
+    });
+    const res = await run("get_transcription_usage", {});
+    expect(res.text).toBe(
+      [
+        "Transcription usage 2027-01-01T00:00:00.000Z → 2027-01-15T08:00:00.000Z:",
+        `- Owner (${owner.id}) · 2 transcriptions · 15 s · $0.0300`,
+        "Total: 2 transcriptions · 15 s · $0.0300",
+        "1 transcription(s) without cost reported: the total does not include them.",
+      ].join("\n"),
+    );
+    expect(res.data).toMatchObject({ total: { count: 2, seconds: 15, rowsWithoutCost: 1 } });
+  });
+
+  it("get_transcription_usage says when the range is empty", async () => {
+    const { run } = await world();
+    const res = await run("get_transcription_usage", { from: "2026-12-01", to: "2026-12-31" });
+    expect(res.text).toBe(
+      "No transcriptions between 2026-12-01T00:00:00.000Z and 2026-12-31T23:59:59.999Z.",
+    );
+  });
+
+  it("get_transcription_usage is an admin tool and refuses without the admin service", async () => {
+    const tool = createAdminTools().find(
+      (t) => t.name === "get_transcription_usage",
+    ) as ToolDefinition;
+    expect(tool.annotations).toMatchObject({ readOnlyHint: true });
+    await expect(tool.run(tool.inputSchema.parse({}), {} as ToolRunContext)).rejects.toThrow(
+      "Admin tools are not available on this server.",
     );
   });
 });

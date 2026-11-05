@@ -396,6 +396,7 @@ for (const cache of [false, true])
       const adminOnly = [
         "create_invite",
         "delete_tenant",
+        "get_transcription_usage",
         "list_tenants",
         "reset_password",
         "restore_tenant",

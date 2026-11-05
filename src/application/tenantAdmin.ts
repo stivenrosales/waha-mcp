@@ -4,6 +4,7 @@ import path from "node:path";
 import { InvalidInputError } from "../domain/errors.js";
 import type { SessionAdmin, SessionState } from "../domain/ports/SessionAdmin.js";
 import type { TenantStatus, TenantStore } from "../domain/ports/TenantStore.js";
+import { localMidnight, parseRange, zoneFormatter, zoneParts } from "./dates.js";
 
 /** Invite and reset links live 72 hours. */
 export const LINK_TTL_MS = 72 * 3600_000;
@@ -20,6 +21,23 @@ export interface TenantOverview {
   createdAt: string;
   lastLoginAt: string | null;
   isAdmin: boolean;
+}
+
+export interface UsageTotals {
+  count: number;
+  seconds: number;
+  costUsd: number;
+  /** Transcriptions whose provider reported no cost: `costUsd` does not include them. */
+  rowsWithoutCost: number;
+}
+
+export interface TranscriptionUsageReport {
+  /** ISO instants, both inclusive. */
+  from: string;
+  to: string;
+  /** Most expensive first; `displayName` is null for a tenant deleted since. */
+  tenants: Array<{ id: string; displayName: string | null } & UsageTotals>;
+  total: UsageTotals;
 }
 
 export interface TenantAdmin {
@@ -47,6 +65,12 @@ export interface TenantAdmin {
     localCleanup: "ok" | "failed";
     wahaSession?: string;
   }>;
+  /** Paid transcriptions per tenant; the range defaults to the current month in `timezone`. */
+  transcriptionUsage(q: {
+    from?: string;
+    to?: string;
+    tenantId?: string;
+  }): Promise<TranscriptionUsageReport>;
 }
 
 export interface TenantAdminDeps {
@@ -59,6 +83,10 @@ export interface TenantAdminDeps {
   dataDir: string;
   publicBaseUrl: string;
   logger: { info(message: string): void };
+  /** IANA zone for usage ranges (`TIMEZONE`); defaults to UTC. */
+  timezone?: string;
+  /** Injectable clock for tests. */
+  now?: () => number;
 }
 
 const newSessionName = (): string => {
@@ -147,6 +175,43 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           return { tenantId: tenant.id, ...linkResult(tenant.id, "invite") };
         },
       );
+    },
+
+    async transcriptionUsage(q) {
+      const timezone = deps.timezone ?? "UTC";
+      const now = (deps.now ?? Date.now)();
+      const range = parseRange({ from: q.from, to: q.to }, timezone);
+      let from = range.from;
+      if (from === undefined) {
+        const fmt = zoneFormatter(timezone);
+        const p = zoneParts(fmt, now);
+        from = localMidnight(fmt, p.year ?? 1970, p.month ?? 1, 1);
+      }
+      // A bound is read to the second: count everything inside its last second.
+      const to = range.to === undefined ? now : range.to + 999;
+      if (from > to) throw new InvalidInputError('"from" must not be later than "to".');
+      const rows = tenants.transcriptionUsage({
+        fromIso: new Date(from).toISOString(),
+        toIso: new Date(to).toISOString(),
+        ...(q.tenantId ? { tenantId: q.tenantId } : {}),
+      });
+      const total: UsageTotals = { count: 0, seconds: 0, costUsd: 0, rowsWithoutCost: 0 };
+      for (const r of rows) {
+        total.count += r.count;
+        total.seconds += r.seconds;
+        total.costUsd += r.costUsd;
+        total.rowsWithoutCost += r.rowsWithoutCost;
+      }
+      return {
+        from: new Date(from).toISOString(),
+        to: new Date(to).toISOString(),
+        tenants: rows.map(({ tenantId, ...totals }) => ({
+          id: tenantId,
+          displayName: tenants.getTenant(tenantId)?.displayName ?? null,
+          ...totals,
+        })),
+        total,
+      };
     },
 
     async listTenants() {

@@ -40,6 +40,26 @@ export interface TranscriptionUsageReport {
   total: UsageTotals;
 }
 
+export interface ToolUsageTotals {
+  calls: number;
+  /** Calls that ended in an error. */
+  errors: number;
+}
+
+export interface ToolUsageReport {
+  /** ISO instants, both inclusive. */
+  from: string;
+  to: string;
+  /** Busiest first (ties: latest call first); `displayName` is null for a tenant deleted since. */
+  tenants: Array<
+    { id: string; displayName: string | null; lastAt: string } & ToolUsageTotals & {
+        /** Busiest tool first. */
+        tools: Array<{ tool: string; lastAt: string } & ToolUsageTotals>;
+      }
+  >;
+  total: ToolUsageTotals;
+}
+
 export interface TenantAdmin {
   /** Exactly one of `displayName` (new tenant) or `tenantId` (re-issue for a tenant with no user). */
   createInvite(q: {
@@ -74,6 +94,8 @@ export interface TenantAdmin {
     to?: string;
     tenantId?: string;
   }): Promise<TranscriptionUsageReport>;
+  /** MCP tool calls per tenant and tool; same range rules as `transcriptionUsage`. */
+  toolUsage(q: { from?: string; to?: string; tenantId?: string }): Promise<ToolUsageReport>;
 }
 
 export interface TenantAdminDeps {
@@ -136,6 +158,26 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
       throw new InvalidInputError(ADMIN_TENANT_MESSAGE);
   };
 
+  /**
+   * Usage ranges as ISO instants, both inclusive. Without `from`, the range starts on the 1st of
+   * the month holding `to` (the current month when both are omitted), in `timezone`.
+   */
+  const usageRange = (q: { from?: string; to?: string }): { from: string; to: string } => {
+    const timezone = deps.timezone ?? "UTC";
+    const now = (deps.now ?? Date.now)();
+    const range = parseRange({ from: q.from, to: q.to }, timezone);
+    // A bound is read to the second: count everything inside its last second.
+    const to = range.to === undefined ? now : range.to + 999;
+    let from = range.from;
+    if (from === undefined) {
+      const fmt = zoneFormatter(timezone);
+      const p = zoneParts(fmt, to);
+      from = localMidnight(fmt, p.year ?? 1970, p.month ?? 1, 1);
+    }
+    if (from > to) throw new InvalidInputError('"from" must not be later than "to".');
+    return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
+  };
+
   const linkResult = (tenantId: string, kind: "invite" | "reset") => {
     const { token, expiresAt } = tenants.issueLink(tenantId, kind, LINK_TTL_MS);
     return { url: `${base}/${kind}/${token}`, expiresAt: iso(expiresAt) };
@@ -181,22 +223,10 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
     },
 
     async transcriptionUsage(q) {
-      const timezone = deps.timezone ?? "UTC";
-      const now = (deps.now ?? Date.now)();
-      const range = parseRange({ from: q.from, to: q.to }, timezone);
-      // A bound is read to the second: count everything inside its last second.
-      const to = range.to === undefined ? now : range.to + 999;
-      let from = range.from;
-      if (from === undefined) {
-        // The month that holds the end of the range (the current one when `to` is omitted).
-        const fmt = zoneFormatter(timezone);
-        const p = zoneParts(fmt, to);
-        from = localMidnight(fmt, p.year ?? 1970, p.month ?? 1, 1);
-      }
-      if (from > to) throw new InvalidInputError('"from" must not be later than "to".');
+      const { from, to } = usageRange(q);
       const rows = tenants.transcriptionUsage({
-        fromIso: new Date(from).toISOString(),
-        toIso: new Date(to).toISOString(),
+        fromIso: from,
+        toIso: to,
         ...(q.tenantId ? { tenantId: q.tenantId } : {}),
       });
       const total: UsageTotals = { count: 0, seconds: 0, costUsd: 0, rowsWithoutCost: 0 };
@@ -207,8 +237,8 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
         total.rowsWithoutCost += r.rowsWithoutCost;
       }
       return {
-        from: new Date(from).toISOString(),
-        to: new Date(to).toISOString(),
+        from,
+        to,
         tenants: rows.map(({ tenantId, ...totals }) => ({
           id: tenantId,
           displayName: tenants.getTenant(tenantId)?.displayName ?? null,
@@ -216,6 +246,44 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
         })),
         total,
       };
+    },
+
+    async toolUsage(q) {
+      const { from, to } = usageRange(q);
+      const rows = tenants.toolUsage({
+        fromIso: from,
+        toIso: to,
+        ...(q.tenantId ? { tenantId: q.tenantId } : {}),
+      });
+      const byTenant = new Map<string, ToolUsageReport["tenants"][number]>();
+      for (const { tenantId, ...tool } of rows) {
+        let entry = byTenant.get(tenantId);
+        if (!entry) {
+          entry = {
+            id: tenantId,
+            displayName: tenants.getTenant(tenantId)?.displayName ?? null,
+            calls: 0,
+            errors: 0,
+            lastAt: tool.lastAt,
+            tools: [],
+          };
+          byTenant.set(tenantId, entry);
+        }
+        entry.calls += tool.calls;
+        entry.errors += tool.errors;
+        if (tool.lastAt > entry.lastAt) entry.lastAt = tool.lastAt;
+        entry.tools.push(tool);
+      }
+      const list = [...byTenant.values()].sort(
+        // Ties: most recently active first.
+        (a, b) => b.calls - a.calls || (a.lastAt > b.lastAt ? -1 : a.lastAt < b.lastAt ? 1 : 0),
+      );
+      const total: ToolUsageTotals = { calls: 0, errors: 0 };
+      for (const t of list) {
+        total.calls += t.calls;
+        total.errors += t.errors;
+      }
+      return { from, to, tenants: list, total };
     },
 
     async listTenants() {

@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "../../defineTool.js";
 import { createInviteTool } from "./createInvite.js";
 import { deleteTenantTool } from "./deleteTenant.js";
+import { getToolUsageTool } from "./getToolUsage.js";
 import { getTranscriptionUsageTool } from "./getTranscriptionUsage.js";
 import { listTenantsTool } from "./listTenants.js";
 import { resetPasswordTool } from "./resetPassword.js";
@@ -12,6 +13,7 @@ export function createAdminTools(): ToolDefinition[] {
   return [
     listTenantsTool,
     getTranscriptionUsageTool,
+    getToolUsageTool,
     createInviteTool,
     resetPasswordTool,
     revokeTenantTool,

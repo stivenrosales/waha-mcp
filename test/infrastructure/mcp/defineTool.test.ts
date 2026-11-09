@@ -49,4 +49,56 @@ describe("createToolHandler", () => {
     // A known error: no stack trace in the log.
     expect(lines.join("\n")).not.toContain("error stack");
   });
+
+  it("reports every call's tool, outcome and duration, never its arguments", async () => {
+    const calls: unknown[] = [];
+    const deps = {
+      mapper: async () => gowsMapper,
+      config,
+      onToolCall: (c: unknown) => calls.push(c),
+    } as unknown as ToolDeps;
+    const ok: ToolDefinition = {
+      name: "fine",
+      title: "Fine",
+      description: "Works.",
+      inputSchema: z.object({ secret: z.string() }),
+      run: async () => ({ text: "done", data: {} }),
+    };
+    const bad: ToolDefinition = {
+      ...ok,
+      name: "broken",
+      run: async () => {
+        throw new WhatsAppDisconnectedError();
+      },
+    };
+    await createToolHandler(ok, deps)({ secret: "hunter2" });
+    await createToolHandler(bad, deps)({ secret: "hunter2" });
+    expect(calls).toEqual([
+      { tool: "fine", outcome: "ok", ms: expect.any(Number) },
+      { tool: "broken", outcome: "WhatsAppDisconnectedError", ms: expect.any(Number) },
+    ]);
+    expect(JSON.stringify(calls)).not.toContain("hunter2");
+  });
+
+  it("answers the tool even when recording the call throws", async () => {
+    const lines: string[] = [];
+    const def: ToolDefinition = {
+      name: "fine",
+      title: "Fine",
+      description: "Works.",
+      inputSchema: z.object({}),
+      run: async () => ({ text: "done", data: {} }),
+    };
+    const result = await createToolHandler(def, {
+      mapper: async () => gowsMapper,
+      config,
+      logger: { info: (m: string) => lines.push(m) },
+      onToolCall: () => {
+        throw new Error("disk full");
+      },
+    } as unknown as ToolDeps)({});
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0]).toMatchObject({ text: "done" });
+    expect(lines).toContain("tool=fine usage not recorded");
+  });
 });

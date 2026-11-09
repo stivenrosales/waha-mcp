@@ -411,3 +411,83 @@ describe("transcriptionUsage", () => {
     ).rejects.toBeInstanceOf(InvalidInputError);
   });
 });
+
+describe("toolUsage", () => {
+  // T0 is 2027-01-15T08:00:00Z, i.e. 03:00 on 2027-01-15 in Lima (UTC-5).
+  const call = (tenantId: string, at: string, tool: string, outcome = "ok") => ({
+    tenantId,
+    at,
+    tool,
+    outcome,
+    ms: 5,
+  });
+
+  it("defaults to the current month in the timezone", async () => {
+    const { admin } = await setup();
+    const report = await admin.toolUsage({});
+    expect(report.from).toBe("2027-01-01T05:00:00.000Z");
+    expect(report.to).toBe(new Date(T0).toISOString());
+    expect(report.tenants).toEqual([]);
+    expect(report.total).toEqual({ calls: 0, errors: 0 });
+  });
+
+  it("groups tools per tenant, busiest tenant first, keeping deleted tenants", async () => {
+    const { admin, tenants, adminTenant } = await setup();
+    const jose = tenants.createTenant({
+      displayName: "Jose",
+      wahaSession: "t_josejosejo",
+      wrappedDek: "x",
+    });
+    tenants.recordToolCall(call(adminTenant.id, "2027-01-10T12:00:00.000Z", "list_chats"));
+    tenants.recordToolCall(call(jose.id, "2027-01-11T12:00:00.000Z", "list_chats"));
+    tenants.recordToolCall(call(jose.id, "2027-01-12T12:00:00.000Z", "send_text", "Boom"));
+    tenants.recordToolCall(call(jose.id, "2027-01-12T13:00:00.000Z", "list_chats"));
+    tenants.recordToolCall(call("gone-tenant", "2027-01-09T12:00:00.000Z", "get_media"));
+    const report = await admin.toolUsage({ from: "2027-01-01", to: "2027-01-31" });
+    expect(report.tenants).toEqual([
+      {
+        id: jose.id,
+        displayName: "Jose",
+        calls: 3,
+        errors: 1,
+        lastAt: "2027-01-12T13:00:00.000Z",
+        tools: [
+          { tool: "list_chats", calls: 2, errors: 0, lastAt: "2027-01-12T13:00:00.000Z" },
+          { tool: "send_text", calls: 1, errors: 1, lastAt: "2027-01-12T12:00:00.000Z" },
+        ],
+      },
+      {
+        id: adminTenant.id,
+        displayName: "Owner",
+        calls: 1,
+        errors: 0,
+        lastAt: "2027-01-10T12:00:00.000Z",
+        tools: [{ tool: "list_chats", calls: 1, errors: 0, lastAt: "2027-01-10T12:00:00.000Z" }],
+      },
+      {
+        id: "gone-tenant",
+        displayName: null,
+        calls: 1,
+        errors: 0,
+        lastAt: "2027-01-09T12:00:00.000Z",
+        tools: [{ tool: "get_media", calls: 1, errors: 0, lastAt: "2027-01-09T12:00:00.000Z" }],
+      },
+    ]);
+    expect(report.total).toEqual({ calls: 5, errors: 1 });
+  });
+
+  it("filters one tenant", async () => {
+    const { admin, tenants, adminTenant } = await setup();
+    tenants.recordToolCall(call(adminTenant.id, "2027-01-10T12:00:00.000Z", "a"));
+    tenants.recordToolCall(call("other", "2027-01-10T12:00:00.000Z", "a"));
+    const report = await admin.toolUsage({ tenantId: adminTenant.id });
+    expect(report.tenants.map((t) => t.id)).toEqual([adminTenant.id]);
+  });
+
+  it("rejects from after to", async () => {
+    const { admin } = await setup();
+    await expect(admin.toolUsage({ from: "2027-01-10", to: "2027-01-01" })).rejects.toThrow(
+      '"from" must not be later than "to".',
+    );
+  });
+});

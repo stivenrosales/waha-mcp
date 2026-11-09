@@ -6,6 +6,7 @@ import type {
   Tenant,
   TenantStatus,
   TenantStore,
+  ToolUsageRow,
   TranscriptionUsageRow,
   User,
 } from "../../domain/ports/TenantStore.js";
@@ -47,6 +48,16 @@ CREATE TABLE IF NOT EXISTS transcription_usage (
   cost_usd REAL
 );
 CREATE INDEX IF NOT EXISTS transcription_usage_at ON transcription_usage (at, tenant_id);
+-- Same accounting rule: no foreign key. Only the tool name, outcome and duration.
+CREATE TABLE IF NOT EXISTS tool_calls (
+  id INTEGER PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  at TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tool_calls_at ON tool_calls (at, tenant_id);
 `;
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
@@ -150,6 +161,39 @@ export function createSqliteTenantStore(
           seconds: Number(r.seconds),
           costUsd: Number(r.cost),
           rowsWithoutCost: Number(r.without_cost),
+        }),
+      );
+    },
+
+    recordToolCall({ tenantId, at, tool, outcome, ms }) {
+      db.prepare(
+        "INSERT INTO tool_calls (tenant_id, at, tool, outcome, ms) VALUES (?, ?, ?, ?, ?)",
+      ).run(tenantId, at, tool, outcome, Math.round(ms));
+    },
+
+    toolUsage({ fromIso, toIso, tenantId }) {
+      const rows = db
+        .prepare(
+          `SELECT tenant_id, tool, COUNT(*) AS calls,
+             SUM(CASE WHEN outcome = 'ok' THEN 0 ELSE 1 END) AS errors, MAX(at) AS last_at
+           FROM tool_calls
+           WHERE at >= ? AND at <= ? AND (? IS NULL OR tenant_id = ?)
+           GROUP BY tenant_id, tool ORDER BY tenant_id, calls DESC, tool`,
+        )
+        .all(fromIso, toIso, tenantId ?? null, tenantId ?? null) as {
+        tenant_id: string;
+        tool: string;
+        calls: number;
+        errors: number;
+        last_at: string;
+      }[];
+      return rows.map(
+        (r): ToolUsageRow => ({
+          tenantId: r.tenant_id,
+          tool: r.tool,
+          calls: Number(r.calls),
+          errors: Number(r.errors),
+          lastAt: r.last_at,
         }),
       );
     },

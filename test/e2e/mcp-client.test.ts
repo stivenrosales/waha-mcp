@@ -156,6 +156,7 @@ interface Setup {
   tenantId: string;
   /** Access token of a member (non-admin) tenant's user. */
   memberToken: string;
+  memberTenantId: string;
 }
 
 const scratchDirs: string[] = [];
@@ -294,6 +295,7 @@ function setup(
     app,
     token: accessToken,
     memberToken,
+    memberTenantId: member.id,
     gateway,
     uploads,
     uploadLinks,
@@ -396,6 +398,7 @@ for (const cache of [false, true])
       const adminOnly = [
         "create_invite",
         "delete_tenant",
+        "get_tool_usage",
         "get_transcription_usage",
         "list_tenants",
         "reset_password",
@@ -407,6 +410,29 @@ for (const cache of [false, true])
       const listed = await call(admin, "list_tenants");
       expect(listed.isError).toBeFalsy();
       expect(textOf(listed)).toContain("Friend");
+    });
+
+    it("records each tenant's tool calls and reports them to the admin", async () => {
+      const s = setup();
+      const member = await connect(s, s.memberToken);
+      await call(member, "list_chats");
+      await call(member, "get_messages", { chat_id: "nobody@c.us" });
+      const admin = await connect(s);
+      const res = await call(admin, "get_tool_usage", { tenant_id: s.memberTenantId });
+      expect(res.isError).toBeFalsy();
+      const data = res.structuredContent as {
+        tenants: Array<{ id: string; calls: number; tools: Array<{ tool: string }> }>;
+      };
+      expect(data.tenants).toHaveLength(1);
+      expect(data.tenants[0]?.id).toBe(s.memberTenantId);
+      expect(data.tenants[0]?.calls).toBe(2);
+      expect(data.tenants[0]?.tools.map((t) => t.tool).sort()).toEqual([
+        "get_messages",
+        "list_chats",
+      ]);
+      // The admin's own call is recorded under the admin tenant, not the member's.
+      const mine = await call(admin, "get_tool_usage", { tenant_id: s.tenantId });
+      expect(textOf(mine)).toContain("get_tool_usage 1");
     });
 
     it("send_text rewrites Markdown for WhatsApp and reports the text it sent", async () => {

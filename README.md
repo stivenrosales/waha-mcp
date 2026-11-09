@@ -142,6 +142,7 @@ Admin tools, listed only for the admin (members never see them):
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `list_tenants`            | Every tenant with its status, WhatsApp connection state, creation date and last login. No message data.                                                                      |
 | `get_transcription_usage` | Transcription spend per tenant for a range (default: the current month): count, audio seconds and USD cost, plus the total. See [transcription usage](#transcription-usage). |
+| `get_tool_usage`          | Tool calls per tenant for a range (default: the current month): calls and errors per tool and the last call, plus the total. See [tool usage](#tool-usage).                  |
 | `create_invite`           | New tenant + invite link; with `tenant_id`, a new link for a tenant that has not signed up yet.                                                                              |
 | `reset_password`          | Single-use password reset link (72 hours) for a tenant's user.                                                                                                               |
 | `revoke_tenant`           | Blocks a tenant: its tokens stop working at once and its links answer 404. Data is kept.                                                                                     |
@@ -207,6 +208,10 @@ Every transcription the provider answers is recorded in the central store (`auth
 
 > [!WARNING]
 > With transcription on, the audio of your voice notes is sent to the configured provider (a third party such as OpenRouter). Check its data policy before enabling it.
+
+### Tool usage
+
+Every MCP tool call is recorded in the central store (`auth.db`, table `tool_calls`) with its tenant, time, tool name, outcome (`ok` or the error's name) and duration. Arguments and results are never recorded. `get_tool_usage` groups them per tenant and tool. LLM tokens are not counted: each user's client pays for its own model, so the server never sees them. Rows are kept after `delete_tenant`, as with transcription usage. Recording starts with this version. A failed write is logged as `tool=<name> usage not recorded` and never blocks the answer.
 
 ## Files and PDFs
 

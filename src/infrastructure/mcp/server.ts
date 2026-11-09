@@ -6,7 +6,7 @@ import { ICON_DATA_URI } from "../http/icon.js";
 import { releaseWhenDone } from "../http/releaseWhenDone.js";
 import type { TenantRegistry } from "../tenants/registry.js";
 import type { TenantRuntime } from "../tenants/runtime.js";
-import { type Logger, type ToolDefinition, toMcpTool } from "./defineTool.js";
+import { type Logger, type ToolCallRecord, type ToolDefinition, toMcpTool } from "./defineTool.js";
 import { ADMIN_INSTRUCTIONS } from "./instructions.js";
 import { registerPrompts } from "./prompts.js";
 
@@ -25,6 +25,8 @@ export interface CreateMcpServerOptions {
   /** Idle timeout for media bodies read by `get_media` (default 30 s); injectable for tests. */
   mediaIdleTimeoutMs?: number;
   logger?: Logger;
+  /** Usage accounting: every tool call, attributed to the caller's tenant. */
+  recordToolCall?: (tenantId: string, call: ToolCallRecord) => void;
 }
 
 export interface McpServerHandle {
@@ -63,8 +65,17 @@ const invalidToken = (config: Config): Response =>
  * the response body ends or is cancelled (tools keep running while an SSE response streams).
  */
 export function createMcpServer(options: CreateMcpServerOptions): McpServerHandle {
-  const { tools, adminTools, instructions, config, registry, admin, logger, mediaIdleTimeoutMs } =
-    options;
+  const {
+    tools,
+    adminTools,
+    instructions,
+    config,
+    registry,
+    admin,
+    logger,
+    mediaIdleTimeoutMs,
+    recordToolCall,
+  } = options;
   const adminInstructions = `${instructions}\n\n${ADMIN_INSTRUCTIONS}`;
 
   const http = createMcpHandler((ctx) => {
@@ -84,6 +95,9 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
       mediaIdleTimeoutMs,
       admin: isAdmin ? admin : null,
       logger,
+      ...(recordToolCall
+        ? { onToolCall: (call: ToolCallRecord) => recordToolCall(extra.auth.tenantId, call) }
+        : {}),
     };
     for (const tool of tools) toMcpTool(server, tool, deps);
     if (isAdmin) for (const tool of adminTools) toMcpTool(server, tool, deps);

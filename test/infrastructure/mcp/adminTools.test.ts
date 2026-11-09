@@ -19,11 +19,12 @@ const tools = createAdminTools();
 const byName = (n: string) => tools.find((t) => t.name === n);
 
 describe("admin tools", () => {
-  it("exposes the seven tools with the right annotations", () => {
+  it("exposes the eight tools with the right annotations", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "create_invite",
         "delete_tenant",
+        "get_tool_usage",
         "get_transcription_usage",
         "list_tenants",
         "reset_password",
@@ -34,6 +35,7 @@ describe("admin tools", () => {
     expect(byName("delete_tenant")?.annotations?.destructiveHint).toBe(true);
     expect(byName("list_tenants")?.annotations?.readOnlyHint).toBe(true);
     expect(byName("get_transcription_usage")?.annotations?.readOnlyHint).toBe(true);
+    expect(byName("get_tool_usage")?.annotations?.readOnlyHint).toBe(true);
     for (const n of ["create_invite", "reset_password", "revoke_tenant", "restore_tenant"]) {
       expect(byName(n)?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     }
@@ -195,6 +197,33 @@ describe("admin tool output through run()", () => {
     expect(tool.annotations).toMatchObject({ readOnlyHint: true });
     await expect(tool.run(tool.inputSchema.parse({}), {} as ToolRunContext)).rejects.toThrow(
       "Admin tools are not available on this server.",
+    );
+  });
+
+  it("get_tool_usage lists each tenant with its tools, and the total", async () => {
+    const { run, store, owner } = await world();
+    const rec = (at: string, tool: string, outcome = "ok") =>
+      store.recordToolCall({ tenantId: owner.id, at, tool, outcome, ms: 3 });
+    rec("2027-01-10T00:00:00.000Z", "list_chats");
+    rec("2027-01-11T00:00:00.000Z", "list_chats");
+    rec("2027-01-12T00:00:00.000Z", "send_text", "Boom");
+    const res = await run("get_tool_usage", {});
+    expect(res.text).toBe(
+      [
+        "Tool usage 2027-01-01T00:00:00.000Z → 2027-01-15T08:00:00.000Z:",
+        `- Owner (${owner.id}) · 3 calls · 1 error · last 2027-01-12T00:00:00.000Z`,
+        "  list_chats 2 · send_text 1 (1 error)",
+        "Total: 3 calls · 1 error",
+      ].join("\n"),
+    );
+    expect(res.data).toMatchObject({ total: { calls: 3, errors: 1 } });
+  });
+
+  it("get_tool_usage says when the range is empty", async () => {
+    const { run } = await world();
+    const res = await run("get_tool_usage", { from: "2026-12-01", to: "2026-12-31" });
+    expect(res.text).toBe(
+      "No tool calls between 2026-12-01T00:00:00.000Z and 2026-12-31T23:59:59.999Z.",
     );
   });
 });

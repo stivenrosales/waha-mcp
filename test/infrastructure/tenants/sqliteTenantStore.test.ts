@@ -327,4 +327,55 @@ describe("sqlite tenant store", () => {
       expect(store.transcriptionUsage(RANGE)).toEqual([]);
     });
   });
+
+  describe("tool usage", () => {
+    const RANGE = { fromIso: "2026-11-01T00:00:00.000Z", toIso: "2026-11-30T23:59:59.999Z" };
+    const call = (tenantId: string, at: string, tool: string, outcome = "ok", ms = 10) => ({
+      tenantId,
+      at,
+      tool,
+      outcome,
+      ms,
+    });
+
+    it("counts calls, errors and the last call per tenant and tool, busiest tool first", () => {
+      const { store, tenant } = setup();
+      store.recordToolCall(call(tenant.id, "2026-11-02T10:00:00.000Z", "list_chats"));
+      store.recordToolCall(call(tenant.id, "2026-11-03T10:00:00.000Z", "list_chats"));
+      store.recordToolCall(
+        call(tenant.id, "2026-11-04T10:00:00.000Z", "get_messages", "WahaUnavailableError"),
+      );
+      store.recordToolCall(call("other", "2026-11-05T10:00:00.000Z", "send_text"));
+      expect(store.toolUsage(RANGE)).toHaveLength(3);
+      expect(store.toolUsage({ ...RANGE, tenantId: tenant.id })).toEqual([
+        {
+          tenantId: tenant.id,
+          tool: "list_chats",
+          calls: 2,
+          errors: 0,
+          lastAt: "2026-11-03T10:00:00.000Z",
+        },
+        {
+          tenantId: tenant.id,
+          tool: "get_messages",
+          calls: 1,
+          errors: 1,
+          lastAt: "2026-11-04T10:00:00.000Z",
+        },
+      ]);
+    });
+
+    it("filters by inclusive range bounds and tenant, and keeps rows after deleteTenant", () => {
+      const { store, tenant } = setup();
+      store.recordToolCall(call(tenant.id, "2026-10-31T23:59:59.999Z", "a"));
+      store.recordToolCall(call(tenant.id, RANGE.fromIso, "a"));
+      store.recordToolCall(call(tenant.id, RANGE.toIso, "a"));
+      store.recordToolCall(call(tenant.id, "2026-12-01T00:00:00.000Z", "a"));
+      store.recordToolCall(call("other", "2026-11-10T00:00:00.000Z", "a"));
+      store.deleteTenant(tenant.id);
+      const one = store.toolUsage({ ...RANGE, tenantId: tenant.id });
+      expect(one).toMatchObject([{ tenantId: tenant.id, tool: "a", calls: 2 }]);
+      expect(store.toolUsage(RANGE)).toHaveLength(2);
+    });
+  });
 });

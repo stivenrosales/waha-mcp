@@ -29,6 +29,17 @@ export interface TranscriptionUsageRow {
   rowsWithoutCost: number;
 }
 
+/** One tenant's calls to one tool in a range. */
+export interface ToolUsageRow {
+  tenantId: string;
+  tool: string;
+  calls: number;
+  /** Calls that ended in an error (any outcome other than "ok"). */
+  errors: number;
+  /** ISO instant of the latest call. */
+  lastAt: string;
+}
+
 export interface TenantStore {
   createTenant(q: { displayName: string; wahaSession: string; wrappedDek: string }): Tenant;
   getTenant(id: string): Tenant | null;
@@ -79,4 +90,17 @@ export interface TenantStore {
     toIso: string;
     tenantId?: string;
   }): TranscriptionUsageRow[];
+  /**
+   * One MCP tool call: its name, "ok" or the error's name, and its duration. Never arguments
+   * or results. Kept after the tenant is deleted (internal accounting).
+   */
+  recordToolCall(q: {
+    tenantId: string;
+    at: string;
+    tool: string;
+    outcome: string;
+    ms: number;
+  }): void;
+  /** Per tenant (by id), busiest tool first; both ISO bounds inclusive. */
+  toolUsage(q: { fromIso: string; toIso: string; tenantId?: string }): ToolUsageRow[];
 }

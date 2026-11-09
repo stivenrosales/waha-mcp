@@ -96,6 +96,16 @@ export interface ToolDeps {
   /** Default null: admin tools then fail with a clear error. */
   admin?: TenantAdmin | null;
   logger?: Logger;
+  /** Told about every call once it ends (usage accounting); a throw is logged, never surfaced. */
+  onToolCall?: (call: ToolCallRecord) => void;
+}
+
+/** What usage accounting learns about a call: never its arguments or its result. */
+export interface ToolCallRecord {
+  tool: string;
+  /** "ok", or the name of the error the call ended with. */
+  outcome: string;
+  ms: number;
 }
 
 /** Writes to WhatsApp: clients ask the owner to approve every call. */
@@ -152,6 +162,13 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
   deps: ToolDeps,
 ): (input: z.output<InputSchema>) => Promise<CallToolResult> {
   const logger = deps.logger ?? { info: () => {} };
+  const report = (outcome: string, ms: number): void => {
+    try {
+      deps.onToolCall?.({ tool: def.name, outcome, ms });
+    } catch {
+      logger.info(`tool=${def.name} usage not recorded`);
+    }
+  };
   return async (input) => {
     const start = Date.now();
     try {
@@ -168,16 +185,24 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         uploadLinks: deps.uploadLinks,
         admin: deps.admin ?? null,
       });
-      logger.info(`tool=${def.name} ms=${Date.now() - start} result=ok`);
-      if ("content" in out) return { content: out.content };
+      const ms = Date.now() - start;
+      logger.info(`tool=${def.name} ms=${ms} result=ok`);
+      if ("content" in out) {
+        report("ok", ms);
+        return { content: out.content };
+      }
       const structuredContent = def.outputSchema
         ? (def.outputSchema.parse(out.data) as Record<string, unknown>)
         : undefined;
+      // After the output check, so a call that fails it is counted once, as an error.
+      report("ok", ms);
       return { content: [{ type: "text", text: out.text }], structuredContent };
     } catch (error) {
       const { message, unexpected } = describeError(error, deps.config);
       const name = error instanceof Error ? error.name : "UnknownError";
-      logger.info(`tool=${def.name} ms=${Date.now() - start} result=${name}`);
+      const ms = Date.now() - start;
+      logger.info(`tool=${def.name} ms=${ms} result=${name}`);
+      report(name, ms);
       if (unexpected)
         logger.info(
           error instanceof Error

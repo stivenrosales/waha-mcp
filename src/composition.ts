@@ -75,6 +75,8 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     registry,
     admin,
     logger,
+    recordToolCall: (tenantId, call) =>
+      tenants.recordToolCall({ tenantId, at: new Date().toISOString(), ...call }),
     ...(deps.mediaIdleTimeoutMs !== undefined
       ? { mediaIdleTimeoutMs: deps.mediaIdleTimeoutMs }
       : {}),

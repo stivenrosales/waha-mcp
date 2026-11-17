@@ -4,24 +4,24 @@ Date: 2026-11-17. Throwaway spike for `2026-11-16-missions-design.md` ("Spike be
 OpenRouter items were run **live** against `anthropic/claude-haiku-5.5` with `@anthropic-ai/sdk` 1.4.0
 (`baseURL: "https://openrouter.ai/api"`, `authToken`, `apiKey: null`). WAHA items come from the official
 docs (waha.devlike.pro) and the WAHA source at tag `2026.9.2` (github.com/devlikeapro/waha); **no live WAHA
-call was made**, so every WAHA item is marked *per docs/source — to confirm live in T4/T11*.
+call was made**, so every WAHA item is marked _per docs/source — to confirm live in T4/T11_.
 
 Total OpenRouter spend for the spike: about **US$0.00095** (15 billed requests).
 
 ## 1. OpenRouter `/api/v1/messages` with Haiku 5.5
 
-| # | Item | Result | Evidence |
-|---|------|--------|----------|
-| 1 | `provider` body field accepted on `/api/v1/messages` | **Works** | Request with `provider: {order:["anthropic"], allow_fallbacks:true}` → 200. |
-| 2 | Provider ordering honored | **Works** | `order:["amazon-bedrock"], allow_fallbacks:false` → served by Amazon Bedrock (body `provider: "Amazon Bedrock"`, id `msg_bdrk_…`, `/generation` `provider_name: "Amazon Bedrock"`). `order:["nonexistent-provider-xyz"], allow_fallbacks:false` → **404** `not_found_error` "No endpoints found for anthropic/claude-haiku-5.5. Every candidate endpoint was removed during routing…". |
-| 3 | Which provider served | **Works, two ways** | (a) Response body has a top-level **`provider`** string (`"Anthropic"`, `"Amazon Bedrock"`) — no extra call needed. (b) Response header **`x-generation-id`** (`gen-…`) → `GET https://openrouter.ai/api/v1/generation?id=<gen id>` returns `provider_name`, `model` (`anthropic/claude-haiku-5.5-20261007`), `total_cost`, `provider_responses[]`. The Anthropic message id (`msg_…`) is **rejected** by `/generation` (400 "Invalid generation ID"). No provider response header exists. With `order:["anthropic"]` the Anthropic endpoint served every call. |
-| 4 | `role: "system"` message mid-`messages` | **Works** | Last entry after a user turn: model obeyed ("reply PINEAPPLE" → `PINEAPPLE`). Between a user and an assistant turn: obeyed later (codeword → `MANGO`). |
-| 5 | `output_config.effort` | **Works (validated)** | `low` and `high` → 200. `effort: "bogus"` → 400 `invalid_request_error`, metadata lists `"low"\|"medium"\|"high"\|"xhigh"\|"max"` at path `output_config.effort` (so OpenRouter validates and forwards it). |
-| 6 | `cache_control` | **Works** | System block (~3.7k tokens) with `cache_control: {type:"ephemeral"}`: turn 1 `cache_creation_input_tokens: 3731`, turn 2 `cache_read_input_tokens: 3731`; cost fell from $0.00047 to $0.000043. |
-| 7 | `strict: true` tool + `tool_choice: {type:"auto"}` | **Works (accepted)** | `stop_reason: "tool_use"`, input `{"outcome":"success","summary":"…"}` matched the schema (`additionalProperties:false`, enum). Strict enforcement itself was not stress-tested. |
-| 8 | Image block (base64 PNG) | **Works** | 16×16 red PNG → `Red`. |
-| 9 | PDF block (base64 `document`) | **Works** | Hand-written one-page PDF "INVOICE 4471" → `INVOICE 4471` (1594 input tokens). |
-| 10 | `usage.cost` | **Present, USD** | Every response has `usage.cost` (number, USD), plus `usage.cost_details.{upstream_inference_cost, upstream_inference_prompt_cost, upstream_inference_completions_cost}` and `usage.is_byok`. Check: 18 in × $0.10/M + 4 out × $0.50/M = $0.0000038 = `usage.cost`. Equals `/generation` `total_cost`. |
+| #   | Item                                                 | Result                | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --- | ---------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `provider` body field accepted on `/api/v1/messages` | **Works**             | Request with `provider: {order:["anthropic"], allow_fallbacks:true}` → 200.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 2   | Provider ordering honored                            | **Works**             | `order:["amazon-bedrock"], allow_fallbacks:false` → served by Amazon Bedrock (body `provider: "Amazon Bedrock"`, id `msg_bdrk_…`, `/generation` `provider_name: "Amazon Bedrock"`). `order:["nonexistent-provider-xyz"], allow_fallbacks:false` → **404** `not_found_error` "No endpoints found for anthropic/claude-haiku-5.5. Every candidate endpoint was removed during routing…".                                                                                                                                                                          |
+| 3   | Which provider served                                | **Works, two ways**   | (a) Response body has a top-level **`provider`** string (`"Anthropic"`, `"Amazon Bedrock"`) — no extra call needed. (b) Response header **`x-generation-id`** (`gen-…`) → `GET https://openrouter.ai/api/v1/generation?id=<gen id>` returns `provider_name`, `model` (`anthropic/claude-haiku-5.5-20261007`), `total_cost`, `provider_responses[]`. The Anthropic message id (`msg_…`) is **rejected** by `/generation` (400 "Invalid generation ID"). No provider response header exists. With `order:["anthropic"]` the Anthropic endpoint served every call. |
+| 4   | `role: "system"` message mid-`messages`              | **Works**             | Last entry after a user turn: model obeyed ("reply PINEAPPLE" → `PINEAPPLE`). Between a user and an assistant turn: obeyed later (codeword → `MANGO`).                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 5   | `output_config.effort`                               | **Works (validated)** | `low` and `high` → 200. `effort: "bogus"` → 400 `invalid_request_error`, metadata lists `"low"\|"medium"\|"high"\|"xhigh"\|"max"` at path `output_config.effort` (so OpenRouter validates and forwards it).                                                                                                                                                                                                                                                                                                                                                     |
+| 6   | `cache_control`                                      | **Works**             | System block (~3.7k tokens) with `cache_control: {type:"ephemeral"}`: turn 1 `cache_creation_input_tokens: 3731`, turn 2 `cache_read_input_tokens: 3731`; cost fell from $0.00047 to $0.000043.                                                                                                                                                                                                                                                                                                                                                                 |
+| 7   | `strict: true` tool + `tool_choice: {type:"auto"}`   | **Works (accepted)**  | `stop_reason: "tool_use"`, input `{"outcome":"success","summary":"…"}` matched the schema (`additionalProperties:false`, enum). Strict enforcement itself was not stress-tested.                                                                                                                                                                                                                                                                                                                                                                                |
+| 8   | Image block (base64 PNG)                             | **Works**             | 16×16 red PNG → `Red`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 9   | PDF block (base64 `document`)                        | **Works**             | Hand-written one-page PDF "INVOICE 4471" → `INVOICE 4471` (1594 input tokens).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 10  | `usage.cost`                                         | **Present, USD**      | Every response has `usage.cost` (number, USD), plus `usage.cost_details.{upstream_inference_cost, upstream_inference_prompt_cost, upstream_inference_completions_cost}` and `usage.is_byok`. Check: 18 in × $0.10/M + 4 out × $0.50/M = $0.0000038 = `usage.cost`. Equals `/generation` `total_cost`.                                                                                                                                                                                                                                                           |
 
 ### Response shape (observed)
 
@@ -52,19 +52,19 @@ Other observations:
 
 ## 2. WAHA 2026.9.2 (GOWS) webhooks — per docs/source, to confirm live in T4/T11
 
-| # | Item | Result | Evidence |
-|---|------|--------|----------|
-| 1 | Session config shape | Per docs | `config.webhooks[]` with `url`, `events`, `hmac.key`, `retries.{policy,delaySeconds,attempts}`, `customHeaders[{name,value}]` (docs "Events", "Sessions"). |
-| 2 | Registering on an existing session | Per docs — **caveat** | `PUT /api/sessions/{session}` takes the **full** new config; if the session is not `STOPPED` it is **stopped and started** again. So T4 must GET the current config, merge `webhooks`, PUT once, and expect a restart. |
-| 3 | Event names | Per docs/source | `message` (GOWS: only messages **not** from me), `message.any` (from me + others), `session.status`, plus `message.reaction`, `message.ack`, `message.edited`, `message.revoked`, … |
-| 4 | Signature | Per source | Headers `X-Webhook-Hmac` (hex) and `X-Webhook-Hmac-Algorithm: sha512`; `crypto.createHmac("sha512", hmac.key).update(body).digest("hex")` where `body` is the exact JSON string POSTed. Only sent when `hmac.key` is set. |
-| 5 | Other headers | Per source | `X-Webhook-Request-Id` (uniqid), `X-Webhook-Timestamp` (= envelope `timestamp`, ms; **not** part of the HMAC), `User-Agent: WAHA/<version>`, `content-type: application/json`, plus `customHeaders`. |
-| 6 | Retries | Per source — **caveat** | Defaults: **15 attempts, 2 s, constant**. `retryCondition: () => true`: any failure, **including 4xx such as 401**, is retried. Delivery is fire-and-forget (`setImmediate` per event), so ordering across events is not guaranteed. |
-| 7 | Incoming DM payload | Per source | `message` and `message.any`, `fromMe:false`, `source:"app"`. |
-| 8 | `fromMe` typed on the phone | Per source | Only `message.any`; `fromMe:true`, `source:"app"` (sender device id ≠ WAHA's device id). |
-| 9 | Sent via `/api/sendText` | Per source/docs | Only `message.any`; `fromMe:true`, `source:"api"` (sender device id = WAHA's device). Whether GOWS echoes our own sends at all must be confirmed live. Note: every send through this WAHA device (missions **and** MCP `send_text`) is `source:"api"`. |
-| 10 | `session.status` payload | Per source | `{name, status, statuses:[{status,timestamp}] (last 3), data}`; `status` ∈ `STOPPED, STARTING, SCAN_QR_CODE, PASSKEY_REQUIRED, PASSKEY_CONFIRMATION_REQUIRED, WORKING, FAILED`. WORKING is delayed up to 2 s until `me` is known. |
-| 11 | Payload accepted by `EngineMapper.message` | **Yes** (source + synthetic check) | See §2.3. |
+| #   | Item                                       | Result                             | Evidence                                                                                                                                                                                                                                               |
+| --- | ------------------------------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Session config shape                       | Per docs                           | `config.webhooks[]` with `url`, `events`, `hmac.key`, `retries.{policy,delaySeconds,attempts}`, `customHeaders[{name,value}]` (docs "Events", "Sessions").                                                                                             |
+| 2   | Registering on an existing session         | Per docs — **caveat**              | `PUT /api/sessions/{session}` takes the **full** new config; if the session is not `STOPPED` it is **stopped and started** again. So T4 must GET the current config, merge `webhooks`, PUT once, and expect a restart.                                 |
+| 3   | Event names                                | Per docs/source                    | `message` (GOWS: only messages **not** from me), `message.any` (from me + others), `session.status`, plus `message.reaction`, `message.ack`, `message.edited`, `message.revoked`, …                                                                    |
+| 4   | Signature                                  | Per source                         | Headers `X-Webhook-Hmac` (hex) and `X-Webhook-Hmac-Algorithm: sha512`; `crypto.createHmac("sha512", hmac.key).update(body).digest("hex")` where `body` is the exact JSON string POSTed. Only sent when `hmac.key` is set.                              |
+| 5   | Other headers                              | Per source                         | `X-Webhook-Request-Id` (uniqid), `X-Webhook-Timestamp` (= envelope `timestamp`, ms; **not** part of the HMAC), `User-Agent: WAHA/<version>`, `content-type: application/json`, plus `customHeaders`.                                                   |
+| 6   | Retries                                    | Per source — **caveat**            | Defaults: **15 attempts, 2 s, constant**. `retryCondition: () => true`: any failure, **including 4xx such as 401**, is retried. Delivery is fire-and-forget (`setImmediate` per event), so ordering across events is not guaranteed.                   |
+| 7   | Incoming DM payload                        | Per source                         | `message` and `message.any`, `fromMe:false`, `source:"app"`.                                                                                                                                                                                           |
+| 8   | `fromMe` typed on the phone                | Per source                         | Only `message.any`; `fromMe:true`, `source:"app"` (sender device id ≠ WAHA's device id).                                                                                                                                                               |
+| 9   | Sent via `/api/sendText`                   | Per source/docs                    | Only `message.any`; `fromMe:true`, `source:"api"` (sender device id = WAHA's device). Whether GOWS echoes our own sends at all must be confirmed live. Note: every send through this WAHA device (missions **and** MCP `send_text`) is `source:"api"`. |
+| 10  | `session.status` payload                   | Per source                         | `{name, status, statuses:[{status,timestamp}] (last 3), data}`; `status` ∈ `STOPPED, STARTING, SCAN_QR_CODE, PASSKEY_REQUIRED, PASSKEY_CONFIRMATION_REQUIRED, WORKING, FAILED`. WORKING is delayed up to 2 s until `me` is known.                      |
+| 11  | Payload accepted by `EngineMapper.message` | **Yes** (source + synthetic check) | See §2.3.                                                                                                                                                                                                                                              |
 
 ### 2.1 Session config (what T4 sends)
 
@@ -73,13 +73,15 @@ Other observations:
   "name": "<tenant.wahaSession>",
   "config": {
     "metadata": { "tenant": "<tenantId>" },
-    "webhooks": [{
-      "url": "{PUBLIC_BASE_URL}/webhooks/waha",
-      "events": ["message.any", "session.status"],
-      "hmac": { "key": "<WAHA_WEBHOOK_SECRET>" },
-      "retries": { "policy": "constant", "delaySeconds": 2, "attempts": 15 },
-      "customHeaders": null
-    }]
+    "webhooks": [
+      {
+        "url": "{PUBLIC_BASE_URL}/webhooks/waha",
+        "events": ["message.any", "session.status"],
+        "hmac": { "key": "<WAHA_WEBHOOK_SECRET>" },
+        "retries": { "policy": "constant", "delaySeconds": 2, "attempts": 15 },
+        "customHeaders": null
+      }
+    ]
   }
 }
 ```
@@ -129,9 +131,15 @@ Message `payload` (GOWS `toWAMessage` + media from `processIncomingMessage`):
 Session-status `payload`:
 
 ```json
-{ "name": "default", "status": "WORKING",
-  "statuses": [{ "status": "STARTING", "timestamp": 1794925800000 }, { "status": "WORKING", "timestamp": 1794925805000 }],
-  "data": null }
+{
+  "name": "default",
+  "status": "WORKING",
+  "statuses": [
+    { "status": "STARTING", "timestamp": 1794925800000 },
+    { "status": "WORKING", "timestamp": 1794925805000 }
+  ],
+  "data": null
+}
 ```
 
 ### 2.3 Webhook payload vs the existing GOWS mapper
@@ -141,13 +149,13 @@ mapper already handles; its keys match `test/fixtures/gows/messages-text.json` o
 (`id, timestamp, from, fromMe, source, body, to, participant, hasMedia, media, ack, location, vCards, ackName,
 replyTo, _data{Info, Message, …}`). Field-by-field, what `gowsMapper.message` reads:
 
-| Mapper reads | Webhook payload | OK |
-|---|---|---|
-| `_data.Message` (object, required) | present | yes |
-| `_data.Info.Sender` / `SenderAlt` / `PushName` / `IsFromMe` / `Chat` | present | yes |
-| `id`, `timestamp` (s), `fromMe`, `from`, `participant` | present | yes |
-| `media.mimetype`, `media.filename` (fallbacks) | present after download | yes |
-| `replyTo.id` | present when replying | yes |
+| Mapper reads                                                         | Webhook payload        | OK  |
+| -------------------------------------------------------------------- | ---------------------- | --- |
+| `_data.Message` (object, required)                                   | present                | yes |
+| `_data.Info.Sender` / `SenderAlt` / `PushName` / `IsFromMe` / `Chat` | present                | yes |
+| `id`, `timestamp` (s), `fromMe`, `from`, `participant`               | present                | yes |
+| `media.mimetype`, `media.filename` (fallbacks)                       | present after download | yes |
+| `replyTo.id`                                                         | present when replying  | yes |
 
 Synthetic check (scratch script, fake numbers): incoming text, `fromMe` from phone, `fromMe` via API, incoming
 PDF document, and an `@lid` sender all mapped correctly (`type`, `fromMe`, `text`, `author.phone` via

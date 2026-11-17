@@ -33,7 +33,8 @@ const RETRY_DELAYS_MS = [30_000, 120_000, 300_000];
 const CLOSING_MAX_DELAY_MS = 24 * 3_600_000;
 /** How often a closing line held by a reach-out pause is checked again. */
 const PAUSE_RECHECK_MS = 60_000;
-const AGENT_MAX_TOKENS = 2048;
+/** Haiku's thinking blocks count against it: room for thinking plus the reply (plan: 4000). */
+const AGENT_MAX_TOKENS = 4000;
 const NO_CLOSING = new Set<StopReason>([
   "refusal",
   "restriction",

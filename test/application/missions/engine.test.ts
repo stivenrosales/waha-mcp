@@ -363,6 +363,8 @@ describe("mission engine: start", () => {
       "no_reply",
     ]);
     for (const t of req.tools) expect((t as { strict?: boolean }).strict).toBe(true);
+    // Haiku's thinking blocks count against max_tokens: room for thinking plus the reply.
+    expect(req.maxTokens).toBe(4000);
 
     expect(h.sender.calls.map((c) => c.method)).toEqual(["startTyping", "stopTyping", "sendText"]);
     expect(h.contactSends()).toEqual(["Hola Ana, soy el asistente de Stiven."]);

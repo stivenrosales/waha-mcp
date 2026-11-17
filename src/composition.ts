@@ -189,6 +189,10 @@ export function composeMissionEngine(deps: {
   logger: Logger;
   /** Test seam; defaults to OpenRouter with `config.missions`. */
   llm?: LlmClient;
+  /** Test seams: the clock, the pacing jitter and the pacing pause (default: real ones). */
+  now?: () => Date;
+  rand?: () => number;
+  sleep?: (ms: number) => Promise<void>;
   /** The shared retention purge (`composeMissionPurge`); the engine runs it in its tick. */
   purge?: MissionPurge;
 }): MissionEngine | null {
@@ -207,11 +211,13 @@ export function composeMissionEngine(deps: {
       const held = deps.registry.acquire(tenantId);
       return held ? { port: missionTenantPort(held.runtime), release: held.release } : null;
     },
-    now: () => new Date(),
-    rand: Math.random,
-    sleep: async (ms) => {
-      await delay(ms);
-    },
+    now: deps.now ?? (() => new Date()),
+    rand: deps.rand ?? Math.random,
+    sleep:
+      deps.sleep ??
+      (async (ms) => {
+        await delay(ms);
+      }),
     logger: deps.logger,
     ...(deps.purge ? { purge: deps.purge } : {}),
   });

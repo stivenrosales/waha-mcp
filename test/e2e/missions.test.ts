@@ -6,12 +6,13 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Hono } from "hono";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createMissionEngine, type MissionEngine } from "../../src/application/missions/engine.js";
+import type { MissionEngine } from "../../src/application/missions/engine.js";
 import { createMissionService } from "../../src/application/missions/service.js";
 import { DISABLED_TRANSCRIPTION } from "../../src/application/transcripts.js";
-import { composeApp } from "../../src/composition.js";
+import { composeApp, composeMissionEngine, composeMissionPurge } from "../../src/composition.js";
 import { loadConfig } from "../../src/config.js";
 import { WahaNotFoundError } from "../../src/domain/errors.js";
+import type { EventStore } from "../../src/domain/ports/EventStore.js";
 import type { LlmClient, LlmTurnRequest, LlmTurnResult } from "../../src/domain/ports/LlmClient.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
 import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
@@ -25,7 +26,6 @@ import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js"
 import { createSealedMissionLog } from "../../src/infrastructure/missions/sealedMissionLog.js";
 import { createSqliteEventStore } from "../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
-import { missionTenantPort } from "../../src/infrastructure/missions/tenantPort.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
 import type { buildTenantRuntime } from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
@@ -44,9 +44,9 @@ import {
 /**
  * A whole mission through the real app: `composeApp` (OAuth bearer guard, MCP tools, the signed
  * `/webhooks/waha` route, the mission service wired into each tenant runtime) and the mission
- * engine built exactly as `composeMissionEngine` builds it, except for the test seams: a scripted
- * LLM, a controllable clock (only `Date` is faked; the engine is driven with `tick`), and a
- * `sleep` that records the pacing pause instead of waiting. WAHA is the in-memory gateway and a
+ * engine from the real `composeMissionEngine` and `composeMissionPurge`, with its test seams: a
+ * scripted LLM, a fixed jitter and a `sleep` that records the pacing pause instead of waiting. The
+ * clock is controllable (only `Date` is faked; timed wakes are driven with `tick`). WAHA is the in-memory gateway and a
  * recording sender per tenant.
  */
 
@@ -151,6 +151,10 @@ interface World {
   admin: Client;
   memberTenantId: string;
   registry: TenantRegistry;
+  /** The webhook inbox (stored events not yet processed by the engine). */
+  events: EventStore;
+  /** How many times the webhook route woke the engine (once per newly stored event). */
+  wakes: { count: number };
   /** Moves the fake clock to `T0 + ms`. */
   at(ms: number): Date;
   /** Runs one engine tick at the current fake time, after any wake already queued. */
@@ -284,11 +288,17 @@ async function world(): Promise<World> {
         uploadLinks,
         missions: missionService,
       },
-      media: createMediaHandler({ gateway: gw, links, maxBytes: b.config.mediaMaxBytes }),
+      media: createMediaHandler({
+        gateway: gw,
+        links,
+        maxBytes: b.config.mediaMaxBytes,
+        logger: b.logger,
+      }),
       upload: createUploadHandler({
         store: uploads,
         links: uploadLinks,
         maxBytes: b.config.uploadMaxBytes,
+        logger: b.logger,
       }),
       missionLog,
       cipher,
@@ -300,6 +310,7 @@ async function world(): Promise<World> {
 
   // As main.ts: the engine is read lazily by the app and assigned right after composing.
   let engine: MissionEngine | null = null;
+  const wakes = { count: 0 };
   const logger = { info: () => {} };
   const { app, registry } = composeApp({
     config,
@@ -307,37 +318,37 @@ async function world(): Promise<World> {
     tenants,
     missions,
     events,
-    onWebhookEvent: () => engine?.wake(),
+    onWebhookEvent: () => {
+      wakes.count += 1;
+      engine?.wake();
+    },
     missionEngine: () => engine,
     sessions: new FakeSessionAdmin(),
     mediaSecret: MEDIA_SECRET,
     logger,
     buildRuntime,
   });
-  // As composeMissionEngine, with the clock, randomness and sleep as test seams. The pacing pause
-  // is recorded in the sender's call log, so the order typing → pause → send is visible.
+  // The real factories, as main.ts calls them; only the LLM, the jitter and the pause are test
+  // seams (the clock is the faked `Date`). The pacing pause is recorded in the sender's call log,
+  // so the order typing → pause → send is visible.
   const llm = new FakeLlm();
-  engine = createMissionEngine({
+  const purge = composeMissionPurge({ registry, tenants, missions, events, logger });
+  engine = composeMissionEngine({
+    config,
+    registry,
+    tenants,
     missions,
     events,
-    tenants,
+    logger,
+    purge,
     llm,
-    model: m.model,
-    limits: m.limits,
-    monthlyBudgetUsd: m.monthlyBudgetUsd,
-    timezone: config.timezone,
-    acquire: (tenantId) => {
-      const held = registry.acquire(tenantId);
-      return held ? { port: missionTenantPort(held.runtime), release: held.release } : null;
-    },
-    now: () => new Date(),
     rand: () => 0.5,
     // Only the member runs missions in these tests.
     sleep: async (ms) => {
       sender.calls.push({ method: "sleep", args: ms });
     },
-    logger,
   });
+  if (!engine) throw new Error("missions must be on");
   const theEngine = engine;
   closers.push(() => {
     theEngine.stop();
@@ -368,6 +379,8 @@ async function world(): Promise<World> {
     admin: await connect(adminSeed.token),
     memberTenantId: memberSeed.tenant.id,
     registry,
+    events,
+    wakes,
     at(ms) {
       const now = new Date(T0.getTime() + ms);
       vi.setSystemTime(now);
@@ -479,7 +492,9 @@ describe("e2e: a mission over the real app", () => {
     expect(
       (await w.webhook(contactPayload("3EB0B2", b2, { conversation: "¿qué necesitas?" }))).status,
     ).toBe(200);
-    await w.tick();
+    // Each stored event woke the engine, and those wakes alone consumed both (no manual tick).
+    expect(w.wakes.count).toBe(2);
+    expect(w.events.pending(10)).toHaveLength(0);
     expect(w.llm.requests).toHaveLength(1);
 
     // After the debounce: one agent turn over both bubbles, one paced reply.
@@ -523,6 +538,8 @@ describe("e2e: a mission over the real app", () => {
       mimetype: "image/jpeg",
     };
     expect((await w.webhook(image)).status).toBe(200);
+    expect(w.wakes.count).toBe(3);
+    expect(w.events.pending(10)).toHaveLength(0);
     let seenMediaId: string | null = null;
     w.llm.queue.push((q) => {
       const ref = lastUserBlocks(q)
@@ -604,6 +621,10 @@ describe("e2e: a mission over the real app", () => {
     expect((await w.webhook(contactPayload("3EB0R1", r1, { conversation: "ok" }))).status).toBe(
       200,
     );
+    // The message was stored (the route wakes only on a newly stored event) and the wake's tick
+    // consumed it: the silence below is the engine's decision, not a dropped event.
+    expect(w.wakes.count).toBe(1);
+    expect(w.events.pending(10)).toHaveLength(0);
     w.at(60 * SEC);
     await w.tick();
     expect(w.llm.requests).toHaveLength(1);

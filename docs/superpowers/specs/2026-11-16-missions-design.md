@@ -211,8 +211,12 @@ builder's starting values, to tune by config:
   (start 3); missions to new numbers per tenant per day (start 5); agent
   messages per hour in a group.
 - Quiet hours (start 22:00–08:00 in the server `TIMEZONE`; tenants have no
-  time zone of their own today): no sends; the mission waits and resumes in
-  the morning, deadline still applies.
+  time zone of their own today): the agent sends nothing on its own
+  initiative. The opening message and reminders that fall in that window are
+  postponed to 08:00. Replies to a message the other side sent are allowed at
+  any hour, with the usual pacing. The deadline keeps running; when a
+  mission's deadline falls inside quiet hours, `start_mission` says so in its
+  result so Claude can suggest another time.
 - Hard cap on LLM calls per mission (runaway protection, builder sets the
   value): reaching it stops the mission.
 - On the `session.status` event with `reachoutTimelock.isActive`, pause every

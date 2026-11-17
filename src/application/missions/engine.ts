@@ -120,10 +120,23 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     return run;
   };
 
-  const { end, turn, closing, schedule, nextWake, append, quiet, paused, iso } = createMissionTurns(
-    deps,
-    { llmFailures, isStopped: () => stopped, ownerSteppedIn: (id) => steppedIn.has(id) },
-  );
+  const {
+    end,
+    turn,
+    closing,
+    schedule,
+    nextWake,
+    append,
+    quiet,
+    paused,
+    iso,
+    unsentOpening,
+    resendOpening,
+  } = createMissionTurns(deps, {
+    llmFailures,
+    isStopped: () => stopped,
+    ownerSteppedIn: (id) => steppedIn.has(id),
+  });
 
   async function step(c: Ctx): Promise<void> {
     if (c.now.getTime() >= Date.parse(c.m.deadlineAt)) return end(c, { type: "expire" });
@@ -136,6 +149,8 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
       return turn(c, { instruction: TURN_TEXT.opening });
     }
     if (replying) return turn(c, { instruction: null });
+    const opening = unsentOpening(c.m, conv);
+    if (opening) return quiet(c.now) ? later() : resendOpening(c, opening);
     if (conv.pending.answers > 0) return quiet(c.now) ? later() : turn(c, { instruction: null });
     if (reminderDue(snapshot(c.m), c.now, limits))
       return quiet(c.now) ? later() : turn(c, { instruction: TURN_TEXT.reminder, reminder: true });

@@ -36,7 +36,14 @@ const MIN = 60 * SEC;
 /** Sends return realistic WhatsApp ids, like WAHA's `sendText`. */
 class WaSender extends RecordingSender {
   private sent = 0;
+  /** Sends to these chats throw (attempts are counted in `failedTo`). */
+  failChats = new Set<string>();
+  failedTo: string[] = [];
   override async sendText(q: Parameters<WhatsAppSender["sendText"]>[0]): Promise<SentMessage> {
+    if (this.failChats.has(q.chatId)) {
+      this.failedTo.push(q.text);
+      throw new Error("send failed");
+    }
     await super.sendText(q);
     this.sent += 1;
     return { id: `true_${q.chatId}_3EB0SENT${this.sent}`, timestamp: null };
@@ -755,6 +762,46 @@ describe("mission engine: caps and failures", () => {
       .messages.flatMap(textsOf)
       .filter((t) => t === "The mission starts now. Send your opening message.");
     expect(opening).toHaveLength(1);
+  });
+
+  it("resends a failed opening at +30 s, +2 min, +5 min without a new LLM call, then stops with errors", async () => {
+    const h = harness();
+    const m = h.start();
+    h.sender.failChats.add(CHAT);
+    h.llm.queue.push(reply("Hola Ana, soy el asistente de Stiven."));
+    await h.tickAt(0);
+    expect(h.sender.failedTo).toHaveLength(1);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 30 * SEC).toISOString());
+    await h.tickAt(30 * SEC);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 150 * SEC).toISOString());
+    await h.tickAt(150 * SEC);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 450 * SEC).toISOString());
+    expect(h.get(m.id).state).toBe("active");
+    await h.tickAt(450 * SEC);
+    expect(h.sender.failedTo).toEqual(Array(4).fill("Hola Ana, soy el asistente de Stiven."));
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.get(m.id).state).toBe("stopped");
+    expect(h.get(m.id).stopReason).toBe("errors");
+    expect(h.ownerSends()).toEqual(["⛔ Misión con Ana detenida (errores del modelo)"]);
+  });
+
+  it("a resent opening that goes through continues the mission normally", async () => {
+    const h = harness();
+    const m = h.start();
+    h.sender.failChats.add(CHAT);
+    h.llm.queue.push(reply("Hola Ana, soy el asistente de Stiven."));
+    await h.tickAt(0);
+    h.sender.failChats.clear();
+    await h.tickAt(30 * SEC);
+    expect(h.contactSends()).toEqual(["Hola Ana, soy el asistente de Stiven."]);
+    expect(h.llm.requests).toHaveLength(1);
+    const row = h.get(m.id);
+    expect(row.state).toBe("active");
+    expect(row.sentCount).toBe(1);
+    expect(row.lastAgentAt).toBe(new Date(T0.getTime() + 30 * SEC).toISOString());
+    expect(row.nextWakeAt).toBe(
+      new Date(T0.getTime() + 30 * SEC + DEFAULT_MISSION_LIMITS.reminderGapMs).toISOString(),
+    );
   });
 
   it("stops at once on a rejected request", async () => {

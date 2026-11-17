@@ -1,3 +1,4 @@
+import type Anthropic from "@anthropic-ai/sdk";
 import { LlmUnavailableError } from "../../domain/errors.js";
 import {
   type MissionEventKind,
@@ -26,6 +27,7 @@ export const TURN_TEXT = {
   idle: "There are no new messages from the contact.",
 };
 
+/** Retry ladder of an unavailable LLM, and of a failed opening send (resent, no new LLM call). */
 const RETRY_DELAYS_MS = [30_000, 120_000, 300_000];
 /** A closing line postponed (quiet hours, pause) longer than this is dropped: too late to help. */
 const CLOSING_MAX_DELAY_MS = 24 * 3_600_000;
@@ -75,6 +77,8 @@ export interface TurnState {
 export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
   const { missions, limits, logger } = deps;
   const { llmFailures, isStopped, ownerSteppedIn } = state;
+  /** Failed sends of a mission's opening line (resend ladder); reset on restart, like LLM retries. */
+  const openingSendFailures = new Map<string, number>();
   const iso = (d: Date): string => d.toISOString();
   /** WhatsApp reach-out timelock: persisted per tenant (a restart never lifts it), with an end. */
   const paused = (tenantId: string, at: Date): boolean =>
@@ -134,6 +138,7 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
       nextWakeAt: null,
     });
     llmFailures.delete(c.m.id);
+    openingSendFailures.delete(c.m.id);
     logger.info(
       `mission=${c.m.id} state=${next.state}${next.stopReason ? ` reason=${next.stopReason}` : ""}`,
     );
@@ -178,7 +183,11 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
     await turn({ ...c, m: reload(c.m) }, { instruction: TURN_TEXT.closing(reason), closing: true });
   }
 
-  async function send(c: Ctx, text: string, seenIds: string[]): Promise<boolean> {
+  async function send(
+    c: Ctx,
+    text: string,
+    seenIds: string[],
+  ): Promise<"sent" | "skipped" | "failed"> {
     try {
       const sent = await sendPaced(
         { sender: c.port.sender, sleep: deps.sleep, rand: deps.rand },
@@ -187,17 +196,51 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
       if (!sent) {
         // The owner wrote in the chat during the typing pause: their message stands alone.
         logger.info(`mission=${c.m.id} send=skipped reason=taken_over`);
-        return false;
+        return "skipped";
       }
       c.port.log.append(c.m.id, { kind: "sent", at: iso(deps.now()), body: { id: sent.id } });
       const m = reload(c.m);
       missions.update(c.m.id, { sentCount: m.sentCount + 1, lastAgentAt: iso(c.now) });
-      return true;
+      return "sent";
     } catch {
-      // Never retried: the outcome may be unknown (it may have been delivered).
+      // Not retried, except the opening line (see `resendOpening`): the outcome may be unknown.
       logger.info(`mission=${c.m.id} send=failed`);
-      return false;
+      return "failed";
     }
+  }
+
+  /**
+   * The opening line the agent wrote but that never went out (its send failed): nothing was ever
+   * sent in this mission yet the last agent turn has a reply. Null otherwise.
+   */
+  function unsentOpening(m: MissionRow, conv: Conversation): string | null {
+    if (m.lastAgentAt !== null || m.sentCount > 0 || conv.sentIds.size > 0) return null;
+    const last = [...conv.messages].reverse().find((x) => x.role === "assistant");
+    if (!last || typeof last.content === "string") return null;
+    const t = parseAgentTurn(last.content as Anthropic.ContentBlock[]);
+    return t.reply && !t.noReply ? t.reply : null;
+  }
+
+  /**
+   * A failed opening send waits on the LLM retry ladder (+30 s, +2 min, +5 min) and is resent as
+   * written (no new LLM call); when the ladder runs out, the mission stops with `errors`.
+   */
+  async function openingSendFailed(c: Ctx): Promise<void> {
+    const n = (openingSendFailures.get(c.m.id) ?? 0) + 1;
+    const delay = RETRY_DELAYS_MS[n - 1];
+    if (delay === undefined) return end(c, { type: "stop", reason: "errors" });
+    openingSendFailures.set(c.m.id, n);
+    logger.info(`mission=${c.m.id} opening=unsent attempt=${n}`);
+    schedule(c, new Date(c.now.getTime() + delay));
+  }
+
+  async function resendOpening(c: Ctx, text: string): Promise<void> {
+    if (isStopped()) return;
+    const r = await send(c, text, []);
+    if (r === "failed") return openingSendFailed({ ...c, m: reload(c.m) });
+    openingSendFailures.delete(c.m.id);
+    const m = reload(c.m);
+    if (m.state === "active") schedule({ ...c, m }, nextWake(m, c.now));
   }
 
   const append = (c: Ctx, kind: "message" | "notice", body: MessageBody | { text: string }): void =>
@@ -298,7 +341,13 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
     if (t.reply && !t.noReply) {
       if (reload(c.m).sentCount >= limits.maxMessagesPerMission)
         return end({ ...c, m: reload(c.m) }, { type: "stop", reason: "message_cap" });
-      await send(c, t.reply, conv.pending.contactIds);
+      const r = await send(c, t.reply, conv.pending.contactIds);
+      if (
+        r === "failed" &&
+        !t.finish &&
+        unsentOpening(reload(c.m), buildConversation(c.port.log.read(c.m.id)))
+      )
+        return openingSendFailed({ ...c, m: reload(c.m) });
     }
     if (q.reminder) {
       const m = reload(c.m);
@@ -330,5 +379,17 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
   }
 
   /** Decides what a due mission does now. */
-  return { end, turn, closing, schedule, nextWake, append, quiet, paused, iso };
+  return {
+    end,
+    turn,
+    closing,
+    schedule,
+    nextWake,
+    append,
+    quiet,
+    paused,
+    iso,
+    unsentOpening,
+    resendOpening,
+  };
 }

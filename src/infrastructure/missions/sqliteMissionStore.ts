@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS missions (
 );
 CREATE INDEX IF NOT EXISTS missions_tenant ON missions (tenant_id, state);
 CREATE INDEX IF NOT EXISTS missions_due ON missions (state, next_wake_at);
+CREATE TABLE IF NOT EXISTS mission_pauses (
+  tenant_id TEXT PRIMARY KEY,
+  since TEXT NOT NULL
+);
 `;
 
 interface Raw {
@@ -191,8 +195,30 @@ export function createSqliteMissionStore(
           .all(tenantId, iso) as unknown as { id: string }[]
       ).map((r) => r.id);
     },
+    dueClosings(nowIso) {
+      return all(
+        `SELECT * FROM missions WHERE state != 'active' AND next_wake_at IS NOT NULL
+           AND next_wake_at <= ? ORDER BY next_wake_at`,
+        nowIso,
+      );
+    },
+    setPaused(tenantId, paused, atIso) {
+      if (paused)
+        db.prepare(
+          "INSERT INTO mission_pauses (tenant_id, since) VALUES (?, ?) ON CONFLICT (tenant_id) DO NOTHING",
+        ).run(tenantId, atIso);
+      else db.prepare("DELETE FROM mission_pauses WHERE tenant_id = ?").run(tenantId);
+    },
+    pausedTenants() {
+      return (
+        db.prepare("SELECT tenant_id FROM mission_pauses").all() as unknown as {
+          tenant_id: string;
+        }[]
+      ).map((r) => r.tenant_id);
+    },
     deleteForTenant(tenantId) {
       db.prepare("DELETE FROM missions WHERE tenant_id = ?").run(tenantId);
+      db.prepare("DELETE FROM mission_pauses WHERE tenant_id = ?").run(tenantId);
     },
   };
 }

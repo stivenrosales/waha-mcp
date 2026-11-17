@@ -81,6 +81,8 @@ export interface Conversation {
   pending: Pending;
   /** Short ids (see `shortMessageId`) of every message the engine sent. */
   sentIds: Set<string>;
+  /** Short ids of every contact message already in the log (redelivery dedupe). */
+  contactIds: Set<string>;
 }
 
 const emptyPending = (): Pending => ({
@@ -103,6 +105,7 @@ export function buildConversation(entries: MissionLogEntry[]): Conversation {
   let spec: MissionSpec = { objective: "", doneWhen: "", contactName: null };
   const messages: Anthropic.MessageParam[] = [];
   const sentIds = new Set<string>();
+  const contactIds = new Set<string>();
   let agentTurns = 0;
   let user: Anthropic.ContentBlockParam[] = [];
   let notices: string[] = [];
@@ -147,6 +150,7 @@ export function buildConversation(entries: MissionLogEntry[]): Conversation {
         } else if (m.from === "contact") {
           user.push(...m.content);
           pending.contactIds.push(m.id);
+          contactIds.add(shortMessageId(m.id));
           pending.userBlocks += m.content.length;
         } else if (m.from === "engine") {
           user.push(textBlock(m.text));
@@ -164,5 +168,5 @@ export function buildConversation(entries: MissionLogEntry[]): Conversation {
     }
   }
   flush();
-  return { system, spec, messages, agentTurns, pending, sentIds };
+  return { system, spec, messages, agentTurns, pending, sentIds, contactIds };
 }

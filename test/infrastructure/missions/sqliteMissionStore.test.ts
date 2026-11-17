@@ -105,4 +105,29 @@ describe("sqliteMissionStore", () => {
     expect(store.list("t1")).toEqual([]);
     expect(store.get("t2", other.id)).not.toBeNull();
   });
+
+  it("keeps a tenant's reach-out pause across store instances until it is lifted", () => {
+    const db = openAuthDatabase(":memory:");
+    const store = createSqliteMissionStore(db);
+    store.setPaused("t1", true, "2026-11-17T10:00:00.000Z");
+    store.setPaused("t1", true, "2026-11-17T11:00:00.000Z");
+    store.setPaused("t2", true, "2026-11-17T10:00:00.000Z");
+    const reopened = createSqliteMissionStore(db);
+    expect(reopened.pausedTenants().sort()).toEqual(["t1", "t2"]);
+    reopened.setPaused("t1", false, "2026-11-17T12:00:00.000Z");
+    expect(reopened.pausedTenants()).toEqual(["t2"]);
+    reopened.deleteForTenant("t2");
+    expect(reopened.pausedTenants()).toEqual([]);
+  });
+
+  it("dueClosings returns ended missions with a due wake (postponed closing lines)", () => {
+    const store = setup();
+    const a = store.create(base);
+    const b = store.create(base);
+    const c = store.create({ ...base, nextWakeAt: "2026-11-17T09:00:00.000Z" });
+    store.update(a.id, { state: "expired", nextWakeAt: "2026-11-17T09:00:00.000Z" });
+    store.update(b.id, { state: "cancelled", nextWakeAt: "2026-11-18T09:00:00.000Z" });
+    expect(store.dueClosings("2026-11-17T10:00:00.000Z").map((m) => m.id)).toEqual([a.id]);
+    expect(store.due("2026-11-17T10:00:00.000Z").map((m) => m.id)).toEqual([c.id]);
+  });
 });

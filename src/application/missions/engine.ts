@@ -82,8 +82,6 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
   let stopped = false;
   let waking = false;
   let timer: ReturnType<typeof setInterval> | undefined;
-  /** Tenants under a WhatsApp reach-out timelock (from `session.status`). */
-  const locked = new Set<string>();
   const llmFailures = new Map<string, number>();
   const eventFailures = new Map<number, number>();
 
@@ -96,14 +94,14 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     return run;
   };
 
-  const { end, turn, schedule, nextWake, append, quiet, iso } = createMissionTurns(deps, {
-    locked,
-    llmFailures,
-  });
+  const { end, turn, closing, schedule, nextWake, append, quiet, paused, iso } = createMissionTurns(
+    deps,
+    { llmFailures, isStopped: () => stopped },
+  );
 
   async function step(c: Ctx): Promise<void> {
     if (c.now.getTime() >= Date.parse(c.m.deadlineAt)) return end(c, { type: "expire" });
-    if (locked.has(c.m.tenantId)) return;
+    if (paused(c.m.tenantId)) return;
     const conv = buildConversation(c.port.log.read(c.m.id));
     const replying = conv.pending.contactIds.length > 0;
     const later = (): void => schedule(c, nextAllowedInitiatedSend(c.now, deps.timezone, limits));
@@ -127,7 +125,8 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     const tenant = deps.tenants.getTenant(m.tenantId);
     const held = deps.acquire(m.tenantId);
     if (!held) {
-      if (!tenant || tenant.status === "revoked") {
+      if (m.state !== "active") missions.update(m.id, { nextWakeAt: null });
+      else if (!tenant || tenant.status === "revoked") {
         const next = transition(snapshot(m), { type: "stop", reason: "revoked" });
         missions.update(m.id, {
           state: next.state,
@@ -168,6 +167,8 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
       if (sent.has(short)) return;
       return end(c, { type: "take_over" });
     }
+    // WAHA may deliver the same message twice: one bubble enters the batch once.
+    if (buildConversation(port.log.read(m.id)).contactIds.has(shortMessageId(msg.id))) return;
     const content = await contactContent(msg, port);
     if (!content) return;
     append(c, "message", { from: "contact", id: msg.id, content });
@@ -182,8 +183,10 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     if (!payload) return;
     if (e.kind === "message") return handleMessage(e, port, payload, now);
     const lock = timelockActive(payload);
-    if (lock === true && !locked.has(e.tenantId)) {
-      locked.add(e.tenantId);
+    const wasPaused = paused(e.tenantId);
+    // Persisted: a restart keeps the pause until a status explicitly reports no active lock.
+    if (lock === true && !wasPaused) {
+      missions.setPaused(e.tenantId, true, iso(now));
       logger.info(`tenant=${e.tenantId} missions=paused`);
       const active = missions.list(e.tenantId, "active");
       const first = active[0];
@@ -198,7 +201,8 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
           },
         );
       }
-    } else if (lock === false && locked.delete(e.tenantId)) {
+    } else if (lock === false && wasPaused) {
+      missions.setPaused(e.tenantId, false, iso(now));
       logger.info(`tenant=${e.tenantId} missions=resumed`);
     }
   }
@@ -245,6 +249,14 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
         if (m?.state === "active") await withMission(m, now, step);
       } catch {
         logger.info(`mission=${due.id} step=failed`);
+      }
+    }
+    for (const ended of missions.dueClosings(iso(now))) {
+      if (stopped) return;
+      try {
+        await withMission(ended, now, closing);
+      } catch {
+        logger.info(`mission=${ended.id} closing=failed`);
       }
     }
   }

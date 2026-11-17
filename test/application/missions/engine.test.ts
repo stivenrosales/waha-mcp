@@ -104,6 +104,7 @@ function harness(opts: Options = {}) {
   const fetched: string[] = [];
   const slept: number[] = [];
   const state = { spend: opts.spend ?? 0, status: "active" as string };
+  const hooks: { onSleep?: () => void } = {};
   const port: MissionTenantPort = {
     log,
     sender,
@@ -154,6 +155,7 @@ function harness(opts: Options = {}) {
       rand: () => 0.5,
       sleep: async (ms) => {
         slept.push(ms);
+        hooks.onSleep?.();
       },
       logger: { info: () => {} },
     });
@@ -172,6 +174,7 @@ function harness(opts: Options = {}) {
     fetched,
     slept,
     state,
+    hooks,
     get engine() {
       return engine;
     },
@@ -831,5 +834,104 @@ describe("mission engine: wake", () => {
     h.engine.wake();
     await h.engine.idle();
     expect(h.contactSends()).toEqual(["Hola."]);
+  });
+});
+
+describe("mission engine: fix round 1", () => {
+  const lock = (isActive: boolean) => ({
+    name: "s1",
+    status: "WORKING",
+    statuses: [],
+    data: null,
+    reachoutTimelock: { isActive },
+  });
+
+  it("keeps the reach-out pause across a restart until an explicit unlock", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.envelope("session.status", lock(true));
+    await h.tickAt(1 * SEC);
+    h.restart();
+    h.message({ text: "hola" });
+    await h.tickAt(2 * SEC);
+    await h.tickAt(30 * SEC);
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.contactSends()).toHaveLength(1);
+
+    h.at(40 * SEC);
+    h.envelope("session.status", { name: "s1", status: "WORKING", statuses: [], data: null });
+    await h.tickAt(40 * SEC);
+    expect(h.llm.requests).toHaveLength(1);
+
+    h.envelope("session.status", lock(false));
+    h.llm.queue.push(reply("Hola de nuevo."));
+    await h.tickAt(41 * SEC);
+    expect(h.llm.requests).toHaveLength(2);
+    expect(h.contactSends().at(-1)).toBe("Hola de nuevo.");
+    expect(h.get(m.id).state).toBe("active");
+  });
+
+  it("stop during a paced send lets that send finish and log its id, and starts no new turn", async () => {
+    const h = harness();
+    const first = h.start({ closingMessage: "yes" });
+    const second = h.start({ closingMessage: "yes" });
+    h.llm.queue.push(reply("Hola Ana."), reply("Hola otra vez."), reply("Adiós."));
+    h.hooks.onSleep = () => h.engine.stop();
+    await h.tickAt(0);
+    await h.engine.idle();
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.contactSends()).toEqual(["Hola Ana."]);
+    const sentMission = [first, second].find((m) => h.get(m.id).sentCount === 1);
+    expect(sentMission).toBeDefined();
+    expect(h.entries(sentMission?.id as string).filter((e) => e.kind === "sent")).toHaveLength(1);
+    await h.tickAt(1 * SEC);
+    h.engine.wake();
+    await h.engine.idle();
+    // A cancel after stop records the state but runs no closing turn.
+    const idle = [first, second].find((m) => m.id !== sentMission?.id) as MissionRow;
+    await h.engine.cancel(TENANT, idle.id);
+    expect(h.get(idle.id).state).toBe("cancelled");
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.contactSends()).toEqual(["Hola Ana."]);
+  });
+
+  it("dedupes a redelivered contact message by its id", async () => {
+    const h = harness();
+    await opened(h);
+    const id = `false_${CHAT}_3EB0DUP1`;
+    h.message({ id, text: "hola" });
+    h.message({ id, text: "hola" });
+    await h.tickAt(1 * SEC);
+    h.message({ id, text: "hola" });
+    await h.tickAt(2 * SEC);
+    h.llm.queue.push(reply("¡Hola!"));
+    await h.tickAt(20 * SEC);
+    expect(textsOf(lastUser(h.lastRequest()))).toEqual(["hola"]);
+    expect(h.sender.calls.filter((c) => c.method === "sendSeen").at(-1)?.args).toEqual({
+      chatId: CHAT,
+      messageIds: [id],
+    });
+  });
+
+  it("postpones the closing line to 08:00 when the mission ends in quiet hours", async () => {
+    const h = harness();
+    h.at(11 * 60 * MIN + 40 * MIN); // 21:40 Lima
+    const m = h.start({ minutes: 50, closingMessage: "yes" });
+    h.llm.queue.push(reply("Hola Ana."));
+    await h.tickAt(11 * 60 * MIN + 40 * MIN);
+    await h.tickAt(12 * 60 * MIN + 30 * MIN); // 22:30 Lima: deadline, quiet
+    expect(h.get(m.id).state).toBe("expired");
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.get(m.id).nextWakeAt).toBe("2026-11-18T13:00:00.000Z");
+
+    h.llm.queue.push(reply("Le paso esto a Stiven."));
+    await h.engine.tick(new Date("2026-11-18T13:00:00.000Z"));
+    expect(textsOf(lastUser(h.lastRequest())).at(-1)).toBe(
+      "The mission is over (expired). Send one short closing message.",
+    );
+    expect(h.contactSends()).toEqual(["Hola Ana.", "Le paso esto a Stiven."]);
+    expect(h.get(m.id).nextWakeAt).toBeNull();
+    await h.engine.tick(new Date("2026-11-18T13:01:00.000Z"));
+    expect(h.llm.requests).toHaveLength(2);
   });
 });

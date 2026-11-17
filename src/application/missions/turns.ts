@@ -5,7 +5,11 @@ import {
   type StopReason,
   transition,
 } from "../../domain/missions/mission.js";
-import { inQuietHours, monthStart } from "../../domain/missions/pacing.js";
+import {
+  inQuietHours,
+  monthStart,
+  nextAllowedInitiatedSend,
+} from "../../domain/missions/pacing.js";
 import type { LlmTurnResult } from "../../domain/ports/LlmClient.js";
 import type { MissionRow } from "../../domain/ports/MissionStore.js";
 import { AGENT_TOOLS, parseAgentTurn } from "./agentTools.js";
@@ -23,6 +27,10 @@ export const TURN_TEXT = {
 };
 
 const RETRY_DELAYS_MS = [30_000, 120_000, 300_000];
+/** A closing line postponed (quiet hours, pause) longer than this is dropped: too late to help. */
+const CLOSING_MAX_DELAY_MS = 24 * 3_600_000;
+/** How often a closing line held by a reach-out pause is checked again. */
+const PAUSE_RECHECK_MS = 60_000;
 const AGENT_MAX_TOKENS = 2048;
 const NO_CLOSING = new Set<StopReason>([
   "refusal",
@@ -50,10 +58,12 @@ export interface Ctx {
   now: Date;
 }
 
-/** Engine state the turns share: timelocked tenants and consecutive LLM failures per mission. */
+/** Engine state the turns share. */
 export interface TurnState {
-  locked: Set<string>;
+  /** Consecutive LLM failures per mission (retry ladder). */
   llmFailures: Map<string, number>;
+  /** True once the engine is stopping: no new LLM call starts. */
+  isStopped: () => boolean;
 }
 
 /**
@@ -62,7 +72,9 @@ export interface TurnState {
  */
 export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
   const { missions, limits, logger } = deps;
-  const { locked, llmFailures } = state;
+  const { llmFailures, isStopped } = state;
+  /** WhatsApp reach-out timelock, persisted per tenant so a restart never lifts it. */
+  const paused = (tenantId: string): boolean => missions.pausedTenants().includes(tenantId);
 
   const iso = (d: Date): string => d.toISOString();
   const quiet = (at: Date): boolean => inQuietHours(at, deps.timezone, limits);
@@ -130,22 +142,38 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
     else if (next.state === "stopped" && next.stopReason)
       await notify(c, ownerTexts.stopped(who, next.stopReason));
 
-    const closable =
-      (next.state === "expired" || next.state === "cancelled" || next.state === "stopped") &&
-      Boolean(c.m.closingMessage) &&
-      !(next.stopReason && NO_CLOSING.has(next.stopReason)) &&
-      !quiet(c.now) &&
-      !locked.has(c.m.tenantId) &&
+    await closing({ ...c, m: reload(c.m) });
+  }
+
+  /** The `<reason>` of the closing instruction, or null when this mission gets no closing line. */
+  const closingReason = (m: MissionRow): string | null => {
+    if (m.state !== "expired" && m.state !== "cancelled" && m.state !== "stopped") return null;
+    if (!m.closingMessage || (m.stopReason && NO_CLOSING.has(m.stopReason))) return null;
+    return m.state === "stopped" ? (m.stopReason ?? "stopped") : m.state;
+  };
+
+  /**
+   * The closing line of an ended mission: an agent-initiated send, so quiet hours postpone it to
+   * 08:00 and a reach-out pause holds it (via `nextWakeAt`, picked up by `dueClosings`).
+   */
+  async function closing(c: Ctx): Promise<void> {
+    const reason = closingReason(c.m);
+    const endedAt = c.m.endedAt ? Date.parse(c.m.endedAt) : c.now.getTime();
+    const allowed =
+      reason !== null &&
+      c.now.getTime() - endedAt <= CLOSING_MAX_DELAY_MS &&
       c.m.sentCount < limits.maxMessagesPerMission &&
       c.m.llmCalls < limits.maxLlmCallsPerMission &&
       !overBudget(c.m.tenantId, c.now);
-    if (closable) {
-      const reason = next.state === "stopped" ? (next.stopReason ?? "stopped") : next.state;
-      await turn(
-        { ...c, m: reload(c.m) },
-        { instruction: TURN_TEXT.closing(reason), closing: true },
-      );
-    }
+    const wakeAt = (at: Date | null): void =>
+      missions.update(c.m.id, { nextWakeAt: at ? iso(at) : null });
+    if (!allowed) return wakeAt(null);
+    // Stopping: keep it due so the next process sends it.
+    if (isStopped()) return wakeAt(c.now);
+    if (quiet(c.now)) return wakeAt(nextAllowedInitiatedSend(c.now, deps.timezone, limits));
+    if (paused(c.m.tenantId)) return wakeAt(new Date(c.now.getTime() + PAUSE_RECHECK_MS));
+    wakeAt(null);
+    await turn({ ...c, m: reload(c.m) }, { instruction: TURN_TEXT.closing(reason), closing: true });
   }
 
   async function send(c: Ctx, text: string, seenIds: string[]): Promise<boolean> {
@@ -173,6 +201,7 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
     c: Ctx,
     q: { instruction: string | null; reminder?: boolean; closing?: boolean },
   ): Promise<void> {
+    if (isStopped()) return;
     if (!q.closing) {
       const cap: StopReason | null =
         c.m.llmCalls >= limits.maxLlmCallsPerMission
@@ -294,5 +323,5 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
   }
 
   /** Decides what a due mission does now. */
-  return { end, turn, schedule, nextWake, append, quiet, iso };
+  return { end, turn, closing, schedule, nextWake, append, quiet, paused, iso };
 }

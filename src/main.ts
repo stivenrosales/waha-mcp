@@ -12,6 +12,9 @@ import { migrateToMultiTenant } from "./infrastructure/tenants/migrate.js";
 import { createSqliteTenantStore } from "./infrastructure/tenants/sqliteTenantStore.js";
 import { createWahaSessionAdmin } from "./infrastructure/waha/WahaSessionAdmin.js";
 
+/** Longest wait on SIGTERM for a running mission turn (an LLM call plus a paced send). */
+const MISSION_DRAIN_MS = 20_000;
+
 /** The only file that reads `process.env`. */
 async function main(): Promise<void> {
   let config: ReturnType<typeof loadConfig>;
@@ -102,14 +105,27 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     console.log(`${signal} received, shutting down.`);
+    // No new turn, LLM call or send starts after stop(); the one in flight (LLM call, paced send,
+    // logging its sent id) gets up to MISSION_DRAIN_MS before the stores close under it.
     missionEngine?.stop();
+    let finished = false;
     const finish = (): void => {
+      if (finished) return;
+      finished = true;
       registry.closeAll();
       store.close();
       process.exit(0);
     };
-    server.close(finish);
-    setTimeout(finish, 5000).unref();
+    const drained = missionEngine
+      ? Promise.race([
+          missionEngine.idle(),
+          new Promise<void>((resolve) => setTimeout(resolve, MISSION_DRAIN_MS).unref()),
+        ])
+      : Promise.resolve();
+    void drained.then(() => {
+      server.close(finish);
+      setTimeout(finish, 5000).unref();
+    });
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));

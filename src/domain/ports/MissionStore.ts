@@ -44,5 +44,14 @@ export interface MissionStore {
   markSeen(ids: string[]): void;
   /** Ids of the tenant's missions that ended before `iso` (feeds `MissionLog.purgeMissions`). */
   endedBefore(tenantId: string, iso: string): string[];
+  /** Terminal missions whose `nextWakeAt` is due: a closing line postponed (quiet hours, pause). */
+  dueClosings(nowIso: string): MissionRow[];
+  /**
+   * WhatsApp's reach-out timelock on a tenant (from `session.status`); kept across restarts so a
+   * deploy never lifts a pause. `paused: false` lifts it.
+   */
+  setPaused(tenantId: string, paused: boolean, atIso: string): void;
+  pausedTenants(): string[];
+  /** Deletes the tenant's missions and its pause. */
   deleteForTenant(tenantId: string): void;
 }

@@ -33,7 +33,7 @@ export const sendLocationTool: ToolDefinition<typeof inputSchema, typeof sendOut
       ...(input.title ? { title: input.title } : {}),
       ...(input.reply_to ? { replyTo: input.reply_to } : {}),
     });
-    noteOwnerSend(ctx, input.chat_id);
+    await noteOwnerSend(ctx, input.chat_id);
     return sentResult(input.chat_id, sent);
   },
 };

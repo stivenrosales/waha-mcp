@@ -807,6 +807,25 @@ describe("mission engine: closing message", () => {
     expect(await h.engine.takeOver(TENANT, m.id)).toBe(false);
   });
 
+  it("drops a reply still in its typing delay when the owner takes the mission over", async () => {
+    const h = harness();
+    const m = await opened(h);
+    const before = h.contactSends().length;
+    h.message({ text: "¿puede ser el viernes?" });
+    h.at(1 * MIN);
+    await h.engine.tick(h.now);
+    h.llm.queue.push(reply("Déjame revisar con Stiven."));
+    // The owner sends while the agent is "typing".
+    h.hooks.onSleep = () => {
+      h.hooks.onSleep = undefined;
+      void h.engine.takeOver(TENANT, m.id);
+    };
+    await h.tickAt(2 * MIN);
+    await h.engine.idle();
+    expect(h.contactSends().length).toBe(before);
+    expect(h.get(m.id).state).toBe("taken_over");
+  });
+
   it("goes silent without a closing message", async () => {
     const h = harness();
     const m = await opened(h, { minutes: 10 });

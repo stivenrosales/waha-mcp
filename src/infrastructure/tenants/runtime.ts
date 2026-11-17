@@ -185,6 +185,8 @@ export function buildTenantRuntime(deps: {
             limits: missionsConfig.limits,
             monthlyBudgetUsd: missionsConfig.monthlyBudgetUsd,
             timezone: config.timezone,
+            lookupLid: (lid) => gateway.lookupLid(lid),
+            logger,
             hasHistory: async (chatId) => {
               try {
                 return (await gateway.getMessages(chatId, { limit: 1, offset: 0 })).length > 0;

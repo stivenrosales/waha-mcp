@@ -19,16 +19,19 @@ async function bestEffort(action: () => Promise<void>): Promise<void> {
 /**
  * Sends a mission reply the way a person would: read, type for a length-based pause,
  * then send. A `sendText` failure (including an unknown outcome) propagates unchanged.
+ * `cancelled` is checked right before `sendText` (after the pause): when it holds, nothing is
+ * sent and the result is null.
  */
 export async function sendPaced(
   deps: PacedDeps,
-  q: { chatId: string; text: string; seenIds: string[] },
-): Promise<SentMessage> {
+  q: { chatId: string; text: string; seenIds: string[]; cancelled?: () => boolean },
+): Promise<SentMessage | null> {
   const { sender, sleep, rand } = deps;
   if (q.seenIds.length > 0)
     await bestEffort(() => sender.sendSeen({ chatId: q.chatId, messageIds: q.seenIds }));
   await bestEffort(() => sender.startTyping(q.chatId));
   await sleep(typingDelayMs(q.text, rand));
   await bestEffort(() => sender.stopTyping(q.chatId));
+  if (q.cancelled?.()) return null;
   return sender.sendText({ chatId: q.chatId, text: q.text });
 }

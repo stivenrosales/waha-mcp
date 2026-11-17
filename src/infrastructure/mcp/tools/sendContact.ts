@@ -36,7 +36,7 @@ export const sendContactTool: ToolDefinition<typeof inputSchema, typeof sendOutp
       ...(input.organization ? { organization: input.organization } : {}),
       ...(input.reply_to ? { replyTo: input.reply_to } : {}),
     });
-    noteOwnerSend(ctx, input.chat_id);
+    await noteOwnerSend(ctx, input.chat_id);
     return sentResult(input.chat_id, sent);
   },
 };

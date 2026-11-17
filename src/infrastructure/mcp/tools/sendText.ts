@@ -43,7 +43,7 @@ export const sendTextTool: ToolDefinition<typeof inputSchema, typeof sendOutputS
       ...(input.reply_to ? { replyTo: input.reply_to } : {}),
       ...(mentions.length ? { mentions } : {}),
     });
-    noteOwnerSend(ctx, input.chat_id);
+    await noteOwnerSend(ctx, input.chat_id);
     return sentResult(input.chat_id, sent, text);
   },
 };

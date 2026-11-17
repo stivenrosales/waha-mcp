@@ -65,8 +65,9 @@ export interface MissionEngine {
   /** Owner answer to an `ask_owner` question; the next tick runs a turn with it. */
   answer(tenantId: string, missionId: string, text: string): Promise<boolean>;
   /**
-   * The owner wrote in the mission chat through the MCP send tools: `taken_over` at once, without
-   * waiting for WAHA's echo of the send. False when not active.
+   * The owner wrote in the mission chat through the MCP send tools: `taken_over` without waiting
+   * for WAHA's echo of the send. A reply of a running turn that has not reached `sendText` yet is
+   * dropped. False when not active.
    */
   takeOver(tenantId: string, missionId: string): Promise<boolean>;
 }
@@ -89,6 +90,8 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
   let timer: ReturnType<typeof setInterval> | undefined;
   const llmFailures = new Map<string, number>();
   const eventFailures = new Map<number, number>();
+  /** Missions the owner took over whose `taken_over` is still queued behind a running turn. */
+  const steppedIn = new Set<string>();
 
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const run = chain.then(fn);
@@ -101,7 +104,7 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
 
   const { end, turn, closing, schedule, nextWake, append, quiet, paused, iso } = createMissionTurns(
     deps,
-    { llmFailures, isStopped: () => stopped },
+    { llmFailures, isStopped: () => stopped, ownerSteppedIn: (id) => steppedIn.has(id) },
   );
 
   async function step(c: Ctx): Promise<void> {
@@ -307,7 +310,13 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
       timer = undefined;
     },
     cancel: (tenantId, missionId) => endByOwner(tenantId, missionId, { type: "cancel" }),
-    takeOver: (tenantId, missionId) => endByOwner(tenantId, missionId, { type: "take_over" }),
+    takeOver(tenantId, missionId) {
+      // Marked at once, so a reply already in its typing pause is not sent after the owner's.
+      if (missions.get(tenantId, missionId)?.state === "active") steppedIn.add(missionId);
+      return endByOwner(tenantId, missionId, { type: "take_over" }).finally(() =>
+        steppedIn.delete(missionId),
+      );
+    },
     answer: (tenantId, missionId, text) =>
       serial(async () => {
         const m = missions.get(tenantId, missionId);

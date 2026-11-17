@@ -64,6 +64,8 @@ export interface TurnState {
   llmFailures: Map<string, number>;
   /** True once the engine is stopping: no new LLM call starts. */
   isStopped: () => boolean;
+  /** True once the owner took this mission over (set before the takeover is applied). */
+  ownerSteppedIn: (missionId: string) => boolean;
 }
 
 /**
@@ -72,7 +74,7 @@ export interface TurnState {
  */
 export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
   const { missions, limits, logger } = deps;
-  const { llmFailures, isStopped } = state;
+  const { llmFailures, isStopped, ownerSteppedIn } = state;
   /** WhatsApp reach-out timelock, persisted per tenant so a restart never lifts it. */
   const paused = (tenantId: string): boolean => missions.pausedTenants().includes(tenantId);
 
@@ -180,8 +182,13 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
     try {
       const sent = await sendPaced(
         { sender: c.port.sender, sleep: deps.sleep, rand: deps.rand },
-        { chatId: c.m.chatId, text, seenIds },
+        { chatId: c.m.chatId, text, seenIds, cancelled: () => ownerSteppedIn(c.m.id) },
       );
+      if (!sent) {
+        // The owner wrote in the chat during the typing pause: their message stands alone.
+        logger.info(`mission=${c.m.id} send=skipped reason=taken_over`);
+        return false;
+      }
       c.port.log.append(c.m.id, { kind: "sent", at: iso(deps.now()), body: { id: sent.id } });
       const m = reload(c.m);
       missions.update(c.m.id, { sentCount: m.sentCount + 1, lastAgentAt: iso(c.now) });

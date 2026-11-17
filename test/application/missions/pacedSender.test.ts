@@ -34,7 +34,23 @@ describe("sendPaced", () => {
     expect(sender.calls[0]?.args).toEqual({ chatId: CHAT, messageIds: ["m1", "m2"] });
     expect(slept).toEqual([typingDelayMs("Hola, ¿cómo estás?", () => 0.5)]);
     expect(sender.calls[4]?.args).toEqual({ chatId: CHAT, text: "Hola, ¿cómo estás?" });
-    expect(sent.id).toBeTruthy();
+    expect(sent?.id).toBeTruthy();
+  });
+
+  it("sends nothing when cancelled during the typing pause", async () => {
+    const { sender, deps } = setup();
+    let cancelled = false;
+    const sent = await sendPaced(
+      {
+        ...deps,
+        sleep: async () => {
+          cancelled = true;
+        },
+      },
+      { chatId: CHAT, text: "hola", seenIds: [], cancelled: () => cancelled },
+    );
+    expect(sent).toBeNull();
+    expect(sender.calls.map((c) => c.method)).toEqual(["startTyping", "stopTyping"]);
   });
 
   it("skips sendSeen when there is nothing to mark", async () => {

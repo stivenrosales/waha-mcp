@@ -112,7 +112,7 @@ const startInput = z.object({
     .string()
     .min(1)
     .describe(
-      "Direct chat to converse in: …@c.us or …@lid (from list_chats or get_contact). Groups are not supported yet.",
+      "Direct chat to converse in: …@c.us or …@lid (from list_chats or get_contact); both forms of a person's id name the same chat. Groups are not supported yet.",
     ),
   system_prompt: z
     .string()
@@ -121,10 +121,15 @@ const startInput = z.object({
     .describe(
       "The agent's whole system prompt, written by you, in the language the contact speaks. Sent verbatim: the server adds nothing to it.",
     ),
-  objective: z.string().min(1).describe("What the agent must achieve, in one or two sentences."),
+  objective: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe("What the agent must achieve, in one or two sentences."),
   done_when: z
     .string()
     .min(1)
+    .max(2000)
     .describe("The observable condition that ends the mission as succeeded."),
   max_duration_minutes: z
     .number()

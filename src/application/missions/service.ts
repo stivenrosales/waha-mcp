@@ -8,6 +8,7 @@ import type { TenantStore } from "../../domain/ports/TenantStore.js";
 import type { CollectedItem } from "./agentTools.js";
 import type { MissionEngine } from "./engine.js";
 import { buildConversation, startMissionContent } from "./history.js";
+import { chatIdForms } from "./inbound.js";
 
 /** What the service needs of the engine: owner actions are queued behind its ticks. */
 export type MissionEnginePort = Pick<MissionEngine, "cancel" | "answer" | "takeOver" | "wake">;
@@ -25,6 +26,10 @@ export interface MissionServiceDeps {
   now: () => Date;
   /** True when the chat already has messages (otherwise the mission is to a new contact). */
   hasHistory(chatId: string): Promise<boolean>;
+  /** Phone JID behind a `@lid` (chat ids are matched in both forms). */
+  lookupLid(lid: string): Promise<string | null>;
+  /** Mission ids and outcomes only; never content. */
+  logger: { info(message: string): void };
 }
 
 export interface StartMissionInput {
@@ -71,6 +76,7 @@ export interface MissionService {
 export const MISSION_TEXTS = {
   notConfigured: "Missions are not configured on this server.",
   group: "Group missions are not available yet.",
+  notDirect: "Missions need a direct chat id (…@c.us or …@lid).",
   budget:
     "The monthly mission budget of this account is used up; missions can start again next month.",
   active: (n: number) =>
@@ -85,6 +91,12 @@ export const MISSION_TEXTS = {
     `The deadline falls in quiet hours (${hh(start)}–${hh(end)}); the agent will not start conversations then.`,
   notice: (n: number) => `\n\nMissions: ${n} finished — call list_missions.`,
 };
+
+/** Direct chats: phone JIDs (`@c.us`, `@s.whatsapp.net`) and linked ids (`@lid`). */
+const DIRECT_CHAT = /^[^@\s]+@(c\.us|s\.whatsapp\.net|lid)$/;
+
+const errorName = (error: unknown): string =>
+  error instanceof Error ? error.name : "UnknownError";
 
 const hh = (hour: number): string => `${String(hour).padStart(2, "0")}:00`;
 
@@ -131,6 +143,15 @@ function viewOf(mission: MissionRow, entries: MissionLogEntry[]): MissionView {
 export function createMissionService(deps: MissionServiceDeps): MissionService {
   const { tenantId, store, log, limits, engine } = deps;
   const iso = (d: Date): string => d.toISOString();
+  const forms = (chatId: string): Promise<string[]> => chatIdForms(chatId, deps.lookupLid);
+  /** Active missions whose chat is `ids` under any of its forms. */
+  const activeIn = async (ids: string[]): Promise<MissionRow[]> => {
+    const wanted = new Set(ids);
+    const out: MissionRow[] = [];
+    for (const m of store.list(tenantId, "active"))
+      if ((await forms(m.chatId)).some((id) => wanted.has(id))) out.push(m);
+    return out;
+  };
 
   const find = (id: string): MissionRow => {
     const m = store.get(tenantId, id);
@@ -146,6 +167,7 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
   return {
     async start(q) {
       if (q.chatId.endsWith("@g.us")) throw new InvalidInputError(MISSION_TEXTS.group);
+      if (!DIRECT_CHAT.test(q.chatId)) throw new InvalidInputError(MISSION_TEXTS.notDirect);
       if (q.maxDurationMinutes > limits.maxDurationMinutes)
         throw new InvalidInputError(MISSION_TEXTS.duration(limits.maxDurationMinutes));
       const now = deps.now();
@@ -155,12 +177,16 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
         toIso: iso(now),
       });
       if (spent >= deps.monthlyBudgetUsd) throw new InvalidInputError(MISSION_TEXTS.budget);
-      const active = store.list(tenantId, "active");
-      const busy = active.find((m) => m.chatId === q.chatId);
+      const ids = await forms(q.chatId);
+      // Stored in its normalized form (`@s.whatsapp.net` → `@c.us`), the one webhooks match.
+      const chatId = ids[0] ?? q.chatId;
+      const [busy] = await activeIn(ids);
       if (busy) throw new InvalidInputError(MISSION_TEXTS.chatBusy(busy.id));
-      if (active.length >= limits.maxActivePerTenant)
+      if (store.countActive(tenantId) >= limits.maxActivePerTenant)
         throw new InvalidInputError(MISSION_TEXTS.active(limits.maxActivePerTenant));
-      const newContact = !(await deps.hasHistory(q.chatId));
+      let known = false;
+      for (const id of ids) if (!known) known = await deps.hasHistory(id);
+      const newContact = !known;
       if (
         newContact &&
         store.countNewContactToday(tenantId, iso(dayStart(now, deps.timezone))) >=
@@ -171,7 +197,7 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
       const deadline = new Date(now.getTime() + q.maxDurationMinutes * 60_000);
       const mission = store.create({
         tenantId,
-        chatId: q.chatId,
+        chatId,
         newContact,
         deadlineAt: iso(deadline),
         expectsFiles: q.expectsFiles,
@@ -226,8 +252,20 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
     },
 
     async ownerSent(chatId) {
-      const targets = store.list(tenantId, "active").filter((m) => m.chatId === chatId);
-      await Promise.all(targets.map((m) => engine.takeOver(tenantId, m.id)));
+      if (store.countActive(tenantId) === 0) return;
+      let targets: MissionRow[];
+      try {
+        targets = await activeIn(await forms(chatId));
+      } catch (error) {
+        deps.logger.info(`takeover=failed error=${errorName(error)}`);
+        return;
+      }
+      for (const m of targets) {
+        // Not awaited: it queues behind a running turn, which the engine's mark already stops.
+        engine.takeOver(tenantId, m.id).catch((error: unknown) => {
+          deps.logger.info(`mission=${m.id} takeover=failed error=${errorName(error)}`);
+        });
+      }
     },
 
     takeUnseenNotice() {

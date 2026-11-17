@@ -50,10 +50,14 @@ export function sentResult(chatId: string, sent: SentMessage, textSent?: string)
 }
 
 /**
- * The owner wrote in `chatId` through these tools: an active mission there ends as taken over at
- * once (WAHA's echo of an API send is not relied on). Not awaited: the engine queues it behind a
- * running turn, and a failure must never fail the send that already happened.
+ * The owner wrote in `chatId` through these tools: an active mission there (under either id form)
+ * is taken over at once; WAHA's echo of an API send is not relied on. Waits only for the chat
+ * matching; the takeover itself queues behind a running turn. Never fails the send that already
+ * happened (`ownerSent` logs its own failures).
  */
-export function noteOwnerSend(ctx: Pick<ToolRunContext, "missions">, chatId: string): void {
-  void ctx.missions?.ownerSent(chatId).catch(() => {});
+export async function noteOwnerSend(
+  ctx: Pick<ToolRunContext, "missions">,
+  chatId: string,
+): Promise<void> {
+  await ctx.missions?.ownerSent(chatId).catch(() => {});
 }

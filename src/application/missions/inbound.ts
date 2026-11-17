@@ -56,6 +56,18 @@ export async function chatIdsOf(
   return ids;
 }
 
+/**
+ * Every id one chat id may go by, normalized, the given form first: the same resolution as
+ * `chatIdsOf` (a `@lid` adds the phone JID behind it). Two ids name the same chat when their
+ * forms intersect.
+ */
+export async function chatIdForms(
+  chatId: string,
+  lookupLid: (lid: string) => Promise<string | null>,
+): Promise<string[]> {
+  return [...(await chatIdsOf({ from: chatId }, lookupLid))];
+}
+
 /** `Info.ID` of a message payload (the stable part of its id), or null. */
 export function payloadShortId(payload: Record<string, unknown>): string | null {
   const info = isRecord(payload._data) && isRecord(payload._data.Info) ? payload._data.Info : {};

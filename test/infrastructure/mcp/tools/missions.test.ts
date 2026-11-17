@@ -25,6 +25,8 @@ const TENANT = "t1";
 const OWNER = "51999000000@c.us";
 const CHAT = "51911111111@c.us";
 const OTHER = "51922222222@c.us";
+/** The `@lid` form of CHAT (WAHA's lid lookup maps it to CHAT). */
+const CHAT_LID = "123456789012345@lid";
 const TZ = "America/Lima";
 /** 10:00 in Lima (UTC-5). */
 const T0 = new Date("2026-11-17T15:00:00.000Z");
@@ -108,27 +110,34 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
   });
   const wakes: number[] = [];
   const takeOvers: string[] = [];
-  const service: MissionService = createMissionService({
-    tenantId: TENANT,
-    store,
-    log,
-    tenants,
-    engine: {
-      cancel: engine.cancel,
-      answer: engine.answer,
-      takeOver: async (tenantId, missionId) => {
-        takeOvers.push(missionId);
-        return engine.takeOver(tenantId, missionId);
+  const lines: string[] = [];
+  const takeOverFails = { on: false };
+  const serviceFor = (tenantId: string): MissionService =>
+    createMissionService({
+      tenantId,
+      store,
+      log,
+      tenants,
+      engine: {
+        cancel: engine.cancel,
+        answer: engine.answer,
+        takeOver: (t, missionId) => {
+          takeOvers.push(missionId);
+          if (takeOverFails.on) return Promise.reject(new TypeError("boom"));
+          return engine.takeOver(t, missionId);
+        },
+        // Recorded only: a real tick would call the (absent) LLM.
+        wake: () => wakes.push(1),
       },
-      // Recorded only: a real tick would call the (absent) LLM.
-      wake: () => wakes.push(1),
-    },
-    limits: DEFAULT_MISSION_LIMITS,
-    monthlyBudgetUsd: 1,
-    timezone: TZ,
-    now: () => now,
-    hasHistory: async (chatId) => history.has(chatId),
-  });
+      limits: DEFAULT_MISSION_LIMITS,
+      monthlyBudgetUsd: 1,
+      timezone: TZ,
+      now: () => now,
+      hasHistory: async (chatId) => history.has(chatId),
+      lookupLid: async (lid) => (lid === CHAT_LID ? CHAT : null),
+      logger: { info: (m: string) => lines.push(m) },
+    });
+  const service = serviceFor(TENANT);
   const deps = (missions: MissionService | null): ToolDeps =>
     ({
       mapper: async () => gowsMapper,
@@ -136,7 +145,11 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
       sender,
       missions,
     }) as unknown as ToolDeps;
-  const call = async (name: string, input: Record<string, unknown>, missions = service) => {
+  const call = async (
+    name: string,
+    input: Record<string, unknown>,
+    missions: MissionService | null = service,
+  ) => {
     const parsed = tool(name).inputSchema.parse(input);
     const r = await createToolHandler(tool(name), deps(missions))(parsed);
     return {
@@ -161,7 +174,10 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
     engine,
     wakes,
     takeOvers,
+    takeOverFails,
+    lines,
     service,
+    serviceFor,
     call,
     startInput,
     at(ms: number) {
@@ -206,9 +222,121 @@ describe("mission tools", () => {
       ["answer_mission", { mission_id: "x", answer: "yes" }],
       ["cancel_mission", { mission_id: "x" }],
     ] as const) {
-      const r = await h.call(name, input, null as unknown as MissionService);
+      const r = await h.call(name, input, null);
       expect(r).toMatchObject({ isError: true, text: msg });
     }
+  });
+
+  it("rejects ids that are not a direct chat", async () => {
+    const h = harness();
+    for (const chat_id of ["120363000000@newsletter", "status@broadcast", "51911111111"]) {
+      const r = await h.call("start_mission", h.startInput({ chat_id }));
+      expect(r).toMatchObject({
+        isError: true,
+        text: "Missions need a direct chat id (…@c.us or …@lid).",
+      });
+    }
+    expect(h.store.list(TENANT)).toEqual([]);
+  });
+
+  it("accepts @s.whatsapp.net and stores it in its @c.us form", async () => {
+    const h = harness();
+    const r = await h.call(
+      "start_mission",
+      h.startInput({ chat_id: "51911111111@s.whatsapp.net" }),
+    );
+    expect(r.isError).toBe(false);
+    expect(h.store.list(TENANT)[0]?.chatId).toBe(CHAT);
+  });
+
+  it("caps objective and done_when at 2000 characters", () => {
+    const schema = tool("start_mission").inputSchema;
+    const base = {
+      chat_id: CHAT,
+      system_prompt: "p",
+      objective: "o",
+      done_when: "d",
+      max_duration_minutes: 10,
+    };
+    expect(schema.safeParse({ ...base, objective: "x".repeat(2000) }).success).toBe(true);
+    expect(schema.safeParse({ ...base, objective: "x".repeat(2001) }).success).toBe(false);
+    expect(schema.safeParse({ ...base, done_when: "x".repeat(2000) }).success).toBe(true);
+    expect(schema.safeParse({ ...base, done_when: "x".repeat(2001) }).success).toBe(false);
+  });
+
+  it("refuses a second mission on the same person under the other id form", async () => {
+    const h = harness();
+    await h.call("start_mission", h.startInput({ chat_id: CHAT_LID }));
+    const [m] = h.store.list(TENANT);
+    expect(await h.call("start_mission", h.startInput({ chat_id: CHAT }))).toMatchObject({
+      isError: true,
+      text: `This chat already has an active mission (${m?.id}).`,
+    });
+    await h.call("cancel_mission", { mission_id: m?.id });
+    await h.call("start_mission", h.startInput({ chat_id: CHAT }));
+    const [n] = h.store.list(TENANT, "active");
+    expect(await h.call("start_mission", h.startInput({ chat_id: CHAT_LID }))).toMatchObject({
+      isError: true,
+      text: `This chat already has an active mission (${n?.id}).`,
+    });
+  });
+
+  it("finds a known contact's history under its other id form", async () => {
+    // History only under the phone id; the mission names the lid.
+    const h = harness({ withHistory: [CHAT] });
+    const r = await h.call("start_mission", h.startInput({ chat_id: CHAT_LID }));
+    expect(r.data).toMatchObject({ new_contact: false });
+  });
+
+  it("a mission started on @lid is taken over by a send to @c.us", async () => {
+    const h = harness();
+    await h.call("start_mission", h.startInput({ chat_id: CHAT_LID }));
+    const [m] = h.store.list(TENANT);
+    await h.call("send_text", { chat_id: CHAT, text: "I'll take it from here." });
+    await h.engine.idle();
+    expect(h.store.get(TENANT, m?.id as string)?.state).toBe("taken_over");
+  });
+
+  it("a mission started on @c.us is taken over by a send to @lid", async () => {
+    const h = harness();
+    await h.call("start_mission", h.startInput({ chat_id: CHAT }));
+    const [m] = h.store.list(TENANT);
+    await h.call("send_text", { chat_id: CHAT_LID, text: "I'll take it from here." });
+    await h.engine.idle();
+    expect(h.store.get(TENANT, m?.id as string)?.state).toBe("taken_over");
+  });
+
+  it("logs a failed takeover by mission id and error class only, and the send still succeeds", async () => {
+    const h = harness();
+    await h.call("start_mission", h.startInput());
+    const [m] = h.store.list(TENANT);
+    h.takeOverFails.on = true;
+    const text = "secret plan for Ana";
+    const r = await h.call("send_text", { chat_id: CHAT, text });
+    expect(r.isError).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.lines).toContain(`mission=${m?.id} takeover=failed error=TypeError`);
+    expect(h.lines.join("\n")).not.toContain(text);
+  });
+
+  it("another tenant cannot get, answer or cancel this tenant's mission", async () => {
+    const h = harness();
+    await h.call("start_mission", h.startInput());
+    const [m] = h.store.list(TENANT);
+    const other = h.serviceFor("t2");
+    for (const [name, input] of [
+      ["get_mission", { mission_id: m?.id }],
+      ["answer_mission", { mission_id: m?.id, answer: "yes" }],
+      ["cancel_mission", { mission_id: m?.id }],
+    ] as const) {
+      expect(await h.call(name, input, other)).toMatchObject({
+        isError: true,
+        text: "Mission not found.",
+      });
+    }
+    expect((await h.call("list_missions", {}, other)).data).toEqual({ missions: [] });
+    expect(h.store.get(TENANT, m?.id as string)?.state).toBe("active");
+    expect(h.log.read(m?.id as string).map((e) => e.kind)).toEqual(["prompt", "spec"]);
   });
 
   it("rejects a group chat id", async () => {

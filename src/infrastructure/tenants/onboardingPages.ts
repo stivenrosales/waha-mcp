@@ -9,7 +9,10 @@ const REFRESH_SECONDS = 5;
 const refresh = `<meta http-equiv="refresh" content="${REFRESH_SECONDS}">\n`;
 const AUTO_REFRESH = `<p class="muted">Esta página se actualiza sola cada pocos segundos.</p>`;
 
-const notice = `<p class="notice">${escapeHtml(TRUST_NOTICE)}</p>`;
+/** Path of the public page that explains who can see a tenant's data. */
+export const PRIVACY_PATH = "/privacidad";
+
+const notice = `<p class="notice">${escapeHtml(TRUST_NOTICE)} <a href="${PRIVACY_PATH}">Cómo se tratan tus datos</a></p>`;
 
 const newPasswordFields = `<label for="password">Contraseña (mínimo 12 caracteres)</label>
 <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required>
@@ -100,5 +103,29 @@ export function pairTakenPage(message: string): string {
     `<h1>Este número ya está conectado</h1>
 <p class="lead">${escapeHtml(message)}</p>
 <p><a href="pair">Vincular otro número</a></p>`,
+  );
+}
+
+/** Public, honest account of what the server stores and who can see it. */
+export function privacyPage(): string {
+  return layout(
+    "Privacidad",
+    `<h1>Cómo se tratan tus datos</h1>
+<p class="lead">Este servidor no tiene cifrado de extremo a extremo. Aquí está, sin letra pequeña, qué se guarda y quién puede verlo.</p>
+<h2>Qué se guarda</h2>
+<ul class="steps">
+<li><span>Una copia de tus mensajes y de las transcripciones de tus notas de voz, cifrada con una llave propia de tu cuenta.</span></li>
+<li><span>Tu usuario y tu contraseña; la contraseña solo como hash, nunca en texto.</span></li>
+<li><span>Registros de uso: qué herramienta se usó, cuándo, si funcionó y cuánto costó cada transcripción. Nunca el contenido de tus mensajes.</span></li>
+</ul>
+<h2>Quién puede verlo</h2>
+<ul class="steps">
+<li><span><strong>Tú</strong>, desde la aplicación que conectes con tu usuario y contraseña.</span></li>
+<li><span><strong>El administrador del servidor</strong> puede acceder técnicamente a tus datos, porque controla el servidor, la conexión con WhatsApp y la llave maestra que protege la de tu cuenta. No tiene herramientas para leer chats de otras cuentas y se compromete a no hacerlo.</span></li>
+<li><span><strong>La aplicación de IA que conectes</strong> (por ejemplo, Claude) recibe los mensajes que le pidas leer o enviar.</span></li>
+<li><span><strong>El servicio de transcripción</strong> recibe el audio de tus notas de voz cuando se transcriben.</span></li>
+</ul>
+<h2>Cómo salir</h2>
+<p>Para cortar el acceso a tu WhatsApp, ve a <strong>Dispositivos vinculados</strong> en tu teléfono y cierra la sesión de este servidor. Para borrar todo, pide al administrador que elimine tu cuenta: se borran tu usuario, tu llave, los mensajes guardados y la sesión de WhatsApp.</p>`,
   );
 }

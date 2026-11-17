@@ -12,11 +12,13 @@ import type { LoginLimiter } from "../auth/rateLimit.js";
 import type { AuthStore } from "../auth/store.js";
 import {
   invitePage,
+  PRIVACY_PATH,
   pairDonePage,
   pairLoginPage,
   pairQrPage,
   pairTakenPage,
   pairWaitPage,
+  privacyPage,
   resetPage,
 } from "./onboardingPages.js";
 
@@ -308,6 +310,8 @@ export function createOnboardingRoutes(deps: {
       );
     }
   };
+
+  app.get(PRIVACY_PATH, (c) => page(c)(privacyPage()));
 
   app.get("/pair", async (c) => {
     const html = page(c, { qr: true });

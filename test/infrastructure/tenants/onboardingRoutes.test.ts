@@ -10,6 +10,7 @@ const HOUR = 3600_000;
 const PASSWORD = "a long enough password";
 const TRUST =
   "El administrador de este servidor puede acceder técnicamente a tus datos de WhatsApp. Continúa solo si confías en quien lo administra.";
+const PRIVACY_LINK = '<a href="/privacidad">Cómo se tratan tus datos</a>';
 const USED = "Este enlace ya se usó.";
 const TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
 
@@ -106,6 +107,7 @@ describe("invite", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(TRUST);
+    expect(html).toContain(PRIVACY_LINK);
     expect(html).toContain('name="username"');
     expect(html).toContain('name="password"');
     expect(html).not.toContain(token);
@@ -319,6 +321,7 @@ describe("pair", () => {
     expect(html).toContain('<img src="data:image/png;base64,ZmFrZS1xcg=="');
     expect(html).toContain('<meta http-equiv="refresh" content="5">');
     expect(html).toContain(TRUST);
+    expect(html).toContain(PRIVACY_LINK);
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("img-src data:");
     expect(csp).toContain("default-src 'none'");
@@ -576,5 +579,23 @@ describe("secrecy", () => {
         expect(text).not.toContain(secret);
       }
     }
+  });
+});
+
+describe("privacy", () => {
+  it("explains, without a session, who can see the tenant's data", async () => {
+    const ctx = setup();
+    const res = await ctx.request("/privacidad");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("<h1>Cómo se tratan tus datos</h1>");
+    expect(html).toContain("no tiene cifrado de extremo a extremo");
+    expect(html).toContain("puede acceder técnicamente a tus datos");
+    expect(html).toContain("servicio de transcripción");
+    expect(html).toContain("Nunca el contenido de tus mensajes");
+    expect(html).toContain("Dispositivos vinculados");
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
   });
 });

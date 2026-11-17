@@ -43,6 +43,7 @@ main{flex:1;width:100%;max-width:27rem;margin:0 auto;padding:clamp(2.5rem,10vh,6
 .eyebrow{display:flex;align-items:center;gap:.55rem;margin:0 0 1.75rem;font-size:.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
 .eyebrow::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:var(--moss)}
 h1{margin:0 0 .85rem;font-size:clamp(1.85rem,6vw,2.35rem);line-height:1.1;font-weight:500;letter-spacing:-.028em}
+h2{margin:2.25rem 0 .75rem;font-size:.8rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 p{margin:0 0 1rem}
 .lead{color:var(--muted);margin-bottom:2rem}
 strong{font-weight:600;color:var(--ink)}
@@ -64,6 +65,7 @@ a:hover{text-decoration-color:var(--moss)}
 .qr{display:flex;justify-content:center;margin:0 0 1.5rem;padding:1.4rem;background:#fff;border:1px solid var(--line)}
 .qr img{display:block;width:100%;max-width:16.5rem;height:auto;image-rendering:pixelated}
 .steps{margin:0 0 1.75rem;padding:0;list-style:none;counter-reset:s;border-top:1px solid var(--line)}
+ul.steps li::before{content:"";flex:0 0 .4rem;width:.4rem;height:.4rem;padding:0;margin-top:.6rem;border-radius:50%;background:var(--moss)}
 .steps li{counter-increment:s;display:flex;gap:.9rem;padding:.8rem 0;border-bottom:1px solid var(--line);font-size:.93rem}
 .steps li::before{content:counter(s,decimal-leading-zero);flex:0 0 1.5rem;font-variant-numeric:tabular-nums;font-size:.75rem;font-weight:700;color:var(--moss);padding-top:.15rem}
 code{display:block;margin:0 0 1rem;padding:.85rem 1rem;border:1px solid var(--line);background:#fbfaf7;font:500 .88rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}

@@ -97,3 +97,25 @@ export class WhatsAppDisconnectedError extends Error {
     this.name = "WhatsAppDisconnectedError";
   }
 }
+
+/**
+ * The LLM provider could not answer right now (network failure, 429 or 5xx); the caller may
+ * retry later. `status` is the HTTP status (null when no response arrived), for the log only.
+ */
+export class LlmUnavailableError extends Error {
+  constructor(public readonly status: number | null = null) {
+    super("The LLM provider is unavailable. Try again later.");
+    this.name = "LlmUnavailableError";
+  }
+}
+
+/**
+ * The LLM provider rejected the request (a 4xx other than 429: bad key, no credits, invalid
+ * request). Retrying the same request will not help. The provider's body is never kept.
+ */
+export class LlmRejectedError extends Error {
+  constructor(public readonly status: number) {
+    super(`The LLM provider rejected the request (HTTP ${status}).`);
+    this.name = "LlmRejectedError";
+  }
+}

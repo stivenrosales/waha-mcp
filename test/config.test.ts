@@ -323,4 +323,110 @@ describe("loadConfig", () => {
       expect(message).not.toContain(bad);
     });
   });
+  describe("missions", () => {
+    const on = {
+      ...minimal,
+      OPENROUTER_API_KEY: "sk-or-mission-secret",
+      WAHA_WEBHOOK_SECRET: "hook-secret",
+    };
+
+    it("missions is null when neither OPENROUTER_API_KEY nor WAHA_WEBHOOK_SECRET is set", () => {
+      expect(loadConfig(minimal).missions).toBeNull();
+    });
+
+    it("setting only one of them fails with 'OPENROUTER_API_KEY and WAHA_WEBHOOK_SECRET must be set together.'", () => {
+      for (const only of [
+        { OPENROUTER_API_KEY: "sk-or-mission-secret" },
+        { WAHA_WEBHOOK_SECRET: "hook-secret" },
+      ]) {
+        let message = "";
+        try {
+          loadConfig({ ...minimal, ...only });
+          expect.unreachable();
+        } catch (e) {
+          message = (e as Error).message;
+        }
+        expect(message).toContain(
+          "OPENROUTER_API_KEY and WAHA_WEBHOOK_SECRET must be set together.",
+        );
+        expect(message).not.toContain("sk-or-mission-secret");
+        expect(message).not.toContain("hook-secret");
+      }
+    });
+
+    it("defaults: model anthropic/claude-haiku-5.5, budget 1, limits as above", () => {
+      expect(loadConfig(on).missions).toEqual({
+        openRouterApiKey: "sk-or-mission-secret",
+        webhookSecret: "hook-secret",
+        model: "anthropic/claude-haiku-5.5",
+        monthlyBudgetUsd: 1,
+        limits: {
+          maxMessagesPerMission: 40,
+          maxActivePerTenant: 3,
+          maxNewContactsPerDay: 5,
+          maxReminders: 2,
+          maxRemindersNewContact: 1,
+          reminderGapMs: 1_800_000,
+          debounceMs: 15_000,
+          maxDurationMinutes: 120,
+          maxLlmCallsPerMission: 60,
+          quietStartHour: 22,
+          quietEndHour: 8,
+        },
+      });
+    });
+
+    it("reads every MISSIONS_* override", () => {
+      const m = loadConfig({
+        ...on,
+        MISSIONS_MODEL: "anthropic/claude-sonnet-5.5",
+        MISSIONS_MONTHLY_BUDGET_USD: "2.5",
+        MISSIONS_MAX_MESSAGES_PER_MISSION: "10",
+        MISSIONS_MAX_ACTIVE_PER_TENANT: "1",
+        MISSIONS_MAX_NEW_CONTACTS_PER_DAY: "2",
+        MISSIONS_MAX_REMINDERS: "0",
+        MISSIONS_MAX_REMINDERS_NEW_CONTACT: "0",
+        MISSIONS_REMINDER_GAP_MS: "60000",
+        MISSIONS_DEBOUNCE_MS: "0",
+        MISSIONS_MAX_DURATION_MINUTES: "30",
+        MISSIONS_MAX_LLM_CALLS_PER_MISSION: "20",
+        MISSIONS_QUIET_START_HOUR: "23",
+        MISSIONS_QUIET_END_HOUR: "0",
+      }).missions;
+      expect(m).toMatchObject({
+        model: "anthropic/claude-sonnet-5.5",
+        monthlyBudgetUsd: 2.5,
+        limits: {
+          maxMessagesPerMission: 10,
+          maxActivePerTenant: 1,
+          maxNewContactsPerDay: 2,
+          maxReminders: 0,
+          maxRemindersNewContact: 0,
+          reminderGapMs: 60000,
+          debounceMs: 0,
+          maxDurationMinutes: 30,
+          maxLlmCallsPerMission: 20,
+          quietStartHour: 23,
+          quietEndHour: 0,
+        },
+      });
+    });
+
+    it("rejects invalid budgets, limits and hours", () => {
+      for (const bad of ["0", "-1", "abc"])
+        expect(() => loadConfig({ ...on, MISSIONS_MONTHLY_BUDGET_USD: bad })).toThrow(
+          /MISSIONS_MONTHLY_BUDGET_USD must be a positive number/,
+        );
+      expect(() => loadConfig({ ...on, MISSIONS_MAX_MESSAGES_PER_MISSION: "0" })).toThrow(
+        /MISSIONS_MAX_MESSAGES_PER_MISSION/,
+      );
+      for (const bad of ["24", "-1", "x"])
+        expect(() => loadConfig({ ...on, MISSIONS_QUIET_START_HOUR: bad })).toThrow(
+          /MISSIONS_QUIET_START_HOUR must be an hour from 0 to 23/,
+        );
+      expect(() => loadConfig({ ...on, MISSIONS_QUIET_END_HOUR: "25" })).toThrow(
+        /MISSIONS_QUIET_END_HOUR must be an hour from 0 to 23/,
+      );
+    });
+  });
 });

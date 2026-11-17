@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_MISSION_LIMITS, type MissionLimits } from "./domain/missions/limits.js";
 import { USERNAME_PATTERN, USERNAME_RULE } from "./domain/username.js";
 import { parseMasterKey } from "./infrastructure/crypto/envelope.js";
 
@@ -43,6 +44,20 @@ export interface Config {
   cacheMaxAgeDays: number;
   /** Voice-note transcription via an OpenAI-compatible API; null when off (the default). */
   transcription: TranscriptionConfig | null;
+  /** Server-side Claude agent on WhatsApp missions; null when off (the default). */
+  missions: MissionsConfig | null;
+}
+
+export interface MissionsConfig {
+  /** OpenRouter key for `https://openrouter.ai/api/v1/messages`. Never logged. */
+  openRouterApiKey: string;
+  /** Shared secret WAHA signs webhook deliveries with. Never logged. */
+  webhookSecret: string;
+  /** OpenRouter model id. */
+  model: string;
+  /** Monthly LLM spend cap per tenant, in USD. */
+  monthlyBudgetUsd: number;
+  limits: MissionLimits;
 }
 
 export interface TranscriptionConfig {
@@ -63,6 +78,8 @@ const TRANSCRIPTION_REQUIRED = [
   "TRANSCRIPTION_API_KEY",
   "TRANSCRIPTION_MODEL",
 ] as const;
+
+const MISSIONS_REQUIRED = ["OPENROUTER_API_KEY", "WAHA_WEBHOOK_SECRET"] as const;
 
 const stripTrailingSlashes = (value: string): string => value.replace(/\/+$/, "");
 
@@ -116,6 +133,40 @@ const boolean = (name: string, fallback: boolean) =>
         .enum(["true", "false"], `${name} must be "true" or "false".`)
         .transform((v) => v === "true"),
     );
+
+const positiveNumber = (name: string, fallback: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === "" ? String(fallback) : v.trim()))
+    .pipe(
+      z
+        .string()
+        .regex(/^\d+(\.\d+)?$/, `${name} must be a positive number.`)
+        .transform(Number)
+        .refine((n) => n > 0, `${name} must be a positive number.`),
+    );
+
+const hour = (name: string, fallback: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? String(fallback) : v))
+    .pipe(
+      z
+        .string()
+        .regex(/^\d{1,2}$/, `${name} must be an hour from 0 to 23.`)
+        .transform(Number)
+        .refine((n) => n <= 23, `${name} must be an hour from 0 to 23.`),
+    );
+
+const optionalTrimmed = () =>
+  z
+    .string()
+    .optional()
+    .transform((v) => v?.trim() || undefined);
+
+const L = DEFAULT_MISSION_LIMITS;
 
 const ADMIN_PASSWORD_MIN = 12;
 
@@ -218,8 +269,50 @@ const envSchema = z
       ),
     TRANSCRIPTION_MAX_SECONDS: positiveInt("TRANSCRIPTION_MAX_SECONDS", 300),
     TRANSCRIPTION_MAX_PER_CALL: nonNegativeInt("TRANSCRIPTION_MAX_PER_CALL", 20),
+    OPENROUTER_API_KEY: optionalTrimmed(),
+    WAHA_WEBHOOK_SECRET: optionalTrimmed(),
+    MISSIONS_MODEL: optionalTrimmed(),
+    MISSIONS_MONTHLY_BUDGET_USD: positiveNumber("MISSIONS_MONTHLY_BUDGET_USD", 1),
+    MISSIONS_MAX_MESSAGES_PER_MISSION: positiveInt(
+      "MISSIONS_MAX_MESSAGES_PER_MISSION",
+      L.maxMessagesPerMission,
+    ),
+    MISSIONS_MAX_ACTIVE_PER_TENANT: positiveInt(
+      "MISSIONS_MAX_ACTIVE_PER_TENANT",
+      L.maxActivePerTenant,
+    ),
+    MISSIONS_MAX_NEW_CONTACTS_PER_DAY: nonNegativeInt(
+      "MISSIONS_MAX_NEW_CONTACTS_PER_DAY",
+      L.maxNewContactsPerDay,
+    ),
+    MISSIONS_MAX_REMINDERS: nonNegativeInt("MISSIONS_MAX_REMINDERS", L.maxReminders),
+    MISSIONS_MAX_REMINDERS_NEW_CONTACT: nonNegativeInt(
+      "MISSIONS_MAX_REMINDERS_NEW_CONTACT",
+      L.maxRemindersNewContact,
+    ),
+    MISSIONS_REMINDER_GAP_MS: positiveInt("MISSIONS_REMINDER_GAP_MS", L.reminderGapMs),
+    MISSIONS_DEBOUNCE_MS: nonNegativeInt("MISSIONS_DEBOUNCE_MS", L.debounceMs),
+    MISSIONS_MAX_DURATION_MINUTES: positiveInt(
+      "MISSIONS_MAX_DURATION_MINUTES",
+      L.maxDurationMinutes,
+    ),
+    MISSIONS_MAX_LLM_CALLS_PER_MISSION: positiveInt(
+      "MISSIONS_MAX_LLM_CALLS_PER_MISSION",
+      L.maxLlmCallsPerMission,
+    ),
+    MISSIONS_QUIET_START_HOUR: hour("MISSIONS_QUIET_START_HOUR", L.quietStartHour),
+    MISSIONS_QUIET_END_HOUR: hour("MISSIONS_QUIET_END_HOUR", L.quietEndHour),
   })
   .superRefine((env, ctx) => {
+    // Both or neither: missions need the model key and the webhook secret together.
+    const missions = MISSIONS_REQUIRED.filter((name) => Boolean(env[name]));
+    if (missions.length > 0 && missions.length < MISSIONS_REQUIRED.length)
+      ctx.addIssue({
+        code: "custom",
+        path: [MISSIONS_REQUIRED.find((name) => !env[name]) ?? MISSIONS_REQUIRED[0]],
+        message: "OPENROUTER_API_KEY and WAHA_WEBHOOK_SECRET must be set together.",
+      });
+
     // All three or none: a half-configured provider is a mistake, not "off".
     const set = TRANSCRIPTION_REQUIRED.filter((name) => Boolean(env[name]));
     if (set.length === 0 || set.length === TRANSCRIPTION_REQUIRED.length) return;
@@ -275,6 +368,28 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
             language: v.TRANSCRIPTION_LANGUAGE || null,
             maxSeconds: v.TRANSCRIPTION_MAX_SECONDS,
             maxPerCall: v.TRANSCRIPTION_MAX_PER_CALL,
+          }
+        : null,
+    missions:
+      v.OPENROUTER_API_KEY && v.WAHA_WEBHOOK_SECRET
+        ? {
+            openRouterApiKey: v.OPENROUTER_API_KEY,
+            webhookSecret: v.WAHA_WEBHOOK_SECRET,
+            model: v.MISSIONS_MODEL ?? "anthropic/claude-haiku-5.5",
+            monthlyBudgetUsd: v.MISSIONS_MONTHLY_BUDGET_USD,
+            limits: {
+              maxMessagesPerMission: v.MISSIONS_MAX_MESSAGES_PER_MISSION,
+              maxActivePerTenant: v.MISSIONS_MAX_ACTIVE_PER_TENANT,
+              maxNewContactsPerDay: v.MISSIONS_MAX_NEW_CONTACTS_PER_DAY,
+              maxReminders: v.MISSIONS_MAX_REMINDERS,
+              maxRemindersNewContact: v.MISSIONS_MAX_REMINDERS_NEW_CONTACT,
+              reminderGapMs: v.MISSIONS_REMINDER_GAP_MS,
+              debounceMs: v.MISSIONS_DEBOUNCE_MS,
+              maxDurationMinutes: v.MISSIONS_MAX_DURATION_MINUTES,
+              maxLlmCallsPerMission: v.MISSIONS_MAX_LLM_CALLS_PER_MISSION,
+              quietStartHour: v.MISSIONS_QUIET_START_HOUR,
+              quietEndHour: v.MISSIONS_QUIET_END_HOUR,
+            },
           }
         : null,
   };

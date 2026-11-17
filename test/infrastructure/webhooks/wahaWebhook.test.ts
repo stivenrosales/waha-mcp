@@ -215,7 +215,7 @@ describe("WAHA webhook route", () => {
   it("answers 200 and stores nothing for stale, future or malformed envelopes", async () => {
     const ctx = setup();
     const cases = [
-      envelope({ id: "evt_old", timestamp: NOW - 10 * MINUTE - 1 }),
+      envelope({ id: "evt_old", timestamp: NOW - 45 * MINUTE - 1 }),
       envelope({ id: "evt_future", timestamp: NOW + 2 * MINUTE + 1 }),
       envelope({ id: "evt_nots", timestamp: "soon" }),
       envelope({ id: "" }),
@@ -226,8 +226,8 @@ describe("WAHA webhook route", () => {
     expect((await ctx.post("not json")).status).toBe(200);
     expect((await ctx.post("[]")).status).toBe(200);
     expect(ctx.stored()).toHaveLength(0);
-    // The window edges are accepted.
-    await ctx.send(envelope({ id: "evt_edge_old", timestamp: NOW - 10 * MINUTE }));
+    // The window edges are accepted: 45 min covers WAHA's last exponential retry (~34-41 min).
+    await ctx.send(envelope({ id: "evt_edge_old", timestamp: NOW - 45 * MINUTE }));
     await ctx.send(envelope({ id: "evt_edge_new", timestamp: NOW + 2 * MINUTE }));
     expect(ctx.stored().map((e) => e.eventId)).toEqual(["evt_edge_old", "evt_edge_new"]);
   });

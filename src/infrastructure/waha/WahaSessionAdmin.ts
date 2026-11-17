@@ -23,10 +23,13 @@ const asRecord = (v: unknown): Record<string, unknown> =>
 /** Missions only consume these: `message.any` already carries incoming messages (spike §3.8). */
 const WEBHOOK_EVENTS = ["message.any", "session.status"] as const;
 /**
- * WAHA's own defaults (spike §2.6), made explicit so the stored config is self-describing:
- * a constant 2 s delay, 15 attempts (~30 s), which covers a server restart or deploy.
+ * Exponential retries: WAHA waits `2^n * delaySeconds` (+0-20% jitter) before retry n
+ * (`WebhookPlugin.sender.ts`, `exponentialDelay`), so 9 attempts at 2 s retry after 4 s, 8 s, …,
+ * 1024 s: the last one about 34-41 min after the event. That outlasts a slow deploy or a crash
+ * loop of up to ~30 min (WAHA's default, 15 x 2 s constant, gave up after ~30 s). The webhook
+ * route's freshness window (45 min) covers the last retry.
  */
-const WEBHOOK_RETRIES = { policy: "constant", delaySeconds: 2, attempts: 15 } as const;
+const WEBHOOK_RETRIES = { policy: "exponential", delaySeconds: 2, attempts: 9 } as const;
 
 /** The session-config webhook entry WAHA expects (spike §2.1). */
 const webhookEntry = (target: WebhookTarget) => ({

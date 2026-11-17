@@ -193,7 +193,7 @@ describe("WahaSessionAdmin", () => {
       url: HOOK.url,
       events: ["message.any", "session.status"],
       hmac: { key: HOOK.secret },
-      retries: { policy: "constant", delaySeconds: 2, attempts: 15 },
+      retries: { policy: "exponential", delaySeconds: 2, attempts: 9 },
       customHeaders: null,
     };
     const OTHER = { url: "https://n8n.example.com/hook", events: ["message"], hmac: null };
@@ -243,6 +243,23 @@ describe("WahaSessionAdmin", () => {
       const { fn, calls } = wahaWith({ name: "t_abc", config: { webhooks: [OTHER, echoed] } });
       await make(fn).configureWebhook("t_abc", HOOK);
       expect(calls.map((c) => c.method)).toEqual(["GET"]);
+    });
+
+    it("configureWebhook rewrites ours when it still has the old 30-second constant retries", async () => {
+      const old = { ...OURS, retries: { policy: "constant", delaySeconds: 2, attempts: 15 } };
+      const { fn, calls } = wahaWith({ name: "t_abc", config: { webhooks: [old] } });
+      await make(fn).configureWebhook("t_abc", HOOK);
+      expect(calls.map((c) => c.method)).toEqual(["GET", "PUT"]);
+      expect(JSON.parse(calls[1]?.body ?? "").config.webhooks).toEqual([OURS]);
+    });
+
+    it("asks WAHA for retries that span about 30 minutes", () => {
+      // WAHA's exponential delay before retry n is 2^n * delaySeconds (+0-20% jitter).
+      const { delaySeconds, attempts } = OURS.retries;
+      let total = 0;
+      for (let n = 1; n <= attempts; n++) total += 2 ** n * delaySeconds;
+      expect(total).toBeGreaterThanOrEqual(30 * 60);
+      expect(total * 1.2).toBeLessThanOrEqual(45 * 60);
     });
 
     it("configureWebhook writes a config for a session that has none", async () => {

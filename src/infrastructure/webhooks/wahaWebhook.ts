@@ -15,8 +15,12 @@ export const WEBHOOK_PATH = "/webhooks/waha";
  */
 export const DEFAULT_MAX_WEBHOOK_BYTES = 256 * 1024;
 
-/** Freshness window on the signed envelope `timestamp` (ms): replays and clock skew. */
-const MAX_AGE_MS = 10 * 60_000;
+/**
+ * Freshness window on the signed envelope `timestamp` (ms): replays and clock skew. It covers
+ * WAHA's last exponential retry (~34-41 min, see `WahaSessionAdmin`); a replay inside it is
+ * dropped by the event id dedupe.
+ */
+const MAX_AGE_MS = 45 * 60_000;
 const MAX_FUTURE_MS = 2 * 60_000;
 /** WAHA ids are `evt_` + a ULID; anything far longer is not one. */
 const MAX_EVENT_ID_LENGTH = 128;

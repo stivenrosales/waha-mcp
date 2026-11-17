@@ -36,4 +36,8 @@ export interface WhatsAppSender {
   sendContact(
     q: Target & { fullName: string; phoneNumber: string; organization?: string },
   ): Promise<SentMessage>;
+  /** Marks messages as read; without ids WAHA marks the whole chat. */
+  sendSeen(q: { chatId: string; messageIds?: string[] }): Promise<void>;
+  startTyping(chatId: string): Promise<void>;
+  stopTyping(chatId: string): Promise<void>;
 }

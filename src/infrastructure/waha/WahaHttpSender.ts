@@ -130,6 +130,15 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
   }
 
   return {
+    sendSeen: async (q) => {
+      await post("/api/sendSeen", { chatId: q.chatId, messageIds: q.messageIds }, false);
+    },
+    startTyping: async (chatId) => {
+      await post("/api/startTyping", { chatId }, false);
+    },
+    stopTyping: async (chatId) => {
+      await post("/api/stopTyping", { chatId }, false);
+    },
     sendText: (q) =>
       post(
         "/api/sendText",

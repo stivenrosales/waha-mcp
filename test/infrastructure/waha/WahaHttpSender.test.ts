@@ -246,6 +246,27 @@ describe("WahaHttpSender", () => {
     }
   });
 
+  it("posts seen and typing actions with the session", async () => {
+    const { fn, calls } = fakeFetch(() => json({}));
+    const s = make(fn);
+    await s.sendSeen({ chatId: "1@c.us", messageIds: ["a", "b"] });
+    await s.sendSeen({ chatId: "1@c.us" });
+    await s.startTyping("1@c.us");
+    await s.stopTyping("1@c.us");
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ["POST", "/api/sendSeen", { session: "default", chatId: "1@c.us", messageIds: ["a", "b"] }],
+      ["POST", "/api/sendSeen", { session: "default", chatId: "1@c.us" }],
+      ["POST", "/api/startTyping", { session: "default", chatId: "1@c.us" }],
+      ["POST", "/api/stopTyping", { session: "default", chatId: "1@c.us" }],
+    ]);
+    expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+  });
+
+  it("maps presence action failures like sends", async () => {
+    const { fn } = fakeFetch(() => json({}, 401));
+    await expect(make(fn).startTyping("1@c.us")).rejects.toBeInstanceOf(WahaAuthError);
+  });
+
   it("never leaks the key or base URL in errors", async () => {
     for (const res of [json({ message: `bad ${KEY}` }, 400), json({}, 500)]) {
       const { fn } = fakeFetch(() => res);

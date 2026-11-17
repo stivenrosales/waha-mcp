@@ -249,15 +249,28 @@ export function rawVoice(
 export class RecordingSender implements WhatsAppSender {
   calls: { method: string; args: unknown }[] = [];
   failWith?: Error;
+  /** Per-method failures, for the presence actions and for targeted send errors. */
+  failMethods: Record<string, Error> = {};
   private n = 0;
 
   private record(method: string, args: unknown): Promise<SentMessage> {
     if (this.failWith) return Promise.reject(this.failWith);
+    const failure = this.failMethods[method];
+    if (failure) return Promise.reject(failure);
     this.calls.push({ method, args });
     this.n += 1;
     return Promise.resolve({ id: `true_sent_${this.n}`, timestamp: 1_800_000_000 + this.n });
   }
 
+  async sendSeen(q: Parameters<WhatsAppSender["sendSeen"]>[0]) {
+    await this.record("sendSeen", q);
+  }
+  async startTyping(chatId: string) {
+    await this.record("startTyping", chatId);
+  }
+  async stopTyping(chatId: string) {
+    await this.record("stopTyping", chatId);
+  }
   sendText(q: Parameters<WhatsAppSender["sendText"]>[0]) {
     return this.record("sendText", q);
   }

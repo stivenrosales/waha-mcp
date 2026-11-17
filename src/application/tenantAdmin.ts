@@ -103,6 +103,8 @@ export interface TenantAdminDeps {
   auth: { revokeUser(userId: string): void };
   sessions: SessionAdmin;
   registry: { evict(id: string): void };
+  /** Mission rows are deleted with the tenant (their sealed log goes with the tenant directory). */
+  missions?: { deleteForTenant(tenantId: string): void };
   /** Wraps a fresh data key for the tenant (keeps crypto out of the application layer). */
   newWrappedDek(tenantId: string): string;
   dataDir: string;
@@ -387,6 +389,7 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
 
           // Row + wrapped DEK first: from here on the tenant's data is unrecoverable.
           tenants.deleteTenant(tenant.id);
+          deps.missions?.deleteForTenant(tenant.id);
 
           /** Runs one cleanup step; a failure is logged (never its error text) and reported. */
           const step = async (name: string, fn: () => unknown): Promise<"ok" | "failed"> => {

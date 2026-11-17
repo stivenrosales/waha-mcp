@@ -79,6 +79,8 @@ describe("buildTenantRuntime", () => {
     expect(fs.existsSync(path.join(dir, "cache.db"))).toBe(true);
     expect(fs.existsSync(path.join(dir, "uploads"))).toBe(true);
     expect(runtime.tenantId).toBe("tid1");
+    runtime.missionLog.append("m1", { kind: "prompt", at: "2026-11-17T10:00:00.000Z", body: "hi" });
+    expect(runtime.missionLog.read("m1")).toHaveLength(1);
     const token = runtime.context.links.sign("m1");
     expect(runtime.context.links.verify(token)).toBe("m1");
     runtime.close();

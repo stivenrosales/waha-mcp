@@ -6,6 +6,7 @@ import { createTenantAdmin } from "../../src/application/tenantAdmin.js";
 import { InvalidInputError } from "../../src/domain/errors.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
 import { generateDek, unwrapDek, wrapDek } from "../../src/infrastructure/crypto/envelope.js";
+import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { FakeSessionAdmin } from "../fakes/FakeSessionAdmin.js";
 
@@ -27,18 +28,19 @@ async function setup() {
   const sessions = new FakeSessionAdmin();
   const evicted: string[] = [];
   const logs: string[] = [];
-  const admin = createTenantAdmin({
+  const deps = {
     tenants,
     auth,
     sessions,
-    registry: { evict: (id) => void evicted.push(id) },
-    newWrappedDek: (id) => wrapDek(KEK, generateDek(), id),
+    registry: { evict: (id: string) => void evicted.push(id) },
+    newWrappedDek: (id: string) => wrapDek(KEK, generateDek(), id),
     dataDir,
     publicBaseUrl: "https://mcp.example.com/",
-    logger: { info: (m) => void logs.push(m) },
+    logger: { info: (m: string) => void logs.push(m) },
     timezone: "America/Lima",
     now: () => T0,
-  });
+  };
+  const admin = createTenantAdmin(deps);
   const adminTenant = tenants.createTenant({
     displayName: "Owner",
     wahaSession: "t_adminadmin",
@@ -51,7 +53,19 @@ async function setup() {
     role: "admin",
   })) as { id: string };
   tenants.setStatus(adminTenant.id, "active");
-  return { dataDir, db, tenants, auth, sessions, evicted, logs, admin, adminTenant, adminUser };
+  return {
+    deps,
+    dataDir,
+    db,
+    tenants,
+    auth,
+    sessions,
+    evicted,
+    logs,
+    admin,
+    adminTenant,
+    adminUser,
+  };
 }
 
 const tokenOf = (url: string) => url.slice(url.lastIndexOf("/") + 1);
@@ -249,6 +263,22 @@ describe("delete_tenant", () => {
     );
     expect(fs.existsSync(dir)).toBe(false);
     expect(s.logs).toContain(`admin delete_tenant tenant=${tenantId} outcome=ok`);
+  });
+
+  it("deletes the tenant's mission rows with the tenant", async () => {
+    const s = await setup();
+    const { tenantId } = await onboard(s);
+    const store = createSqliteMissionStore(s.db);
+    const m = store.create({
+      tenantId,
+      chatId: "c",
+      newContact: false,
+      deadlineAt: "2026-11-20T00:00:00.000Z",
+      expectsFiles: false,
+    });
+    const admin = createTenantAdmin({ ...s.deps, missions: store });
+    await admin.delete(tenantId, "Acme");
+    expect(store.get(tenantId, m.id)).toBeNull();
   });
 
   it("still finishes local deletion when WAHA fails and reports it", async () => {

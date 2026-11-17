@@ -18,7 +18,10 @@ import { MEDIA_GONE } from "../../src/infrastructure/media/resolveMedia.js";
 import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
 import { migrateToMultiTenant } from "../../src/infrastructure/tenants/migrate.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
-import type { buildTenantRuntime } from "../../src/infrastructure/tenants/runtime.js";
+import type {
+  buildTenantRuntime,
+  TenantRuntime,
+} from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
 import { createUploadLinks } from "../../src/infrastructure/uploads/uploadLinks.js";
@@ -204,6 +207,7 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
         links: uploadLinks,
         maxBytes: b.config.uploadMaxBytes,
       }),
+      missionLog: {} as TenantRuntime["missionLog"],
       close() {},
     };
   };

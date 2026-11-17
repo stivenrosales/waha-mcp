@@ -14,6 +14,7 @@ import { createTenantCipher } from "../crypto/envelope.js";
 import type { Logger, ToolRunContext } from "../mcp/defineTool.js";
 import { createMediaHandler } from "../media/mediaRoute.js";
 import { createSignedLinks } from "../media/signedLink.js";
+import { createSealedMissionLog, type MissionLog } from "../missions/sealedMissionLog.js";
 import {
   createOpenAiCompatibleTranscriber,
   type TranscriptionUsage,
@@ -47,6 +48,8 @@ export interface TenantRuntime {
   media(token: string): Promise<Response>;
   /** `/upload/:token` for this tenant's links. */
   upload(req: Request, token: string): Promise<Response>;
+  /** Sealed mission content of this tenant (`cache.db`). */
+  missionLog: MissionLog;
   /** Closes the cache database and stops the upload sweep. Idempotent. */
   close(): void;
 }
@@ -101,14 +104,13 @@ export function buildTenantRuntime(deps: {
     session,
   });
   // Transcripts live in the same file as the message cache (even with the cache off).
-  const cacheDb =
-    config.cacheEnabled || config.transcription ? openCacheDatabase(join(dir, "cache.db")) : null;
+  // The mission log needs it too, so it is always open.
+  const cacheDb = openCacheDatabase(join(dir, "cache.db"));
   // Anything that fails after the database is open must not leak its handle (or the sweep
   // timer): the registry would rebuild, and leak again, on every later acquire.
   let sweeper: ReturnType<typeof setInterval> | undefined;
   try {
-    const messageStore =
-      config.cacheEnabled && cacheDb ? createSqliteMessageStore(cacheDb, cipher) : null;
+    const messageStore = config.cacheEnabled ? createSqliteMessageStore(cacheDb, cipher) : null;
     const gateway = messageStore
       ? createCachedGateway(wahaGateway, messageStore, {
           refreshHours: config.cacheRefreshHours,
@@ -116,22 +118,21 @@ export function buildTenantRuntime(deps: {
           session,
         })
       : wahaGateway;
-    const transcription =
-      config.transcription && cacheDb
-        ? createTranscriptionService({
-            gateway,
-            audio: createWahaAudioSource(gateway, { maxBytes: config.mediaMaxBytes }),
-            store: createSqliteTranscriptStore(cacheDb, cipher),
-            transcriber: createOpenAiCompatibleTranscriber({
-              ...config.transcription,
-              onUsage: guardUsageRecorder(deps.recordUsage, logger, tenant.id),
-            }),
-            session,
-            maxSeconds: config.transcription.maxSeconds,
-            maxPerCall: config.transcription.maxPerCall,
-            logger,
-          })
-        : DISABLED_TRANSCRIPTION;
+    const transcription = config.transcription
+      ? createTranscriptionService({
+          gateway,
+          audio: createWahaAudioSource(gateway, { maxBytes: config.mediaMaxBytes }),
+          store: createSqliteTranscriptStore(cacheDb, cipher),
+          transcriber: createOpenAiCompatibleTranscriber({
+            ...config.transcription,
+            onUsage: guardUsageRecorder(deps.recordUsage, logger, tenant.id),
+          }),
+          session,
+          maxSeconds: config.transcription.maxSeconds,
+          maxPerCall: config.transcription.maxPerCall,
+          logger,
+        })
+      : DISABLED_TRANSCRIPTION;
     const links = createSignedLinks({
       secret: mediaSecret,
       ttlSeconds: config.mediaLinkTtlSeconds,
@@ -176,16 +177,17 @@ export function buildTenantRuntime(deps: {
       },
       media,
       upload,
+      missionLog: createSealedMissionLog(cacheDb, cipher),
       close() {
         if (closed) return;
         closed = true;
         clearInterval(sweeper);
-        cacheDb?.close();
+        cacheDb.close();
       },
     };
   } catch (error) {
     if (sweeper) clearInterval(sweeper);
-    cacheDb?.close();
+    cacheDb.close();
     throw error;
   }
 }

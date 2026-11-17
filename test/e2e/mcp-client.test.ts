@@ -27,7 +27,10 @@ import {
 } from "../../src/infrastructure/mcp/instructions.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { createSignedLinks, type SignedLinks } from "../../src/infrastructure/media/signedLink.js";
-import type { buildTenantRuntime } from "../../src/infrastructure/tenants/runtime.js";
+import type {
+  buildTenantRuntime,
+  TenantRuntime,
+} from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createOpenAiCompatibleTranscriber } from "../../src/infrastructure/transcription/openaiCompatible.js";
 import { createWahaAudioSource } from "../../src/infrastructure/transcription/wahaAudioSource.js";
@@ -264,6 +267,7 @@ function setup(
       links: uploadLinks,
       maxBytes: b.config.uploadMaxBytes,
     }),
+    missionLog: {} as TenantRuntime["missionLog"],
     close() {},
   });
   const { app } = composeApp({

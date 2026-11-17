@@ -68,7 +68,10 @@ describe("OpenRouter Claude client", () => {
     expect(req.headers.get("x-api-key")).toBeNull();
     expect(body.model).toBe(MODEL);
     expect(body.max_tokens).toBe(4000);
-    expect(body.system).toBe(turn.system);
+    // The system prompt is stable for a mission: one cache breakpoint on it (spike §3.4).
+    expect(body.system).toEqual([
+      { type: "text", text: turn.system, cache_control: { type: "ephemeral" } },
+    ]);
     expect(body.messages).toEqual(turn.messages);
     expect(body.tools).toEqual(tools);
     expect(body.tool_choice).toEqual({ type: "auto" });

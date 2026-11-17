@@ -1,0 +1,835 @@
+import { DatabaseSync } from "node:sqlite";
+import type Anthropic from "@anthropic-ai/sdk";
+import { describe, expect, it } from "vitest";
+import {
+  createMissionEngine,
+  type MissionTenantPort,
+} from "../../../src/application/missions/engine.js";
+import { startMissionContent } from "../../../src/application/missions/history.js";
+import { LlmRejectedError, LlmUnavailableError } from "../../../src/domain/errors.js";
+import { DEFAULT_MISSION_LIMITS, type MissionLimits } from "../../../src/domain/missions/limits.js";
+import type {
+  LlmClient,
+  LlmTurnRequest,
+  LlmTurnResult,
+} from "../../../src/domain/ports/LlmClient.js";
+import type { MissionRow } from "../../../src/domain/ports/MissionStore.js";
+import type { SentMessage, WhatsAppSender } from "../../../src/domain/ports/WhatsAppSender.js";
+import { createSealedMissionLog } from "../../../src/infrastructure/missions/sealedMissionLog.js";
+import { createSqliteEventStore } from "../../../src/infrastructure/missions/sqliteEventStore.js";
+import { createSqliteMissionStore } from "../../../src/infrastructure/missions/sqliteMissionStore.js";
+import { decodeMediaId, gowsMapper } from "../../../src/infrastructure/waha/engines/gows.js";
+import { RecordingSender } from "../../fakes/InMemoryWahaGateway.js";
+import { testCipher } from "../../fakes/testCipher.js";
+
+const TENANT = "t1";
+const OWNER = "51999000000@c.us";
+const CHAT = "51911111111@c.us";
+const LID = "123456789012345@lid";
+const PROMPT = "Eres el asistente de Stiven. Coordina la reunión con Ana.";
+const TZ = "America/Lima";
+/** 10:00 in Lima (UTC-5, no DST). */
+const T0 = new Date("2026-11-17T15:00:00.000Z");
+const SEC = 1000;
+const MIN = 60 * SEC;
+
+/** Sends return realistic WhatsApp ids, like WAHA's `sendText`. */
+class WaSender extends RecordingSender {
+  private sent = 0;
+  override async sendText(q: Parameters<WhatsAppSender["sendText"]>[0]): Promise<SentMessage> {
+    await super.sendText(q);
+    this.sent += 1;
+    return { id: `true_${q.chatId}_3EB0SENT${this.sent}`, timestamp: null };
+  }
+  texts(chatId: string): string[] {
+    return this.calls
+      .filter((c) => c.method === "sendText" && (c.args as { chatId: string }).chatId === chatId)
+      .map((c) => (c.args as { text: string }).text);
+  }
+}
+
+class FakeLlm implements LlmClient {
+  requests: LlmTurnRequest[] = [];
+  queue: (LlmTurnResult | Error)[] = [];
+  async turn(q: LlmTurnRequest): Promise<LlmTurnResult> {
+    this.requests.push(structuredClone(q));
+    const next = this.queue.shift();
+    if (!next) throw new Error("no scripted LLM reply");
+    if (next instanceof Error) throw next;
+    return next;
+  }
+}
+
+const usage = {
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  costUsd: 0.001,
+};
+
+const block = (b: Record<string, unknown>) => b as unknown as Anthropic.ContentBlock;
+const thinking = block({ type: "thinking", thinking: "Plan the reply.", signature: "sig-1" });
+const text = (t: string) => block({ type: "text", text: t, citations: null });
+let toolSeq = 0;
+const tool = (name: string, input: unknown) =>
+  block({ type: "tool_use", id: `toolu_${++toolSeq}`, name, input });
+
+function reply(t: string | null, ...tools: Anthropic.ContentBlock[]): LlmTurnResult {
+  return {
+    content: [thinking, ...(t === null ? [] : [text(t)]), ...tools],
+    stopReason: tools.length > 0 ? "tool_use" : "end_turn",
+    usage,
+  };
+}
+
+interface Options {
+  limits?: Partial<MissionLimits>;
+  spend?: number;
+  waId?: string | null;
+}
+
+function harness(opts: Options = {}) {
+  let now = T0;
+  const authDb = new DatabaseSync(":memory:");
+  const cacheDb = new DatabaseSync(":memory:");
+  const cipher = testCipher(TENANT);
+  const missions = createSqliteMissionStore(authDb, () => now.toISOString());
+  const events = createSqliteEventStore(authDb, () => now.toISOString());
+  const log = createSealedMissionLog(cacheDb, cipher);
+  const sender = new WaSender();
+  const llm = new FakeLlm();
+  const usageRows: unknown[] = [];
+  const transcribed: string[] = [];
+  const fetched: string[] = [];
+  const slept: number[] = [];
+  const state = { spend: opts.spend ?? 0, status: "active" as string };
+  const port: MissionTenantPort = {
+    log,
+    sender,
+    openEvent: (e) => cipher.openText(e.payloadSealed, `webhook:${e.tenantId}:${e.eventId}`),
+    mapper: async () => gowsMapper,
+    transcribe: async (mediaId) => {
+      transcribed.push(mediaId);
+      return "quiero el martes a las 3";
+    },
+    fetchMedia: async (mediaId) => {
+      fetched.push(mediaId);
+      return decodeMediaId(mediaId)?.messageId.includes("PDF")
+        ? { data: new TextEncoder().encode("%PDF-1.4"), mimetype: "application/pdf" }
+        : { data: new Uint8Array([137, 80, 78, 71]), mimetype: "image/png" };
+    },
+    lookupLid: async (lid) => (lid === LID ? CHAT : null),
+  };
+  const limits = { ...DEFAULT_MISSION_LIMITS, ...opts.limits };
+  const tenants = {
+    getTenant: (id: string) =>
+      id === TENANT
+        ? {
+            id,
+            wahaSession: "s1",
+            displayName: "Stiven",
+            status: state.status as "active",
+            waId: opts.waId === undefined ? OWNER : opts.waId,
+            createdAt: 0,
+          }
+        : null,
+    recordLlmUsage: (q: unknown) => {
+      usageRows.push(q);
+    },
+    llmSpendUsd: () => state.spend,
+  };
+  const make = () =>
+    createMissionEngine({
+      missions,
+      events,
+      tenants,
+      llm,
+      model: "anthropic/claude-haiku-5.5",
+      limits,
+      monthlyBudgetUsd: 1,
+      timezone: TZ,
+      acquire: (id) => (id === TENANT ? { port, release() {} } : null),
+      now: () => now,
+      rand: () => 0.5,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+      logger: { info: () => {} },
+    });
+  let engine = make();
+  let evt = 0;
+  let msg = 0;
+
+  const h = {
+    missions,
+    events,
+    log,
+    sender,
+    llm,
+    usageRows,
+    transcribed,
+    fetched,
+    slept,
+    state,
+    get engine() {
+      return engine;
+    },
+    restart() {
+      engine.stop();
+      engine = make();
+    },
+    get now() {
+      return now;
+    },
+    at(ms: number) {
+      now = new Date(T0.getTime() + ms);
+      return now;
+    },
+    async tickAt(ms: number) {
+      await engine.tick(h.at(ms));
+    },
+    start(
+      q: Partial<Pick<MissionRow, "newContact" | "closingMessage" | "nextWakeAt">> & {
+        minutes?: number;
+      } = {},
+    ): MissionRow {
+      const m = missions.create({
+        tenantId: TENANT,
+        chatId: CHAT,
+        newContact: q.newContact ?? false,
+        deadlineAt: new Date(now.getTime() + (q.minutes ?? 60) * MIN).toISOString(),
+        expectsFiles: false,
+        nextWakeAt: q.nextWakeAt === undefined ? now.toISOString() : q.nextWakeAt,
+        closingMessage: q.closingMessage ?? null,
+      });
+      startMissionContent(
+        log,
+        m.id,
+        {
+          systemPrompt: PROMPT,
+          objective: "Agendar una reunión con Ana esta semana.",
+          doneWhen: "Ana confirma día y hora.",
+          contactName: "Ana",
+        },
+        now.toISOString(),
+      );
+      return m;
+    },
+    get(id: string): MissionRow {
+      return missions.get(TENANT, id) as MissionRow;
+    },
+    /** Stores a sealed `message.any` webhook event; returns the WhatsApp message id. */
+    message(q: {
+      text?: string;
+      message?: Record<string, unknown>;
+      fromMe?: boolean;
+      source?: "app" | "api";
+      id?: string;
+      from?: string;
+      senderAlt?: string;
+    }): string {
+      msg += 1;
+      const fromMe = q.fromMe ?? false;
+      const from = q.from ?? CHAT;
+      const shortId = `3EB0MSG${msg}`;
+      const id = q.id ?? `${fromMe}_${from}_${shortId}`;
+      const payload = {
+        id,
+        timestamp: Math.floor(now.getTime() / 1000),
+        from,
+        fromMe,
+        source: q.source ?? "app",
+        body: q.text ?? null,
+        to: null,
+        participant: null,
+        hasMedia: Boolean(q.message),
+        media: null,
+        _data: {
+          Info: {
+            Chat: from,
+            Sender: fromMe ? OWNER : from,
+            ...(q.senderAlt ? { SenderAlt: q.senderAlt } : {}),
+            IsFromMe: fromMe,
+            ID: id.split("_")[2] ?? shortId,
+            PushName: "Ana",
+          },
+          Message: q.message ?? { conversation: q.text ?? "" },
+        },
+      };
+      h.envelope("message.any", payload);
+      return id;
+    },
+    envelope(event: string, payload: unknown): void {
+      evt += 1;
+      const eventId = `evt_${evt}`;
+      const body = JSON.stringify({
+        id: eventId,
+        timestamp: now.getTime(),
+        event,
+        session: "s1",
+        payload,
+      });
+      events.put({
+        tenantId: TENANT,
+        eventId,
+        kind: event === "session.status" ? "session.status" : "message",
+        receivedAt: now.toISOString(),
+        payloadSealed: cipher.sealText(body, `webhook:${TENANT}:${eventId}`),
+      });
+    },
+    lastRequest(): LlmTurnRequest {
+      const r = llm.requests.at(-1);
+      if (!r) throw new Error("no LLM request");
+      return r;
+    },
+    contactSends(): string[] {
+      return sender.texts(CHAT);
+    },
+    ownerSends(): string[] {
+      return sender.texts(OWNER);
+    },
+    entries(id: string) {
+      return log.read(id);
+    },
+  };
+  return h;
+}
+
+/** Text of every text block of a message's content. */
+function textsOf(m: Anthropic.MessageParam | undefined): string[] {
+  if (!m) return [];
+  if (typeof m.content === "string") return [m.content];
+  return (m.content as { type: string; text?: string }[])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text as string);
+}
+
+const lastUser = (r: LlmTurnRequest) => [...r.messages].reverse().find((x) => x.role === "user");
+
+/** Opens a mission and runs its opening turn. */
+async function opened(h: ReturnType<typeof harness>, q: Parameters<typeof h.start>[0] = {}) {
+  const m = h.start(q);
+  h.llm.queue.push(reply("Hola Ana, soy el asistente de Stiven."));
+  await h.tickAt(0);
+  return m;
+}
+
+describe("mission engine: start", () => {
+  it("runs the opening turn with Claude's prompt as the whole system prompt and sends it paced", async () => {
+    const h = harness();
+    const m = h.start();
+    h.llm.queue.push(reply("Hola Ana, soy el asistente de Stiven."));
+    await h.tickAt(0);
+
+    expect(h.llm.requests).toHaveLength(1);
+    const req = h.lastRequest();
+    expect(req.system).toBe(PROMPT);
+    const first = req.messages[0];
+    expect(first?.role).toBe("user");
+    const firstText = textsOf(first).join("\n");
+    expect(firstText).toContain("Agendar una reunión con Ana esta semana.");
+    expect(firstText).toContain("Ana confirma día y hora.");
+    expect(textsOf(first).at(-1)).toBe("The mission starts now. Send your opening message.");
+    // Server facts go as a system notice after the user turn, never in the system prompt.
+    expect(req.messages[1]?.role).toBe("system");
+    expect(textsOf(req.messages[1]).join(" ")).toContain("Deadline");
+
+    expect(req.tools.map((t) => t.name).sort()).toEqual([
+      "ask_owner",
+      "finish_mission",
+      "no_reply",
+    ]);
+    for (const t of req.tools) expect((t as { strict?: boolean }).strict).toBe(true);
+
+    expect(h.sender.calls.map((c) => c.method)).toEqual(["startTyping", "stopTyping", "sendText"]);
+    expect(h.contactSends()).toEqual(["Hola Ana, soy el asistente de Stiven."]);
+    expect(h.slept).toHaveLength(1);
+
+    const row = h.get(m.id);
+    expect(row.state).toBe("active");
+    expect(row.sentCount).toBe(1);
+    expect(row.llmCalls).toBe(1);
+    expect(row.lastAgentAt).toBe(T0.toISOString());
+    expect(h.usageRows).toEqual([
+      {
+        tenantId: TENANT,
+        missionId: m.id,
+        at: T0.toISOString(),
+        model: "anthropic/claude-haiku-5.5",
+        kind: "agent",
+        usage,
+      },
+    ]);
+  });
+
+  it("postpones the opening to 08:00 when the mission starts in quiet hours", async () => {
+    const h = harness();
+    h.at(13 * 60 * MIN); // 23:00 Lima
+    const m = h.start({ minutes: 600 });
+    await h.tickAt(13 * 60 * MIN);
+    expect(h.llm.requests).toHaveLength(0);
+    expect(h.sender.calls).toHaveLength(0);
+    expect(h.get(m.id).nextWakeAt).toBe("2026-11-18T13:00:00.000Z");
+
+    h.llm.queue.push(reply("Buenos días Ana."));
+    await h.engine.tick(new Date("2026-11-18T13:00:00.000Z"));
+    expect(h.contactSends()).toEqual(["Buenos días Ana."]);
+  });
+});
+
+describe("mission engine: inbound messages", () => {
+  it("batches three bubbles within the debounce window into one agent turn", async () => {
+    const h = harness();
+    const m = await opened(h);
+    const ids = [h.message({ text: "hola" })];
+    await h.tickAt(1 * SEC);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 16 * SEC).toISOString());
+    h.at(6 * SEC);
+    ids.push(h.message({ text: "sí puedo" }));
+    await h.tickAt(6 * SEC);
+    h.at(11 * SEC);
+    ids.push(h.message({ text: "el martes" }));
+    await h.tickAt(11 * SEC);
+    await h.tickAt(20 * SEC);
+    expect(h.llm.requests).toHaveLength(1);
+
+    h.llm.queue.push(reply("Perfecto, ¿a qué hora el martes?"));
+    await h.tickAt(26 * SEC);
+    expect(h.llm.requests).toHaveLength(2);
+    const req = h.lastRequest();
+    const lastUser = [...req.messages].reverse().find((x) => x.role === "user");
+    expect(textsOf(lastUser)).toEqual(["hola", "sí puedo", "el martes"]);
+    const seen = h.sender.calls.filter((c) => c.method === "sendSeen");
+    expect(seen.at(-1)?.args).toEqual({ chatId: CHAT, messageIds: ids });
+    expect(h.contactSends().at(-1)).toBe("Perfecto, ¿a qué hora el martes?");
+    expect(h.get(m.id).lastInboundAt).toBe(new Date(T0.getTime() + 11 * SEC).toISOString());
+  });
+
+  it("keeps the history append-only, with assistant content exactly as returned", async () => {
+    const h = harness();
+    await opened(h);
+    h.message({ text: "hola" });
+    await h.tickAt(1 * SEC);
+    h.llm.queue.push(reply("¿Qué día te queda?"));
+    await h.tickAt(20 * SEC);
+    const [first, second] = h.llm.requests;
+    expect(second?.messages.slice(0, first?.messages.length)).toEqual(first?.messages);
+    const assistant = second?.messages[first?.messages.length ?? 0];
+    expect(assistant).toEqual({
+      role: "assistant",
+      content: [thinking, text("Hola Ana, soy el asistente de Stiven.")],
+    });
+  });
+
+  it("transcribes voice notes and attaches images and PDFs as content blocks", async () => {
+    const h = harness();
+    await opened(h);
+    h.message({
+      message: { audioMessage: { mimetype: "audio/ogg; codecs=opus", PTT: true, seconds: 4 } },
+    });
+    h.message({ message: { imageMessage: { mimetype: "image/png", caption: "mi agenda" } } });
+    h.message({
+      id: `false_${CHAT}_3EB0PDF1`,
+      message: { documentMessage: { mimetype: "application/pdf", fileName: "cv.pdf" } },
+    });
+    await h.tickAt(1 * SEC);
+    expect(h.transcribed).toHaveLength(1);
+    expect(h.fetched).toHaveLength(2);
+
+    h.llm.queue.push(reply("Gracias, lo reviso."));
+    await h.tickAt(20 * SEC);
+    const lastUser = [...h.lastRequest().messages].reverse().find((x) => x.role === "user");
+    const blocks = lastUser?.content as { type: string; text?: string; source?: unknown }[];
+    expect(
+      blocks.some((b) => b.type === "text" && b.text?.includes("quiero el martes a las 3")),
+    ).toBe(true);
+    expect(blocks.find((b) => b.type === "image")?.source).toEqual({
+      type: "base64",
+      media_type: "image/png",
+      data: Buffer.from([137, 80, 78, 71]).toString("base64"),
+    });
+    expect(blocks.some((b) => b.type === "text" && b.text?.includes("mi agenda"))).toBe(true);
+    expect(blocks.find((b) => b.type === "document")?.source).toEqual({
+      type: "base64",
+      media_type: "application/pdf",
+      data: Buffer.from("%PDF-1.4").toString("base64"),
+    });
+  });
+
+  it("matches a mission chat when the event uses the @lid id", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ from: LID, text: "hola" });
+    await h.tickAt(1 * SEC);
+    expect(h.get(m.id).lastInboundAt).not.toBeNull();
+    h.message({
+      from: "987654321098765@lid",
+      senderAlt: "51911111111:12@s.whatsapp.net",
+      text: "otra",
+    });
+    await h.tickAt(2 * SEC);
+    expect(h.get(m.id).lastInboundAt).toBe(new Date(T0.getTime() + 2 * SEC).toISOString());
+  });
+
+  it("ignores the echo of its own sends", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ fromMe: true, source: "api", id: `true_${CHAT}_3EB0SENT1` });
+    await h.tickAt(1 * SEC);
+    expect(h.get(m.id).state).toBe("active");
+  });
+
+  it("ends as taken_over when the owner writes from the phone, and sends nothing more", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ text: "hola" });
+    h.message({ fromMe: true, source: "app", text: "Ana, te escribo yo" });
+    await h.tickAt(1 * SEC);
+    const row = h.get(m.id);
+    expect(row.state).toBe("taken_over");
+    expect(row.endedAt).toBe(new Date(T0.getTime() + 1 * SEC).toISOString());
+    const before = h.sender.calls.length;
+    await h.tickAt(60 * SEC);
+    expect(h.sender.calls.length).toBe(before);
+    expect(h.llm.requests).toHaveLength(1);
+  });
+
+  it("ends as taken_over when the owner sends through the API (an id the engine did not send)", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ fromMe: true, source: "api", text: "enviado con send_text" });
+    await h.tickAt(1 * SEC);
+    expect(h.get(m.id).state).toBe("taken_over");
+  });
+});
+
+describe("mission engine: agent tools", () => {
+  it("finish_mission succeeded: logs summary and collected items, sends the text, notifies the owner", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ text: "el martes a las 3 me va bien" });
+    await h.tickAt(1 * SEC);
+    h.llm.queue.push(
+      reply(
+        "¡Listo, nos vemos el martes!",
+        tool("finish_mission", {
+          outcome: "succeeded",
+          summary: "Reunión el martes a las 15:00.",
+          collected: [{ label: "hora", value: "martes 15:00" }],
+        }),
+      ),
+    );
+    await h.tickAt(20 * SEC);
+    const row = h.get(m.id);
+    expect(row.state).toBe("succeeded");
+    expect(row.endedAt).not.toBeNull();
+    expect(row.nextWakeAt).toBeNull();
+    expect(h.contactSends().at(-1)).toBe("¡Listo, nos vemos el martes!");
+    expect(h.ownerSends()).toEqual(["✅ Misión con Ana cumplida: Reunión el martes a las 15:00."]);
+    const kinds = h.entries(m.id).map((e) => e.kind);
+    expect(kinds).toContain("summary");
+    expect(h.entries(m.id).find((e) => e.kind === "collected")?.body).toEqual([
+      { label: "hora", value: "martes 15:00" },
+    ]);
+    // The owner notification is a plain send: no typing around it.
+    expect(h.sender.calls.at(-1)?.method).toBe("sendText");
+    expect(h.sender.calls.at(-2)?.method).toBe("sendText");
+  });
+
+  it("finish_mission failed notifies the owner", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ text: "no puedo esta semana" });
+    await h.tickAt(1 * SEC);
+    h.llm.queue.push(
+      reply(null, tool("finish_mission", { outcome: "failed", summary: "Ana no puede." })),
+    );
+    await h.tickAt(20 * SEC);
+    expect(h.get(m.id).state).toBe("failed");
+    expect(h.ownerSends()).toEqual(["⚠️ Misión con Ana fallida: Ana no puede."]);
+  });
+
+  it("ask_owner logs the question, notifies the owner and still sends the reply; the answer comes back as a notice", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ text: "¿puede ser en su oficina?" });
+    await h.tickAt(1 * SEC);
+    h.llm.queue.push(
+      reply(
+        "Lo consulto y te confirmo.",
+        tool("ask_owner", { question: "¿Puede ser en tu oficina?" }),
+      ),
+    );
+    await h.tickAt(20 * SEC);
+    expect(h.get(m.id).state).toBe("active");
+    expect(h.contactSends().at(-1)).toBe("Lo consulto y te confirmo.");
+    expect(h.ownerSends()).toEqual(["❓ Ana pregunta: ¿Puede ser en tu oficina?"]);
+    expect(h.entries(m.id).find((e) => e.kind === "question")?.body).toEqual({
+      question: "¿Puede ser en tu oficina?",
+    });
+
+    h.at(2 * MIN);
+    expect(await h.engine.answer(TENANT, m.id, "Sí, en mi oficina.")).toBe(true);
+    h.llm.queue.push(reply("Sí, puede ser en su oficina."));
+    await h.tickAt(2 * MIN);
+    const req = h.lastRequest();
+    const system = req.messages.filter((x) => x.role === "system").flatMap(textsOf);
+    expect(system.some((t) => t.includes("Sí, en mi oficina."))).toBe(true);
+    const toolResults = req.messages
+      .filter((x) => x.role === "user" && Array.isArray(x.content))
+      .flatMap((x) => x.content as { type: string }[])
+      .filter((b) => b.type === "tool_result");
+    expect(toolResults).toHaveLength(1);
+    expect(h.contactSends().at(-1)).toBe("Sí, puede ser en su oficina.");
+  });
+
+  it("no_reply sends nothing", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ text: "ok 👍" });
+    await h.tickAt(1 * SEC);
+    h.llm.queue.push(reply(null, tool("no_reply", {})));
+    await h.tickAt(20 * SEC);
+    expect(h.contactSends()).toHaveLength(1);
+    expect(h.get(m.id).sentCount).toBe(1);
+    expect(h.get(m.id).llmCalls).toBe(2);
+  });
+});
+
+describe("mission engine: time", () => {
+  it("expires after the deadline and notifies the owner", async () => {
+    const h = harness();
+    const m = await opened(h, { minutes: 10 });
+    await h.tickAt(10 * MIN);
+    const row = h.get(m.id);
+    expect(row.state).toBe("expired");
+    expect(row.nextWakeAt).toBeNull();
+    expect(h.ownerSends()).toEqual(["⏱️ Misión con Ana vencida"]);
+    expect(h.llm.requests).toHaveLength(1);
+  });
+
+  it("sends a reminder turn after the gap when the contact is silent", async () => {
+    const h = harness();
+    const m = await opened(h);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 30 * MIN).toISOString());
+    await h.tickAt(29 * MIN);
+    expect(h.llm.requests).toHaveLength(1);
+    h.llm.queue.push(reply("¿Pudiste verlo, Ana?"));
+    await h.tickAt(30 * MIN);
+    expect(textsOf(lastUser(h.lastRequest())).at(-1)).toBe(
+      "No reply yet. Send a short, friendly reminder.",
+    );
+    expect(h.contactSends().at(-1)).toBe("¿Pudiste verlo, Ana?");
+    expect(h.get(m.id).reminderCount).toBe(1);
+  });
+
+  it("caps reminders at one for a new contact", async () => {
+    const h = harness();
+    const m = await opened(h, { newContact: true, minutes: 120 });
+    h.llm.queue.push(reply("¿Pudiste verlo?"));
+    await h.tickAt(30 * MIN);
+    expect(h.get(m.id).reminderCount).toBe(1);
+    await h.tickAt(61 * MIN);
+    expect(h.llm.requests).toHaveLength(2);
+    expect(h.get(m.id).nextWakeAt).toBe(h.get(m.id).deadlineAt);
+  });
+
+  it("postpones a reminder that falls in quiet hours to 08:00", async () => {
+    const h = harness();
+    h.at(11 * 60 * MIN + 40 * MIN); // 21:40 Lima; quiet hours start at 22:00
+    const m = h.start({ minutes: 120 });
+    h.llm.queue.push(reply("Hola Ana."));
+    await h.tickAt(11 * 60 * MIN + 40 * MIN);
+    await h.tickAt(12 * 60 * MIN + 10 * MIN); // 22:10 Lima, reminder due
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.get(m.id).nextWakeAt).toBe(h.get(m.id).deadlineAt);
+  });
+});
+
+describe("mission engine: caps and failures", () => {
+  it("stops at the message cap", async () => {
+    const h = harness({ limits: { maxMessagesPerMission: 1 } });
+    const m = await opened(h);
+    h.message({ text: "hola" });
+    await h.tickAt(1 * SEC);
+    await h.tickAt(20 * SEC);
+    const row = h.get(m.id);
+    expect(row.state).toBe("stopped");
+    expect(row.stopReason).toBe("message_cap");
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.ownerSends()).toEqual(["⛔ Misión con Ana detenida (límite de mensajes)"]);
+  });
+
+  it("stops at the LLM call cap", async () => {
+    const h = harness({ limits: { maxLlmCallsPerMission: 1 } });
+    const m = await opened(h);
+    h.message({ text: "hola" });
+    await h.tickAt(1 * SEC);
+    await h.tickAt(20 * SEC);
+    expect(h.get(m.id).stopReason).toBe("llm_cap");
+    expect(h.llm.requests).toHaveLength(1);
+  });
+
+  it("stops when the monthly budget is spent", async () => {
+    const h = harness({ spend: 1 });
+    const m = h.start();
+    await h.tickAt(0);
+    expect(h.get(m.id).stopReason).toBe("budget");
+    expect(h.llm.requests).toHaveLength(0);
+    expect(h.ownerSends()).toEqual(["⛔ Misión con Ana detenida (presupuesto mensual agotado)"]);
+  });
+
+  it("stops on a refusal and sends nothing", async () => {
+    const h = harness();
+    const m = h.start();
+    h.llm.queue.push({ content: [], stopReason: "refusal", usage });
+    await h.tickAt(0);
+    expect(h.get(m.id).state).toBe("stopped");
+    expect(h.get(m.id).stopReason).toBe("refusal");
+    expect(h.contactSends()).toEqual([]);
+    expect(h.usageRows).toHaveLength(1);
+  });
+
+  it("retries an unavailable LLM at +30 s, +2 min, +5 min, then stops with errors", async () => {
+    const h = harness();
+    const m = h.start();
+    for (let i = 0; i < 4; i++) h.llm.queue.push(new LlmUnavailableError(503));
+    await h.tickAt(0);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 30 * SEC).toISOString());
+    await h.tickAt(30 * SEC);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 150 * SEC).toISOString());
+    await h.tickAt(150 * SEC);
+    expect(h.get(m.id).nextWakeAt).toBe(new Date(T0.getTime() + 450 * SEC).toISOString());
+    await h.tickAt(450 * SEC);
+    expect(h.llm.requests).toHaveLength(4);
+    expect(h.get(m.id).state).toBe("stopped");
+    expect(h.get(m.id).stopReason).toBe("errors");
+    expect(h.contactSends()).toEqual([]);
+    // A retried turn never repeats its instruction in the history.
+    const opening = h
+      .lastRequest()
+      .messages.flatMap(textsOf)
+      .filter((t) => t === "The mission starts now. Send your opening message.");
+    expect(opening).toHaveLength(1);
+  });
+
+  it("stops at once on a rejected request", async () => {
+    const h = harness();
+    const m = h.start();
+    h.llm.queue.push(new LlmRejectedError(400));
+    await h.tickAt(0);
+    expect(h.get(m.id).stopReason).toBe("errors");
+    expect(h.ownerSends()).toEqual(["⛔ Misión con Ana detenida (errores del modelo)"]);
+  });
+});
+
+describe("mission engine: reach-out timelock", () => {
+  const lock = (isActive: boolean) => ({
+    name: "s1",
+    status: "WORKING",
+    statuses: [],
+    data: null,
+    reachoutTimelock: { isActive },
+  });
+
+  it("pauses the tenant's missions while the lock is active and resumes when it lifts", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.envelope("session.status", lock(true));
+    h.message({ text: "hola" });
+    await h.tickAt(1 * SEC);
+    await h.tickAt(30 * SEC);
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.contactSends()).toHaveLength(1);
+    expect(h.get(m.id).state).toBe("active");
+
+    h.at(40 * SEC);
+    h.envelope("session.status", lock(false));
+    h.llm.queue.push(reply("Hola de nuevo."));
+    await h.tickAt(40 * SEC);
+    expect(h.llm.requests).toHaveLength(2);
+    expect(h.contactSends().at(-1)).toBe("Hola de nuevo.");
+  });
+
+  it("keeps the deadline running while paused", async () => {
+    const h = harness();
+    const m = await opened(h, { minutes: 5 });
+    h.envelope("session.status", lock(true));
+    await h.tickAt(1 * SEC);
+    await h.tickAt(5 * MIN);
+    expect(h.get(m.id).state).toBe("expired");
+  });
+});
+
+describe("mission engine: closing message", () => {
+  it("sends one paced closing line when an expired mission has a closing message", async () => {
+    const h = harness();
+    const m = await opened(h, { minutes: 10, closingMessage: "yes" });
+    h.llm.queue.push(reply("Le paso esto a Stiven, ¡gracias!"));
+    await h.tickAt(10 * MIN);
+    expect(h.get(m.id).state).toBe("expired");
+    expect(textsOf(lastUser(h.lastRequest())).at(-1)).toBe(
+      "The mission is over (expired). Send one short closing message.",
+    );
+    expect(h.contactSends()).toEqual([
+      "Hola Ana, soy el asistente de Stiven.",
+      "Le paso esto a Stiven, ¡gracias!",
+    ]);
+  });
+
+  it("sends the closing line on cancel", async () => {
+    const h = harness();
+    const m = await opened(h, { closingMessage: "yes" });
+    h.llm.queue.push(reply("Stiven te escribirá."));
+    h.at(5 * MIN);
+    expect(await h.engine.cancel(TENANT, m.id)).toBe(true);
+    expect(h.get(m.id).state).toBe("cancelled");
+    expect(textsOf(lastUser(h.lastRequest())).at(-1)).toBe(
+      "The mission is over (cancelled). Send one short closing message.",
+    );
+    expect(h.contactSends().at(-1)).toBe("Stiven te escribirá.");
+    expect(await h.engine.cancel(TENANT, m.id)).toBe(false);
+  });
+
+  it("goes silent without a closing message", async () => {
+    const h = harness();
+    const m = await opened(h, { minutes: 10 });
+    await h.tickAt(10 * MIN);
+    expect(h.get(m.id).state).toBe("expired");
+    expect(h.contactSends()).toHaveLength(1);
+  });
+});
+
+describe("mission engine: restart", () => {
+  it("resumes due missions and pending events over the same stores with no duplicate sends", async () => {
+    const h = harness();
+    const m = await opened(h);
+    h.message({ fromMe: true, source: "api", id: `true_${CHAT}_3EB0SENT1` });
+    h.message({ text: "hola" });
+    h.restart();
+    await h.tickAt(1 * SEC);
+    expect(h.get(m.id).state).toBe("active");
+    expect(h.contactSends()).toHaveLength(1);
+    h.llm.queue.push(reply("¿Cuándo te viene bien?"));
+    h.restart();
+    await h.tickAt(20 * SEC);
+    await h.tickAt(21 * SEC);
+    expect(h.contactSends()).toEqual([
+      "Hola Ana, soy el asistente de Stiven.",
+      "¿Cuándo te viene bien?",
+    ]);
+    expect(h.events.pending(10)).toEqual([]);
+  });
+});
+
+describe("mission engine: wake", () => {
+  it("wake runs a tick without waiting for the interval", async () => {
+    const h = harness();
+    h.start();
+    h.llm.queue.push(reply("Hola."));
+    h.engine.wake();
+    await h.engine.idle();
+    expect(h.contactSends()).toEqual(["Hola."]);
+  });
+});

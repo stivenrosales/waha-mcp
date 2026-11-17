@@ -86,3 +86,9 @@ export function reminderDue(m: MissionSnapshot, now: Date, limits: MissionLimits
   const lastNudge = Math.max(lastAgent, m.lastReminderAt ? Date.parse(m.lastReminderAt) : 0);
   return now.getTime() - lastNudge >= limits.reminderGapMs;
 }
+
+/** UTC instant of 00:00 on the first day of `at`'s calendar month in `tz` (monthly budget window). */
+export function monthStart(at: Date, tz: string): Date {
+  const p = localParts(at, tz);
+  return zonedInstant(p.year, p.month, 1, 0, tz, at);
+}

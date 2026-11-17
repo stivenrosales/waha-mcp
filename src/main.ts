@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
-import { composeApp } from "./composition.js";
+import type { MissionEngine } from "./application/missions/engine.js";
+import { composeApp, composeMissionEngine } from "./composition.js";
 import { loadConfig } from "./config.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
@@ -54,16 +55,23 @@ async function main(): Promise<void> {
   if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");
 
   const mediaSecret = loadOrCreateMediaSecret(config.dataDir);
+  // Assigned right after composing (it needs the registry); a webhook before then is picked up
+  // by the first tick.
+  let missionEngine: MissionEngine | null = null;
   const { app, registry, toolCount, configureWebhooks } = composeApp({
     config,
     store,
     tenants,
     missions,
     ...(events ? { events } : {}),
+    onWebhookEvent: () => missionEngine?.wake(),
     sessions,
     mediaSecret,
     logger,
   });
+  missionEngine = composeMissionEngine({ config, registry, tenants, missions, events, logger });
+  // Migrations are done: process stored events and due missions every 5 s.
+  missionEngine?.start();
 
   const server = serve({ fetch: app.fetch, port: config.port });
 
@@ -80,7 +88,7 @@ async function main(): Promise<void> {
     held?.release();
   }
   console.log(
-    `waha-mcp listening on :${config.port} | engine: ${engine} | public URL: ${config.publicBaseUrl} | tenants: ${tenants.listTenants().length} | tools: ${toolCount} | message cache: ${config.cacheEnabled ? "on" : "off"} | transcription: ${config.transcription ? "on" : "off"}`,
+    `waha-mcp listening on :${config.port} | engine: ${engine} | public URL: ${config.publicBaseUrl} | tenants: ${tenants.listTenants().length} | tools: ${toolCount} | message cache: ${config.cacheEnabled ? "on" : "off"} | transcription: ${config.transcription ? "on" : "off"} | missions: ${config.missions ? "on" : "off"}`,
   );
   if (engine !== "GOWS" && !engine.startsWith("unknown")) {
     console.warn(`Engine ${engine} is not supported (GOWS only); tools will report this.`);
@@ -94,6 +102,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     console.log(`${signal} received, shutting down.`);
+    missionEngine?.stop();
     const finish = (): void => {
       registry.closeAll();
       store.close();

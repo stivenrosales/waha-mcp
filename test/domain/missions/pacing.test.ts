@@ -3,6 +3,7 @@ import { DEFAULT_MISSION_LIMITS as L } from "../../../src/domain/missions/limits
 import type { MissionSnapshot } from "../../../src/domain/missions/mission.js";
 import {
   inQuietHours,
+  monthStart,
   nextAllowedInitiatedSend,
   reminderDue,
   typingDelayMs,
@@ -92,5 +93,20 @@ describe("reminderDue", () => {
   it("is never due for a terminal mission or before the agent wrote", () => {
     expect(reminderDue({ ...base, state: "stopped" }, min(500), L)).toBe(false);
     expect(reminderDue({ ...base, lastAgentAt: null }, min(500), L)).toBe(false);
+  });
+});
+
+describe("monthStart", () => {
+  it("is local midnight of the first day of the month in the time zone", () => {
+    expect(monthStart(new Date("2026-11-17T15:00:00Z"), "America/Lima").toISOString()).toBe(
+      "2026-11-01T05:00:00.000Z",
+    );
+    // 23:30 on 31 Oct in Lima is still October there, though November in UTC.
+    expect(monthStart(new Date("2026-11-01T04:30:00Z"), "America/Lima").toISOString()).toBe(
+      "2026-10-01T05:00:00.000Z",
+    );
+    expect(monthStart(new Date("2026-03-31T23:30:00Z"), "Europe/Madrid").toISOString()).toBe(
+      "2026-03-31T22:00:00.000Z",
+    );
   });
 });

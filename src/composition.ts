@@ -1,8 +1,11 @@
 import { createHmac } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Hono } from "hono";
+import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
 import type { EventStore } from "./domain/ports/EventStore.js";
+import type { LlmClient } from "./domain/ports/LlmClient.js";
 import type { MissionStore } from "./domain/ports/MissionStore.js";
 import type { SessionAdmin, WebhookTarget } from "./domain/ports/SessionAdmin.js";
 import type { TenantStore } from "./domain/ports/TenantStore.js";
@@ -12,11 +15,13 @@ import { createLoginLimiter } from "./infrastructure/auth/rateLimit.js";
 import type { AuthStore } from "./infrastructure/auth/store.js";
 import { generateDek, wrapDek } from "./infrastructure/crypto/envelope.js";
 import { createApp } from "./infrastructure/http/app.js";
+import { createOpenRouterClaude } from "./infrastructure/llm/openRouterClaude.js";
 import type { Logger } from "./infrastructure/mcp/defineTool.js";
 import { SERVER_INSTRUCTIONS } from "./infrastructure/mcp/instructions.js";
 import { createMcpServer } from "./infrastructure/mcp/server.js";
 import { createAdminTools } from "./infrastructure/mcp/tools/admin/index.js";
 import { createTools } from "./infrastructure/mcp/tools/index.js";
+import { missionTenantPort } from "./infrastructure/missions/tenantPort.js";
 import { createOnboardingRoutes } from "./infrastructure/tenants/onboardingRoutes.js";
 import { createTenantRegistry, type TenantRegistry } from "./infrastructure/tenants/registry.js";
 import type { buildTenantRuntime } from "./infrastructure/tenants/runtime.js";
@@ -147,4 +152,42 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     if (webhook) await configureTenantWebhooks({ tenants, sessions, target: webhook, logger });
   };
   return { app, registry, toolCount: tools.length, configureWebhooks };
+}
+
+/**
+ * The mission engine over the composed registry (null when missions are off). Not started:
+ * `main.ts` starts its tick after migrations and wires `wake()` to the webhook route.
+ */
+export function composeMissionEngine(deps: {
+  config: Config;
+  registry: TenantRegistry;
+  tenants: TenantStore;
+  missions: MissionStore;
+  events: EventStore | undefined;
+  logger: Logger;
+  /** Test seam; defaults to OpenRouter with `config.missions`. */
+  llm?: LlmClient;
+}): MissionEngine | null {
+  const m = deps.config.missions;
+  if (!m || !deps.events) return null;
+  return createMissionEngine({
+    missions: deps.missions,
+    events: deps.events,
+    tenants: deps.tenants,
+    llm: deps.llm ?? createOpenRouterClaude({ apiKey: m.openRouterApiKey, model: m.model }),
+    model: m.model,
+    limits: m.limits,
+    monthlyBudgetUsd: m.monthlyBudgetUsd,
+    timezone: deps.config.timezone,
+    acquire: (tenantId) => {
+      const held = deps.registry.acquire(tenantId);
+      return held ? { port: missionTenantPort(held.runtime), release: held.release } : null;
+    },
+    now: () => new Date(),
+    rand: Math.random,
+    sleep: async (ms) => {
+      await delay(ms);
+    },
+    logger: deps.logger,
+  });
 }

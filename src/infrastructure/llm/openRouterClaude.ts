@@ -54,7 +54,8 @@ export function createOpenRouterClaude(opts: {
       const params: OpenRouterParams = {
         model: opts.model,
         max_tokens: q.maxTokens,
-        system: q.system,
+        // The mission's system prompt never changes: cache it (reads work through OpenRouter).
+        system: [{ type: "text", text: q.system, cache_control: { type: "ephemeral" } }],
         messages: q.messages,
         ...(q.tools.length > 0 ? { tools: q.tools, tool_choice: { type: "auto" as const } } : {}),
         output_config: { effort: q.effort },

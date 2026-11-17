@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTenantAdmin } from "../../src/application/tenantAdmin.js";
 import { InvalidInputError } from "../../src/domain/errors.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
-import { generateDek, unwrapDek, wrapDek } from "../../src/infrastructure/crypto/envelope.js";
+import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
+import {
+  createTenantCipher,
+  generateDek,
+  unwrapDek,
+  wrapDek,
+} from "../../src/infrastructure/crypto/envelope.js";
+import { createSealedMissionLog } from "../../src/infrastructure/missions/sealedMissionLog.js";
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { FakeSessionAdmin } from "../fakes/FakeSessionAdmin.js";
@@ -31,6 +38,7 @@ async function setup() {
   const deps = {
     tenants,
     auth,
+    missions: createSqliteMissionStore(db),
     sessions,
     registry: { evict: (id: string) => void evicted.push(id) },
     newWrappedDek: (id: string) => wrapDek(KEK, generateDek(), id),
@@ -265,7 +273,7 @@ describe("delete_tenant", () => {
     expect(s.logs).toContain(`admin delete_tenant tenant=${tenantId} outcome=ok`);
   });
 
-  it("deletes the tenant's mission rows with the tenant", async () => {
+  it("deletes the tenant's mission rows and its sealed mission log", async () => {
     const s = await setup();
     const { tenantId } = await onboard(s);
     const store = createSqliteMissionStore(s.db);
@@ -276,9 +284,42 @@ describe("delete_tenant", () => {
       deadlineAt: "2026-11-20T00:00:00.000Z",
       expectsFiles: false,
     });
-    const admin = createTenantAdmin({ ...s.deps, missions: store });
-    await admin.delete(tenantId, "Acme");
+    const dir = path.join(s.dataDir, "tenants", tenantId);
+    fs.mkdirSync(dir, { recursive: true });
+    const cacheDb = openCacheDatabase(path.join(dir, "cache.db"));
+    createSealedMissionLog(cacheDb, createTenantCipher(generateDek(), tenantId)).append(m.id, {
+      kind: "prompt",
+      at: "2026-11-17T10:00:00.000Z",
+      body: "secret",
+    });
+    cacheDb.close();
+
+    await s.admin.delete(tenantId, "Acme");
+
     expect(store.get(tenantId, m.id)).toBeNull();
+    expect(fs.existsSync(path.join(dir, "cache.db"))).toBe(false);
+  });
+
+  it("still cleans WAHA and the directory when deleting mission rows fails", async () => {
+    const s = await setup();
+    const { tenantId } = await onboard(s);
+    const dir = path.join(s.dataDir, "tenants", tenantId);
+    fs.mkdirSync(dir, { recursive: true });
+    const session = s.tenants.getTenant(tenantId)?.wahaSession as string;
+    const admin = createTenantAdmin({
+      ...s.deps,
+      missions: {
+        deleteForTenant: () => {
+          throw new Error("db locked");
+        },
+      },
+    });
+    const out = await admin.delete(tenantId, "Acme");
+    expect(out).toMatchObject({ whatsappCleanup: "ok", localCleanup: "failed" });
+    expect(s.sessions.calls).toEqual(
+      expect.arrayContaining([`logout:${session}`, `remove:${session}`]),
+    );
+    expect(fs.existsSync(dir)).toBe(false);
   });
 
   it("still finishes local deletion when WAHA fails and reports it", async () => {
@@ -321,6 +362,7 @@ describe("delete_tenant", () => {
     const boom = createTenantAdmin({
       tenants: s.tenants,
       auth: s.auth,
+      missions: createSqliteMissionStore(s.db),
       sessions: s.sessions,
       registry: {
         evict: () => {

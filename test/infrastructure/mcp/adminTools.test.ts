@@ -12,6 +12,7 @@ import {
   type ToolRunContext,
 } from "../../../src/infrastructure/mcp/defineTool.js";
 import { createAdminTools } from "../../../src/infrastructure/mcp/tools/admin/index.js";
+import { createSqliteMissionStore } from "../../../src/infrastructure/missions/sqliteMissionStore.js";
 import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { FakeSessionAdmin } from "../../fakes/FakeSessionAdmin.js";
 
@@ -73,6 +74,7 @@ describe("admin tool output through run()", () => {
     const admin = createTenantAdmin({
       tenants: store,
       auth: createAuthStore(db),
+      missions: createSqliteMissionStore(db),
       sessions,
       registry: { evict: () => {} },
       newWrappedDek: (id) => wrapDek(Buffer.alloc(32, 1), generateDek(), id),

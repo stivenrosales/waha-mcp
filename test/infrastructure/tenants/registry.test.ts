@@ -7,6 +7,7 @@ import { loadConfig } from "../../../src/config.js";
 import type { Tenant, TenantStatus, TenantStore } from "../../../src/domain/ports/TenantStore.js";
 import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
 import { generateDek, wrapDek } from "../../../src/infrastructure/crypto/envelope.js";
+import { createSqliteMissionStore } from "../../../src/infrastructure/missions/sqliteMissionStore.js";
 import { createTenantRegistry } from "../../../src/infrastructure/tenants/registry.js";
 import type {
   buildTenantRuntime,
@@ -260,6 +261,7 @@ describe("revoke through the admin service", () => {
     const admin = createTenantAdmin({
       tenants,
       auth: createAuthStore(db),
+      missions: createSqliteMissionStore(db),
       sessions: new FakeSessionAdmin(),
       registry,
       newWrappedDek: (id) => wrapDek(KEK, generateDek(), id),

@@ -16,6 +16,7 @@ import { createTenantCipher } from "../../src/infrastructure/crypto/envelope.js"
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { MEDIA_GONE } from "../../src/infrastructure/media/resolveMedia.js";
 import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
+import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import { migrateToMultiTenant } from "../../src/infrastructure/tenants/migrate.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
 import type {
@@ -331,6 +332,7 @@ async function world(): Promise<World> {
     config,
     store,
     tenants,
+    missions: createSqliteMissionStore(authDb),
     sessions,
     mediaSecret: MEDIA_SECRET,
     logger: { info: () => {} },
@@ -774,6 +776,7 @@ describe("e2e: a 0.3.0 DATA_DIR keeps its message cache", () => {
       config,
       store,
       tenants,
+      missions: createSqliteMissionStore(authDb),
       sessions,
       mediaSecret: MEDIA_SECRET,
       logger: { info: () => {} },

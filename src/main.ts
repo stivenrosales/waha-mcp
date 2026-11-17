@@ -5,6 +5,7 @@ import { composeApp } from "./composition.js";
 import { loadConfig } from "./config.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
+import { createSqliteMissionStore } from "./infrastructure/missions/sqliteMissionStore.js";
 import { migrateToMultiTenant } from "./infrastructure/tenants/migrate.js";
 import { createSqliteTenantStore } from "./infrastructure/tenants/sqliteTenantStore.js";
 import { createWahaSessionAdmin } from "./infrastructure/waha/WahaSessionAdmin.js";
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   const authDb = openAuthDatabase(join(config.dataDir, "auth.db"));
   const store = createAuthStore(authDb);
   const tenants = createSqliteTenantStore(authDb);
+  const missions = createSqliteMissionStore(authDb);
   const sessions = createWahaSessionAdmin({
     baseUrl: config.wahaApiUrl,
     apiKey: config.wahaApiKey,
@@ -54,6 +56,7 @@ async function main(): Promise<void> {
     config,
     store,
     tenants,
+    missions,
     sessions,
     mediaSecret,
     logger,

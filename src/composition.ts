@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import type { Hono } from "hono";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
+import type { MissionStore } from "./domain/ports/MissionStore.js";
 import type { SessionAdmin } from "./domain/ports/SessionAdmin.js";
 import type { TenantStore } from "./domain/ports/TenantStore.js";
 import { bearerGuard } from "./infrastructure/auth/bearer.js";
@@ -24,6 +25,8 @@ export interface ComposeDeps {
   /** Auth and tenant stores over the same, already migrated, auth database. */
   store: AuthStore;
   tenants: TenantStore;
+  /** Mission rows, deleted with their tenant. */
+  missions: MissionStore;
   sessions: SessionAdmin;
   mediaSecret: Uint8Array;
   logger: Logger;
@@ -45,7 +48,7 @@ export interface ComposedApp {
  * by the end-to-end tests, so both exercise the same wiring.
  */
 export function composeApp(deps: ComposeDeps): ComposedApp {
-  const { config, store, tenants, sessions, mediaSecret, logger } = deps;
+  const { config, store, tenants, missions, sessions, mediaSecret, logger } = deps;
   const limiter = createLoginLimiter();
   const registry = createTenantRegistry({
     config,
@@ -60,6 +63,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     auth: store,
     sessions,
     registry,
+    missions,
     newWrappedDek: (tenantId) => wrapDek(config.masterKey, generateDek(), tenantId),
     dataDir: config.dataDir,
     publicBaseUrl: config.publicBaseUrl,

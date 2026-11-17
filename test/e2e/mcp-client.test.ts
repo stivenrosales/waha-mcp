@@ -27,6 +27,7 @@ import {
 } from "../../src/infrastructure/mcp/instructions.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { createSignedLinks, type SignedLinks } from "../../src/infrastructure/media/signedLink.js";
+import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import type {
   buildTenantRuntime,
   TenantRuntime,
@@ -274,6 +275,7 @@ function setup(
     config,
     store,
     tenants,
+    missions: createSqliteMissionStore(db),
     sessions: new FakeSessionAdmin(),
     mediaSecret: MEDIA_SECRET,
     logger: { info: () => {} },

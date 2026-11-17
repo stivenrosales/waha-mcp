@@ -104,7 +104,7 @@ export interface TenantAdminDeps {
   sessions: SessionAdmin;
   registry: { evict(id: string): void };
   /** Mission rows are deleted with the tenant (their sealed log goes with the tenant directory). */
-  missions?: { deleteForTenant(tenantId: string): void };
+  missions: { deleteForTenant(tenantId: string): void };
   /** Wraps a fresh data key for the tenant (keeps crypto out of the application layer). */
   newWrappedDek(tenantId: string): string;
   dataDir: string;
@@ -389,7 +389,6 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
 
           // Row + wrapped DEK first: from here on the tenant's data is unrecoverable.
           tenants.deleteTenant(tenant.id);
-          deps.missions?.deleteForTenant(tenant.id);
 
           /** Runs one cleanup step; a failure is logged (never its error text) and reported. */
           const step = async (name: string, fn: () => unknown): Promise<"ok" | "failed"> => {
@@ -405,6 +404,9 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           };
           const worst = (...r: ("ok" | "failed")[]) => (r.includes("failed") ? "failed" : "ok");
 
+          const missionsDeleted = await step("missions", () =>
+            deps.missions.deleteForTenant(tenant.id),
+          );
           const revoked = await step("revoke_user", () => user && auth.revokeUser(user.id));
           const evicted = await step("evict", () => registry.evict(tenant.id));
           const whatsappCleanup = worst(
@@ -417,7 +419,7 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
               force: true,
             }),
           );
-          const localCleanup = worst(revoked, evicted, removed);
+          const localCleanup = worst(missionsDeleted, revoked, evicted, removed);
           return whatsappCleanup === "ok" && localCleanup === "ok"
             ? { whatsappCleanup, localCleanup }
             : { whatsappCleanup, localCleanup, wahaSession: tenant.wahaSession };

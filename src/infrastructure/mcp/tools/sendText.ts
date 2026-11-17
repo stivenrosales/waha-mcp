@@ -4,6 +4,7 @@ import { toWhatsAppText } from "../../../application/whatsappFormat.js";
 import { SEND_ANNOTATIONS, type ToolDefinition } from "../defineTool.js";
 import {
   chatIdField,
+  noteOwnerSend,
   replyToField,
   SEND_POLICY,
   sendOutputSchema,
@@ -30,7 +31,8 @@ export const sendTextTool: ToolDefinition<typeof inputSchema, typeof sendOutputS
   inputSchema,
   outputSchema: sendOutputSchema,
   annotations: SEND_ANNOTATIONS,
-  async run(input, { sender }) {
+  async run(input, ctx) {
+    const { sender } = ctx;
     const text = toWhatsAppText(input.text);
     assertTextLength(text);
     const mentions = input.mentions ?? [];
@@ -41,6 +43,7 @@ export const sendTextTool: ToolDefinition<typeof inputSchema, typeof sendOutputS
       ...(input.reply_to ? { replyTo: input.reply_to } : {}),
       ...(mentions.length ? { mentions } : {}),
     });
+    noteOwnerSend(ctx, input.chat_id);
     return sentResult(input.chat_id, sent, text);
   },
 };

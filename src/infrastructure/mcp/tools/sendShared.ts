@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SentMessage } from "../../../domain/ports/WhatsAppSender.js";
+import type { ToolRunContext } from "../defineTool.js";
 
 /** WhatsApp's formatting syntax, repeated wherever the model writes text that will be sent. */
 export const WHATSAPP_FORMAT_RULES = `Write in WhatsApp formatting, not Markdown:
@@ -46,4 +47,13 @@ export function sentResult(chatId: string, sent: SentMessage, textSent?: string)
       ...(textSent === undefined ? {} : { text_sent: textSent }),
     },
   };
+}
+
+/**
+ * The owner wrote in `chatId` through these tools: an active mission there ends as taken over at
+ * once (WAHA's echo of an API send is not relied on). Not awaited: the engine queues it behind a
+ * running turn, and a failure must never fail the send that already happened.
+ */
+export function noteOwnerSend(ctx: Pick<ToolRunContext, "missions">, chatId: string): void {
+  void ctx.missions?.ownerSent(chatId).catch(() => {});
 }

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SEND_ANNOTATIONS, type ToolDefinition } from "../defineTool.js";
 import {
   chatIdField,
+  noteOwnerSend,
   replyToField,
   SEND_POLICY,
   sendOutputSchema,
@@ -26,7 +27,8 @@ export const sendContactTool: ToolDefinition<typeof inputSchema, typeof sendOutp
   inputSchema,
   outputSchema: sendOutputSchema,
   annotations: SEND_ANNOTATIONS,
-  async run(input, { sender }) {
+  async run(input, ctx) {
+    const { sender } = ctx;
     const sent = await sender.sendContact({
       chatId: input.chat_id,
       fullName: input.full_name,
@@ -34,6 +36,7 @@ export const sendContactTool: ToolDefinition<typeof inputSchema, typeof sendOutp
       ...(input.organization ? { organization: input.organization } : {}),
       ...(input.reply_to ? { replyTo: input.reply_to } : {}),
     });
+    noteOwnerSend(ctx, input.chat_id);
     return sentResult(input.chat_id, sent);
   },
 };

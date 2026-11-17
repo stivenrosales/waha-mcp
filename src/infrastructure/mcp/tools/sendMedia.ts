@@ -9,6 +9,7 @@ import { mimetypeFromFilename } from "../../uploads/fsUploadStore.js";
 import { SEND_ANNOTATIONS, type ToolDefinition, type ToolRunContext } from "../defineTool.js";
 import {
   chatIdField,
+  noteOwnerSend,
   replyToField,
   SEND_POLICY,
   sendOutputSchema,
@@ -128,5 +129,6 @@ async function send(input: z.output<typeof inputSchema>, ctx: ToolRunContext, fi
 
   // Only after WAHA confirmed: a failed send keeps the upload for a retry.
   if (input.upload_id !== undefined) ctx.uploads.remove(input.upload_id);
+  noteOwnerSend(ctx, input.chat_id);
   return sentResult(input.chat_id, sent, caption);
 }

@@ -92,3 +92,9 @@ export function monthStart(at: Date, tz: string): Date {
   const p = localParts(at, tz);
   return zonedInstant(p.year, p.month, 1, 0, tz, at);
 }
+
+/** UTC instant of 00:00 on `at`'s calendar day in `tz` (daily new-contact cap window). */
+export function dayStart(at: Date, tz: string): Date {
+  const p = localParts(at, tz);
+  return zonedInstant(p.year, p.month, p.day, 0, tz, at);
+}

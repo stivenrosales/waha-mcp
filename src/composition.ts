@@ -24,7 +24,7 @@ import { createTools } from "./infrastructure/mcp/tools/index.js";
 import { missionTenantPort } from "./infrastructure/missions/tenantPort.js";
 import { createOnboardingRoutes } from "./infrastructure/tenants/onboardingRoutes.js";
 import { createTenantRegistry, type TenantRegistry } from "./infrastructure/tenants/registry.js";
-import type { buildTenantRuntime } from "./infrastructure/tenants/runtime.js";
+import type { buildTenantRuntime, MissionWiring } from "./infrastructure/tenants/runtime.js";
 import {
   configureTenantWebhooks,
   createWahaWebhookRoute,
@@ -43,6 +43,11 @@ export interface ComposeDeps {
   events?: EventStore;
   /** Wakes the mission engine when a webhook event is stored. */
   onWebhookEvent?: WahaWebhookDeps["onEvent"];
+  /**
+   * The mission engine, read lazily (it is composed after the registry it needs). Mission tools
+   * act through it: cancel, answer and takeover queue behind its ticks.
+   */
+  missionEngine?: () => MissionEngine | null;
   sessions: SessionAdmin;
   mediaSecret: Uint8Array;
   logger: Logger;
@@ -79,6 +84,20 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
         secret: missionsOn.webhookSecret,
       }
     : null;
+  const engine = (): MissionEngine | null => deps.missionEngine?.() ?? null;
+  const missionWiring: MissionWiring | null = missionsOn
+    ? {
+        store: missions,
+        tenants,
+        engine: {
+          cancel: async (t, id) => (await engine()?.cancel(t, id)) ?? false,
+          answer: async (t, id, text) => (await engine()?.answer(t, id, text)) ?? false,
+          takeOver: async (t, id) => (await engine()?.takeOver(t, id)) ?? false,
+          wake: () => engine()?.wake(),
+        },
+        now: () => new Date(),
+      }
+    : null;
   const registry = createTenantRegistry({
     config,
     tenants,
@@ -86,6 +105,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     mediaSecret,
     logger,
     ...(deps.buildRuntime ? { build: deps.buildRuntime } : {}),
+    ...(missionWiring ? { missions: missionWiring } : {}),
   });
   const admin = createTenantAdmin({
     tenants,

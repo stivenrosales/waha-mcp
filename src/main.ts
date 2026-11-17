@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     missions,
     ...(events ? { events } : {}),
     onWebhookEvent: () => missionEngine?.wake(),
+    missionEngine: () => missionEngine,
     sessions,
     mediaSecret,
     logger,

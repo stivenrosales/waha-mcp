@@ -101,4 +101,70 @@ describe("createToolHandler", () => {
     expect(result.content[0]).toMatchObject({ text: "done" });
     expect(lines).toContain("tool=fine usage not recorded");
   });
+
+  it("appends the unseen mission outcomes notice to successful results only, once", async () => {
+    const NOTICE = "\n\nMissions: 2 finished — call list_missions.";
+    let pending: string | null = NOTICE;
+    const taken: number[] = [];
+    const missions = {
+      takeUnseenNotice: () => {
+        taken.push(1);
+        const n = pending;
+        pending = null;
+        return n;
+      },
+    };
+    const deps = { mapper: async () => gowsMapper, config, missions } as unknown as ToolDeps;
+    const bad: ToolDefinition = {
+      name: "broken",
+      title: "Broken",
+      description: "Throws.",
+      inputSchema: z.object({}),
+      run: async () => {
+        throw new WhatsAppDisconnectedError();
+      },
+    };
+    const ok: ToolDefinition = {
+      ...bad,
+      name: "fine",
+      run: async () => ({ text: "done", data: {} }),
+    };
+    const media: ToolDefinition = {
+      ...bad,
+      name: "media",
+      run: async () => ({ content: [{ type: "image", data: "AA==", mimeType: "image/png" }] }),
+    };
+    const failed = await createToolHandler(bad, deps)({});
+    expect(failed.content).toHaveLength(1);
+    expect(taken).toHaveLength(0);
+    const first = await createToolHandler(ok, deps)({});
+    expect(first.content).toEqual([{ type: "text", text: `done${NOTICE}` }]);
+    const second = await createToolHandler(ok, deps)({});
+    expect(second.content).toEqual([{ type: "text", text: "done" }]);
+    pending = NOTICE;
+    const blocks = await createToolHandler(media, deps)({});
+    expect(blocks.content).toEqual([
+      { type: "image", data: "AA==", mimeType: "image/png" },
+      { type: "text", text: NOTICE.trimStart() },
+    ]);
+  });
+
+  it("never fails a call because the mission notice could not be read", async () => {
+    const missions = {
+      takeUnseenNotice: () => {
+        throw new Error("db locked");
+      },
+    };
+    const deps = { mapper: async () => gowsMapper, config, missions } as unknown as ToolDeps;
+    const ok: ToolDefinition = {
+      name: "fine",
+      title: "Fine",
+      description: "Works.",
+      inputSchema: z.object({}),
+      run: async () => ({ text: "done", data: {} }),
+    };
+    const r = await createToolHandler(ok, deps)({});
+    expect(r.isError).toBeFalsy();
+    expect(r.content).toEqual([{ type: "text", text: "done" }]);
+  });
 });

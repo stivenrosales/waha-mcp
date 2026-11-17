@@ -2,7 +2,7 @@ import type { Config } from "../../config.js";
 import type { Tenant, TenantStore } from "../../domain/ports/TenantStore.js";
 import { unwrapDek } from "../crypto/envelope.js";
 import type { Logger } from "../mcp/defineTool.js";
-import { buildTenantRuntime, type TenantRuntime } from "./runtime.js";
+import { buildTenantRuntime, type MissionWiring, type TenantRuntime } from "./runtime.js";
 
 export interface TenantRegistry {
   /**
@@ -43,6 +43,8 @@ export function createTenantRegistry(deps: {
   logger: Logger;
   maxOpen?: number /* default 32 */;
   build?: typeof buildTenantRuntime;
+  /** Handed to every runtime it builds (mission tools); absent when missions are off. */
+  missions?: MissionWiring;
 }): TenantRegistry {
   const maxOpen = Math.max(1, deps.maxOpen ?? DEFAULT_MAX_OPEN);
   const build = deps.build ?? buildTenantRuntime;
@@ -82,6 +84,7 @@ export function createTenantRegistry(deps: {
       dek,
       mediaSecret: deps.mediaSecret,
       logger: deps.logger,
+      ...(deps.missions ? { missions: deps.missions } : {}),
       recordUsage: (usage) => {
         const model = deps.config.transcription?.model;
         if (!model) return;

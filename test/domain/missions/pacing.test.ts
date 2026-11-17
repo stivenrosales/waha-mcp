@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_MISSION_LIMITS as L } from "../../../src/domain/missions/limits.js";
 import type { MissionSnapshot } from "../../../src/domain/missions/mission.js";
 import {
+  dayStart,
   inQuietHours,
   monthStart,
   nextAllowedInitiatedSend,
@@ -107,6 +108,18 @@ describe("monthStart", () => {
     );
     expect(monthStart(new Date("2026-03-31T23:30:00Z"), "Europe/Madrid").toISOString()).toBe(
       "2026-03-31T22:00:00.000Z",
+    );
+  });
+});
+
+describe("dayStart", () => {
+  it("is local midnight of the day in the time zone", () => {
+    expect(dayStart(new Date("2026-11-17T15:00:00Z"), "America/Lima").toISOString()).toBe(
+      "2026-11-17T05:00:00.000Z",
+    );
+    // 23:30 on 16 Nov in Lima is the 17th in UTC.
+    expect(dayStart(new Date("2026-11-17T04:30:00Z"), "America/Lima").toISOString()).toBe(
+      "2026-11-16T05:00:00.000Z",
     );
   });
 });

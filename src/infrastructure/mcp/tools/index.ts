@@ -11,6 +11,13 @@ import { listChatsTool } from "./listChats.js";
 import { listGroupsTool } from "./listGroups.js";
 import { listPendingRepliesTool } from "./listPendingReplies.js";
 import { listSharedFilesTool } from "./listSharedFiles.js";
+import {
+  answerMissionTool,
+  cancelMissionTool,
+  getMissionTool,
+  listMissionsTool,
+  startMissionTool,
+} from "./missions.js";
 import { searchMessagesTool } from "./searchMessages.js";
 import { sendContactTool } from "./sendContact.js";
 import { sendLocationTool } from "./sendLocation.js";
@@ -34,10 +41,15 @@ export function createTools(): ToolDefinition[] {
     listSharedFilesTool,
     getContactTool,
     transcribeAudioTool,
+    getMissionTool,
+    listMissionsTool,
     sendTextTool,
     createUploadLinkTool,
     sendMediaTool,
     sendLocationTool,
     sendContactTool,
+    startMissionTool,
+    answerMissionTool,
+    cancelMissionTool,
   ] as unknown as ToolDefinition[];
 }

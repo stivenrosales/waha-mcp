@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SEND_ANNOTATIONS, type ToolDefinition } from "../defineTool.js";
 import {
   chatIdField,
+  noteOwnerSend,
   replyToField,
   SEND_POLICY,
   sendOutputSchema,
@@ -23,7 +24,8 @@ export const sendLocationTool: ToolDefinition<typeof inputSchema, typeof sendOut
   inputSchema,
   outputSchema: sendOutputSchema,
   annotations: SEND_ANNOTATIONS,
-  async run(input, { sender }) {
+  async run(input, ctx) {
+    const { sender } = ctx;
     const sent = await sender.sendLocation({
       chatId: input.chat_id,
       latitude: input.latitude,
@@ -31,6 +33,7 @@ export const sendLocationTool: ToolDefinition<typeof inputSchema, typeof sendOut
       ...(input.title ? { title: input.title } : {}),
       ...(input.reply_to ? { replyTo: input.reply_to } : {}),
     });
+    noteOwnerSend(ctx, input.chat_id);
     return sentResult(input.chat_id, sent);
   },
 };

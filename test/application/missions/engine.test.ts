@@ -795,6 +795,18 @@ describe("mission engine: closing message", () => {
     expect(await h.engine.cancel(TENANT, m.id)).toBe(false);
   });
 
+  it("takes a mission over at once when the owner sends through the MCP tools", async () => {
+    const h = harness();
+    const m = await opened(h, { closingMessage: "yes" });
+    const sends = h.sender.calls.length;
+    h.at(5 * MIN);
+    expect(await h.engine.takeOver(TENANT, m.id)).toBe(true);
+    expect(h.get(m.id)).toMatchObject({ state: "taken_over", nextWakeAt: null });
+    // Silent: no closing line, no owner notice.
+    expect(h.sender.calls.length).toBe(sends);
+    expect(await h.engine.takeOver(TENANT, m.id)).toBe(false);
+  });
+
   it("goes silent without a closing message", async () => {
     const h = harness();
     const m = await opened(h, { minutes: 10 });

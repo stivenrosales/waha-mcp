@@ -7,6 +7,7 @@ import type {
   ToolCallback,
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
+import type { MissionService } from "../../application/missions/service.js";
 import type { TenantAdmin } from "../../application/tenantAdmin.js";
 import {
   DISABLED_TRANSCRIPTION,
@@ -47,6 +48,8 @@ export interface ToolRunContext {
   uploadLinks: SignedLinks;
   /** Tenant management; null for tenants that are not the admin. */
   admin: TenantAdmin | null;
+  /** This tenant's missions; null when the server has no `config.missions`. */
+  missions: MissionService | null;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
@@ -95,6 +98,8 @@ export interface ToolDeps {
   uploadLinks: SignedLinks;
   /** Default null: admin tools then fail with a clear error. */
   admin?: TenantAdmin | null;
+  /** Default null: mission tools then answer that missions are not configured. */
+  missions?: MissionService | null;
   logger?: Logger;
   /** Told about every call once it ends (usage accounting); a throw is logged, never surfaced. */
   onToolCall?: (call: ToolCallRecord) => void;
@@ -169,6 +174,15 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
       logger.info(`tool=${def.name} usage not recorded`);
     }
   };
+  /** Unseen mission outcomes, told once on a successful result; never fails the call. */
+  const missionNotice = (): string | null => {
+    try {
+      return deps.missions?.takeUnseenNotice() ?? null;
+    } catch {
+      logger.info(`tool=${def.name} mission notice unavailable`);
+      return null;
+    }
+  };
   return async (input) => {
     const start = Date.now();
     try {
@@ -184,19 +198,28 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         uploads: deps.uploads,
         uploadLinks: deps.uploadLinks,
         admin: deps.admin ?? null,
+        missions: deps.missions ?? null,
       });
       const ms = Date.now() - start;
       logger.info(`tool=${def.name} ms=${ms} result=ok`);
       if ("content" in out) {
         report("ok", ms);
-        return { content: out.content };
+        const notice = missionNotice();
+        return {
+          content: notice
+            ? [...out.content, { type: "text", text: notice.trimStart() }]
+            : out.content,
+        };
       }
       const structuredContent = def.outputSchema
         ? (def.outputSchema.parse(out.data) as Record<string, unknown>)
         : undefined;
       // After the output check, so a call that fails it is counted once, as an error.
       report("ok", ms);
-      return { content: [{ type: "text", text: out.text }], structuredContent };
+      return {
+        content: [{ type: "text", text: `${out.text}${missionNotice() ?? ""}` }],
+        structuredContent,
+      };
     } catch (error) {
       const { message, unexpected } = describeError(error, deps.config);
       const name = error instanceof Error ? error.name : "UnknownError";

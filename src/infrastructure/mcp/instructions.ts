@@ -20,7 +20,12 @@ Reading:
 - Respect coverage notes: when history is partial, truncated or unavailable, say so instead of presenting the numbers as complete. An empty result does not mean the chat was silent.
 - Media is not included in messages; fetch an attachment on demand with get_media using its media_id. Only small images are returned inline; documents, PDFs, video and large files come back as a link you cannot open yourself, so give the user the link and ask them to download the file and attach it to the chat.
 - When the server has transcription configured, voice notes carry a transcript (null otherwise). Coverage notes say which voice notes were skipped; transcribe one on demand with transcribe_audio and its media_id.
-- Reactions are usually unavailable on the GOWS engine; do not conclude that nobody reacted.`;
+- Reactions are usually unavailable on the GOWS engine; do not conclude that nobody reacted.
+
+Missions (start_mission, get_mission, list_missions, answer_mission, cancel_mission; only when the server has them configured):
+- A mission hands one direct chat to a server-side assistant that converses on the owner's behalf until the objective is met, it fails, the deadline passes, or the owner cancels it. Start one only when the owner asked; show them the system prompt and the recipient first.
+- When the assistant needs the owner, they get a WhatsApp message to themselves; relay their reply with answer_mission. Any message the owner sends in that chat (including through send_text or send_media) takes the mission over and the assistant goes silent.
+- Results can end with "Missions: <n> finished — call list_missions."; when they do, check list_missions and tell the owner the outcomes.`;
 
 /** Appended to the instructions for the admin only (members never see the admin tools). */
 export const ADMIN_INSTRUCTIONS = `Tenant management (admin only; list_tenants, get_transcription_usage, get_tool_usage, get_llm_usage, create_invite, reset_password, revoke_tenant, restore_tenant, delete_tenant):

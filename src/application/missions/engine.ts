@@ -64,6 +64,11 @@ export interface MissionEngine {
   cancel(tenantId: string, missionId: string): Promise<boolean>;
   /** Owner answer to an `ask_owner` question; the next tick runs a turn with it. */
   answer(tenantId: string, missionId: string, text: string): Promise<boolean>;
+  /**
+   * The owner wrote in the mission chat through the MCP send tools: `taken_over` at once, without
+   * waiting for WAHA's echo of the send. False when not active.
+   */
+  takeOver(tenantId: string, missionId: string): Promise<boolean>;
 }
 
 const EVENT_BATCH = 100;
@@ -261,6 +266,23 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     }
   }
 
+  /** Owner-driven end, queued behind any running tick so it never interleaves with a turn. */
+  const endByOwner = (
+    tenantId: string,
+    missionId: string,
+    event: { type: "cancel" } | { type: "take_over" },
+  ): Promise<boolean> =>
+    serial(async () => {
+      const m = missions.get(tenantId, missionId);
+      if (m?.state !== "active") return false;
+      let done = false;
+      await withMission(m, deps.now(), async (c) => {
+        await end(c, event);
+        done = true;
+      });
+      return done;
+    });
+
   return {
     tick: (now) => serial(() => runTick(now)),
     wake() {
@@ -284,18 +306,8 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
       if (timer) clearInterval(timer);
       timer = undefined;
     },
-    cancel: (tenantId, missionId) =>
-      serial(async () => {
-        const m = missions.get(tenantId, missionId);
-        if (m?.state !== "active") return false;
-        const now = deps.now();
-        let done = false;
-        await withMission(m, now, async (c) => {
-          await end(c, { type: "cancel" });
-          done = true;
-        });
-        return done;
-      }),
+    cancel: (tenantId, missionId) => endByOwner(tenantId, missionId, { type: "cancel" }),
+    takeOver: (tenantId, missionId) => endByOwner(tenantId, missionId, { type: "take_over" }),
     answer: (tenantId, missionId, text) =>
       serial(async () => {
         const m = missions.get(tenantId, missionId);

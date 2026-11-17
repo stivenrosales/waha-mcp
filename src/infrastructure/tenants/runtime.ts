@@ -2,10 +2,15 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createCachedGateway } from "../../application/cachedMessages.js";
 import {
+  createMissionService,
+  type MissionServiceDeps,
+} from "../../application/missions/service.js";
+import {
   createTranscriptionService,
   DISABLED_TRANSCRIPTION,
 } from "../../application/transcripts.js";
 import type { Config } from "../../config.js";
+import { WahaNotFoundError } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
 import type { Tenant } from "../../domain/ports/TenantStore.js";
 import { createSqliteMessageStore, openCacheDatabase } from "../cache/sqliteMessageStore.js";
@@ -26,6 +31,9 @@ import { createUploadHandler } from "../uploads/uploadRoute.js";
 import { createEngineResolver } from "../waha/engines/index.js";
 import { createWahaHttpGateway } from "../waha/WahaHttpGateway.js";
 import { createWahaHttpSender } from "../waha/WahaHttpSender.js";
+
+/** What every tenant's mission service shares (the server-wide stores and the engine). */
+export type MissionWiring = Pick<MissionServiceDeps, "store" | "tenants" | "engine" | "now">;
 
 /** Expired upload slots are removed when the runtime is built and on this interval. */
 const UPLOAD_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -90,6 +98,8 @@ export function buildTenantRuntime(deps: {
   logger: Logger;
   /** Stores one paid transcription for this tenant (the registry writes it to the central store). */
   recordUsage?: (usage: TranscriptionUsage) => void;
+  /** Mission stores and engine; the tools get no mission service without it or `config.missions`. */
+  missions?: MissionWiring;
 }): TenantRuntime {
   const { config, tenant, dek, mediaSecret, logger } = deps;
   if (!TENANT_ID.test(tenant.id)) throw new Error("Invalid tenant id.");
@@ -164,6 +174,29 @@ export function buildTenantRuntime(deps: {
       logger,
     });
 
+    const missionLog = createSealedMissionLog(cacheDb, cipher);
+    const missionsConfig = config.missions;
+    const missions =
+      missionsConfig && deps.missions
+        ? createMissionService({
+            ...deps.missions,
+            tenantId: tenant.id,
+            log: missionLog,
+            limits: missionsConfig.limits,
+            monthlyBudgetUsd: missionsConfig.monthlyBudgetUsd,
+            timezone: config.timezone,
+            hasHistory: async (chatId) => {
+              try {
+                return (await gateway.getMessages(chatId, { limit: 1, offset: 0 })).length > 0;
+              } catch (error) {
+                // WAHA has never seen this chat: a new contact.
+                if (error instanceof WahaNotFoundError) return false;
+                throw error;
+              }
+            },
+          })
+        : null;
+
     let closed = false;
     return {
       tenantId: tenant.id,
@@ -176,10 +209,11 @@ export function buildTenantRuntime(deps: {
         sender,
         uploads,
         uploadLinks,
+        missions,
       },
       media,
       upload,
-      missionLog: createSealedMissionLog(cacheDb, cipher),
+      missionLog,
       cipher,
       close() {
         if (closed) return;

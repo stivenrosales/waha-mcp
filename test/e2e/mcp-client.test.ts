@@ -180,6 +180,9 @@ const SEND_TOOLS = [
   "send_media",
   "send_location",
   "send_contact",
+  "start_mission",
+  "answer_mission",
+  "cancel_mission",
 ];
 
 /** Every e2e test runs twice: CACHE_ENABLED=false (today's path) and with the message cache. */
@@ -256,6 +259,7 @@ function setup(
       sender,
       uploads,
       uploadLinks,
+      missions: null,
     },
     media: createMediaHandler({
       gateway: served,
@@ -373,8 +377,10 @@ for (const cache of [false, true])
         "get_media",
         "get_messages",
         "get_thread",
+        "get_mission",
         "list_chats",
         "list_groups",
+        "list_missions",
         "list_pending_replies",
         "list_shared_files",
         "search_messages",

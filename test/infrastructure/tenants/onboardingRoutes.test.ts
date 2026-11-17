@@ -636,4 +636,17 @@ describe("privacy", () => {
     expect(res.headers.get("x-frame-options")).toBe("DENY");
     expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
   });
+
+  it("explains missions: who receives the conversations, retention and the admin promise", async () => {
+    const ctx = setup();
+    const html = await (await ctx.request("/privacidad")).text();
+    expect(html).toContain("<h2>Misiones</h2>");
+    expect(html).toContain("OpenRouter");
+    expect(html).toContain("Anthropic");
+    expect(html).toContain("30 días");
+    expect(html).toContain("El administrador no accede al contenido de las misiones");
+    // The existing sections stay.
+    expect(html).toContain("<h2>Qué se guarda</h2>");
+    expect(html).toContain("<h2>Cómo salir</h2>");
+  });
 });

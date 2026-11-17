@@ -117,6 +117,12 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 | 🖼️           | `send_media`           | Sends an uploaded file, forwards a WhatsApp attachment or sends a public URL.     |
 | 📍           | `send_location`        | Sends a location pin.                                                             |
 | 👤           | `send_contact`         | Sends a contact card.                                                             |
+| **Delegate** |                        |                                                                                   |
+| 🤖           | `start_mission`        | Hands a direct chat to a server-side agent until an objective is met (optional).  |
+| 🔍           | `get_mission`          | State, timeline, pending questions, collected files and usage of one mission.     |
+| 📋           | `list_missions`        | Your missions, optionally filtered by state.                                      |
+| 💡           | `answer_mission`       | Answers a question the mission agent asked you.                                   |
+| ⛔           | `cancel_mission`       | Stops a running mission.                                                          |
 
 ### Prompts
 
@@ -148,7 +154,7 @@ Admin tools, listed only for the admin (members never see them):
 | `reset_password`          | Single-use password reset link (72 hours) for a tenant's user.                                                                                                               |
 | `revoke_tenant`           | Blocks a tenant: its tokens stop working at once and its links answer 404. Data is kept.                                                                                     |
 | `restore_tenant`          | Undoes `revoke_tenant`.                                                                                                                                                      |
-| `delete_tenant`           | Permanent: account, encryption key, cache and WAHA session. Needs the exact display name.                                                                                    |
+| `delete_tenant`           | Permanent: account, encryption key, cache, missions and WAHA session. Needs the exact display name.                                                                          |
 
 Every admin tool call is logged with the tool, the target tenant and the outcome, never secrets.
 
@@ -213,6 +219,37 @@ Every transcription the provider answers is recorded in the central store (`auth
 ### Tool usage
 
 Every MCP tool call is recorded in the central store (`auth.db`, table `tool_calls`) with its tenant, time, tool name, outcome (`ok` or the error's name) and duration. Arguments and results are never recorded. `get_tool_usage` groups them per tenant and tool. LLM tokens are not counted: each user's client pays for its own model, so the server never sees them. Rows are kept after `delete_tenant`, as with transcription usage. Recording starts with this version. A failed write is logged as `tool=<name> usage not recorded` and never blocks the answer.
+
+## Missions (optional)
+
+A mission hands one direct chat to an agent that runs on the server: it writes to the contact on your behalf, as your assistant, until the objective is met, it fails, the deadline passes, you cancel it, or you write in that chat yourself (that takes the mission over and the agent goes silent). The agent is Claude Haiku 5.5 through [OpenRouter](https://openrouter.ai), which routes to Anthropic first and to other providers of the same model only when Anthropic fails. One `OPENROUTER_API_KEY` serves every tenant, so all mission spend is billed to the admin. Missions to groups are not available yet.
+
+| Tool             | What it does                                                                                                                                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start_mission`  | `chat_id`, `system_prompt`, `objective`, `done_when`, `max_duration_minutes`, optional `expects_files` and `closing_message`. Returns the mission id and the deadline, and says when the deadline falls in quiet hours. |
+| `get_mission`    | One mission: state, timeline summary, pending questions, collected items (their media ids work with `get_media`) and usage.                                                                                             |
+| `list_missions`  | Your missions, optionally filtered by `state`.                                                                                                                                                                          |
+| `answer_mission` | Answers a question the agent could not answer itself; it uses the answer and goes on.                                                                                                                                   |
+| `cancel_mission` | Stops a running mission (with the closing line, when the mission has one).                                                                                                                                              |
+
+You get a WhatsApp message in your own chat when a mission finishes, times out, is stopped, pauses, or has a question for you, and the next tool result in any of your MCP sessions carries a short notice. The admin tool `get_llm_usage` reports mission spend per tenant (calls, missions, tokens and USD cost); usage rows hold no content and are kept after `delete_tenant`, like transcription usage.
+
+**Setup.** Set `OPENROUTER_API_KEY` and `WAHA_WEBHOOK_SECRET` together (setting only one is a startup error). At startup the server points every active tenant's WAHA session at `POST {PUBLIC_BASE_URL}/webhooks/waha` for `message.any` and `session.status` events, signed with `WAHA_WEBHOOK_SECRET` (HMAC-SHA512); new sessions get it on creation. The route accepts only signed, recent events of known sessions and stores them encrypted with the tenant's key until the engine handles them, so a restart loses nothing.
+
+**Limits** (environment variables in [Configuration](#configuration), defaults in brackets):
+
+- At most `MISSIONS_MAX_ACTIVE_PER_TENANT` [3] missions at once per tenant, and `MISSIONS_MAX_NEW_CONTACTS_PER_DAY` [5] missions per day to contacts with no prior chat.
+- Each mission sends at most `MISSIONS_MAX_MESSAGES_PER_MISSION` [40] messages, makes at most `MISSIONS_MAX_LLM_CALLS_PER_MISSION` [60] model calls (reaching it stops the mission) and runs at most `MISSIONS_MAX_DURATION_MINUTES` [120] minutes.
+- When the contact is silent, at most `MISSIONS_MAX_REMINDERS` [2] reminders (`MISSIONS_MAX_REMINDERS_NEW_CONTACT` [1] for a new contact), `MISSIONS_REMINDER_GAP_MS` [30 min] apart. Incoming bubbles are batched for `MISSIONS_DEBOUNCE_MS` [15 s] before one reply.
+- Every message goes out with a seen mark, a typing indicator and a random delay proportional to its length.
+- `MISSIONS_MONTHLY_BUDGET_USD` [1] per tenant per calendar month (in `TIMEZONE`): once reached, `start_mission` is refused and running missions stop.
+- **Quiet hours** from `MISSIONS_QUIET_START_HOUR` [22] to `MISSIONS_QUIET_END_HOUR` [8] in `TIMEZONE`: the agent starts nothing on its own (opening messages, reminders, closing lines) and postpones it to the end of the window. Replies to a message the contact sent are still allowed. The deadline keeps running.
+- When WhatsApp puts a reach-out lock on a number (`session.status`), every mission of that tenant pauses until the lock lifts, also across restarts.
+
+**Retention.** Mission content (prompt, conversation, summaries, questions) is encrypted with the tenant's key in its `cache.db`, and deleted together with the mission's row 30 days after the mission ends; `delete_tenant` deletes it at once. Stored webhook events (already-handled ones keep only their id, for dedupe) are deleted 7 days after they arrive. Both purges run in the engine about once a day, the first one right after start. A revoked tenant's old missions wait until it is restored or deleted, because its content can only be reached with its runtime.
+
+> [!WARNING]
+> With missions on, every mission conversation (your instructions and the chat's messages, including transcribed voice notes, images and documents) is sent to OpenRouter and Anthropic. The `/privacidad` page tells tenants this.
 
 ## Files and PDFs
 
@@ -307,6 +344,8 @@ Missions are off unless `OPENROUTER_API_KEY` and `WAHA_WEBHOOK_SECRET` are both 
 
 The Docker healthcheck probes `/health` on port 3000; if you change `PORT`, adjust or disable it.
 
+With missions on, set the container's stop grace period to **at least 25 s** (Docker `stop_grace_period` / `--stop-timeout`): on `SIGTERM` the server waits up to 20 s for a running mission turn (a model call plus a paced send) before exiting, and a shorter grace period kills it mid-send.
+
 </details>
 
 ## Connect your client
@@ -352,6 +391,7 @@ To sign out everywhere, open `<base>/logout` and log in: it revokes every client
 - Rotating `WAHA_API_KEY` signs every user out at the next start (every OAuth client, code and token is revoked; users log in again with their username and password): only a hash of the key is kept in `auth.db` to detect the change. `auth.db` is created with `0600` permissions.
 - The message cache is a copy of the conversations you read: see [Message cache](#message-cache).
 - Transcription is off by default; when on, voice notes go to the configured provider: see [Voice-note transcription](#voice-note-transcription-optional). `TRANSCRIPTION_API_KEY` is never logged or returned; provider errors are reported with fixed messages.
+- Missions are off by default; when on, mission conversations go to OpenRouter and Anthropic: see [Missions](#missions-optional). `OPENROUTER_API_KEY` and `WAHA_WEBHOOK_SECRET` are never logged; webhook requests without a valid signature are rejected.
 - At most 50 OAuth clients can wait unbound (registered, but nobody has logged in through them yet), all users together; clients bound to a user do not count. Unbound registrations are pruned after 1 hour, and bound clients older than 24 h with no live token after 24 hours, whenever a new client registers.
 
 > [!WARNING]

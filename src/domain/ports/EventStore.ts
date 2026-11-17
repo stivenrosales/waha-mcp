@@ -23,4 +23,11 @@ export interface EventStore {
   pending(limit: number): StoredEvent[];
   /** Marks the event handled and drops its sealed payload; the id is kept for dedupe. */
   markDone(id: number): void;
+  /**
+   * Deletes events received before `beforeIso`, done or not (retention: past it a redelivery is
+   * no longer deduped). Returns how many were deleted.
+   */
+  prune(beforeIso: string): number;
+  /** Deletes every event of the tenant (tenant deletion). */
+  deleteForTenant(tenantId: string): void;
 }

@@ -68,5 +68,12 @@ export function createSqliteEventStore(
         "UPDATE webhook_events SET done_at = ?, payload_sealed = '' WHERE id = ? AND done_at IS NULL",
       ).run(now(), id);
     },
+    prune(beforeIso) {
+      const r = db.prepare("DELETE FROM webhook_events WHERE received_at < ?").run(beforeIso);
+      return Number(r.changes);
+    },
+    deleteForTenant(tenantId) {
+      db.prepare("DELETE FROM webhook_events WHERE tenant_id = ?").run(tenantId);
+    },
   };
 }

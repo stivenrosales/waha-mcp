@@ -35,7 +35,7 @@ export interface MissionTenantPort extends MediaReader {
 export interface MissionEngineDeps {
   missions: MissionStore;
   events: EventStore;
-  tenants: Pick<TenantStore, "getTenant" | "recordLlmUsage" | "llmSpendUsd">;
+  tenants: Pick<TenantStore, "getTenant" | "recordLlmUsage" | "llmSpendUsd" | "listTenants">;
   llm: LlmClient;
   model: string;
   limits: MissionLimits;
@@ -76,6 +76,11 @@ const EVENT_BATCH = 100;
 const EVENT_ATTEMPTS = 3;
 /** A message older than its mission (by more than clock skew) is history, not an event of it. */
 const SKEW_MS = 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Mission content (log) and row are deleted this long after the mission ends. */
+export const MISSION_RETENTION_DAYS = 30;
+/** Webhook events (dedupe ids, unhandled payloads) are kept this long after they arrive. */
+export const WEBHOOK_EVENT_RETENTION_DAYS = 7;
 
 /**
  * The mission engine: consumes stored webhook events and mission timers, runs agent turns on the
@@ -92,6 +97,8 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
   const eventFailures = new Map<number, number>();
   /** Missions the owner took over whose `taken_over` is still queued behind a running turn. */
   const steppedIn = new Set<string>();
+  /** Last retention purge of this process (null: not yet, so the first tick after boot runs it). */
+  let lastPurgeAt: number | null = null;
 
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const run = chain.then(fn);
@@ -247,6 +254,38 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     }
   }
 
+  /**
+   * Retention: deletes the sealed log and the row of every mission that ended more than
+   * `MISSION_RETENTION_DAYS` ago, and webhook events older than `WEBHOOK_EVENT_RETENTION_DAYS`.
+   * A tenant without a runtime (revoked, not active) keeps its old missions until a later purge
+   * can reach its log (or the tenant is deleted, which removes everything at once).
+   */
+  function purge(now: Date): void {
+    const missionCutoff = iso(new Date(now.getTime() - MISSION_RETENTION_DAYS * DAY_MS));
+    let purged = 0;
+    for (const tenant of deps.tenants.listTenants()) {
+      try {
+        const ids = missions.endedBefore(tenant.id, missionCutoff);
+        if (ids.length === 0) continue;
+        const held = deps.acquire(tenant.id);
+        if (!held) continue;
+        try {
+          held.port.log.purgeMissions(ids);
+        } finally {
+          held.release();
+        }
+        missions.deleteMissions(tenant.id, ids);
+        purged += ids.length;
+      } catch {
+        logger.info(`tenant=${tenant.id} purge=failed`);
+      }
+    }
+    const pruned = events.prune(
+      iso(new Date(now.getTime() - WEBHOOK_EVENT_RETENTION_DAYS * DAY_MS)),
+    );
+    if (purged > 0 || pruned > 0) logger.info(`missions purge missions=${purged} events=${pruned}`);
+  }
+
   async function runTick(now: Date): Promise<void> {
     if (stopped) return;
     await processEvents(now);
@@ -265,6 +304,15 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
         await withMission(ended, now, closing);
       } catch {
         logger.info(`mission=${ended.id} closing=failed`);
+      }
+    }
+    if (stopped) return;
+    if (lastPurgeAt === null || now.getTime() - lastPurgeAt >= DAY_MS) {
+      lastPurgeAt = now.getTime();
+      try {
+        purge(now);
+      } catch {
+        logger.info("missions purge=failed");
       }
     }
   }

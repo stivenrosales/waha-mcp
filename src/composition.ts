@@ -113,6 +113,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     sessions,
     registry,
     missions,
+    ...(deps.events ? { events: deps.events } : {}),
     newWrappedDek: (tenantId) => wrapDek(config.masterKey, generateDek(), tenantId),
     dataDir: config.dataDir,
     publicBaseUrl: config.publicBaseUrl,

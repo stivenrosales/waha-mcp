@@ -44,6 +44,8 @@ export interface MissionStore {
   markSeen(ids: string[]): void;
   /** Ids of the tenant's missions that ended before `iso` (feeds `MissionLog.purgeMissions`). */
   endedBefore(tenantId: string, iso: string): string[];
+  /** Deletes the given missions of the tenant (retention, after their log was purged). */
+  deleteMissions(tenantId: string, ids: string[]): void;
   /** Terminal missions whose `nextWakeAt` is due: a closing line postponed (quiet hours, pause). */
   dueClosings(nowIso: string): MissionRow[];
   /**

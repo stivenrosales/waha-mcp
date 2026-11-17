@@ -139,6 +139,18 @@ function harness(opts: Options = {}) {
       usageRows.push(q);
     },
     llmSpendUsd: () => state.spend,
+    /** Plus a revoked "t2" with no runtime (`acquire` returns null for it). */
+    listTenants: () => [
+      ...[tenants.getTenant(TENANT)].flatMap((t) => t ?? []),
+      {
+        id: "t2",
+        wahaSession: "s2",
+        displayName: "Otro",
+        status: "revoked" as const,
+        waId: null,
+        createdAt: 0,
+      },
+    ],
   };
   const make = () =>
     createMissionEngine({
@@ -964,5 +976,86 @@ describe("mission engine: fix round 1", () => {
     expect(h.get(m.id).nextWakeAt).toBeNull();
     await h.engine.tick(new Date("2026-11-18T13:01:00.000Z"));
     expect(h.llm.requests).toHaveLength(2);
+  });
+});
+
+describe("mission engine: retention", () => {
+  const DAY = 24 * 60 * MIN;
+  /** An ended mission (no closing due) with content, `daysAgo` days before the clock. */
+  function ended(h: ReturnType<typeof harness>, daysAgo: number): MissionRow {
+    const m = h.start({ nextWakeAt: null, closingMessage: "Le paso esto a Stiven." });
+    h.missions.update(m.id, {
+      state: "cancelled",
+      stopReason: null,
+      endedAt: new Date(h.now.getTime() - daysAgo * DAY).toISOString(),
+    });
+    return m;
+  }
+
+  it("deletes the content and row of missions ended more than 30 days ago and keeps newer ones", async () => {
+    const h = harness();
+    const old = ended(h, 31);
+    const recent = ended(h, 29);
+    const active = h.start({ nextWakeAt: null });
+    await h.tickAt(0);
+    expect(h.log.read(old.id)).toEqual([]);
+    expect(h.missions.get(TENANT, old.id)).toBeNull();
+    expect(h.log.read(recent.id).length).toBeGreaterThan(0);
+    expect(h.get(recent.id).closingMessage).toBe("Le paso esto a Stiven.");
+    expect(h.log.read(active.id).length).toBeGreaterThan(0);
+    expect(h.get(active.id).state).toBe("active");
+  });
+
+  it("prunes webhook events received more than 7 days ago in the same purge", async () => {
+    const h = harness();
+    const put = (eventId: string, daysAgo: number) =>
+      h.events.put({
+        tenantId: TENANT,
+        eventId,
+        kind: "message",
+        receivedAt: new Date(h.now.getTime() - daysAgo * DAY).toISOString(),
+        payloadSealed: "",
+      });
+    put("evt_old", 8);
+    put("evt_new", 6);
+    for (const e of h.events.pending(10)) h.events.markDone(e.id);
+    await h.tickAt(0);
+    expect(put("evt_old", 8)).toBe("stored");
+    expect(put("evt_new", 6)).toBe("duplicate");
+  });
+
+  it("purges on the first tick after boot, then at most once per day", async () => {
+    const h = harness();
+    await h.tickAt(0);
+    const m = ended(h, 31);
+    await h.tickAt(23 * 60 * MIN);
+    expect(h.missions.get(TENANT, m.id)).not.toBeNull();
+    await h.tickAt(DAY);
+    expect(h.missions.get(TENANT, m.id)).toBeNull();
+    // A restarted process purges again on its first tick.
+    const n = ended(h, 31);
+    h.restart();
+    await h.tickAt(DAY + MIN);
+    expect(h.missions.get(TENANT, n.id)).toBeNull();
+  });
+
+  it("keeps the content of a tenant without a runtime until it can be purged", async () => {
+    const h = harness();
+    const m = ended(h, 31);
+    const other = h.missions.create({
+      tenantId: "t2",
+      chatId: CHAT,
+      newContact: false,
+      deadlineAt: h.now.toISOString(),
+      expectsFiles: false,
+    });
+    h.missions.update(other.id, {
+      state: "cancelled",
+      endedAt: new Date(h.now.getTime() - 40 * DAY).toISOString(),
+    });
+    await h.tickAt(0);
+    expect(h.missions.get(TENANT, m.id)).toBeNull();
+    // No runtime (revoked or not active): its log cannot be reached, so its row stays too.
+    expect(h.missions.get("t2", other.id)).not.toBeNull();
   });
 });

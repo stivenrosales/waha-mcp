@@ -195,6 +195,10 @@ export function createSqliteMissionStore(
           .all(tenantId, iso) as unknown as { id: string }[]
       ).map((r) => r.id);
     },
+    deleteMissions(tenantId, ids) {
+      const stmt = db.prepare("DELETE FROM missions WHERE tenant_id = ? AND id = ?");
+      for (const id of ids) stmt.run(tenantId, id);
+    },
     dueClosings(nowIso) {
       return all(
         `SELECT * FROM missions WHERE state != 'active' AND next_wake_at IS NOT NULL

@@ -78,6 +78,7 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
         : null,
     recordLlmUsage: () => {},
     llmSpendUsd: () => state.spend,
+    listTenants: () => [],
   };
   const engine = createMissionEngine({
     missions: store,

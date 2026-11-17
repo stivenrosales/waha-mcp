@@ -40,6 +40,28 @@ describe("sqliteEventStore", () => {
     expect(row.payload_sealed).toBe("");
   });
 
+  it("prunes events received before the cutoff, done or pending, and keeps newer ones", () => {
+    const store = createSqliteEventStore(openAuthDatabase(":memory:"));
+    store.put({ ...event("evt_old_done"), receivedAt: "2026-11-01T00:00:00.000Z" });
+    store.put({ ...event("evt_old_pending"), receivedAt: "2026-11-02T00:00:00.000Z" });
+    store.put({ ...event("evt_new"), receivedAt: "2026-11-15T00:00:00.000Z" });
+    store.markDone(store.pending(1)[0]?.id as number);
+    expect(store.prune("2026-11-10T00:00:00.000Z")).toBe(2);
+    expect(store.pending(10).map((e) => e.eventId)).toEqual(["evt_new"]);
+    // A pruned id is no longer deduped: past the window a redelivery is stored again.
+    expect(store.put({ ...event("evt_old_done"), receivedAt: "2026-11-01T00:00:00.000Z" })).toBe(
+      "stored",
+    );
+  });
+
+  it("deleteForTenant removes only that tenant's events", () => {
+    const store = createSqliteEventStore(openAuthDatabase(":memory:"));
+    store.put(event("evt_1", "t1"));
+    store.put(event("evt_2", "t2"));
+    store.deleteForTenant("t1");
+    expect(store.pending(10).map((e) => e.tenantId)).toEqual(["t2"]);
+  });
+
   it("opening twice over the same database keeps the rows (idempotent schema)", () => {
     const db = openAuthDatabase(":memory:");
     createSqliteEventStore(db).put(event("evt_1"));

@@ -128,6 +128,8 @@ export interface TenantAdminDeps {
   registry: { evict(id: string): void };
   /** Mission rows are deleted with the tenant (their sealed log goes with the tenant directory). */
   missions: { deleteForTenant(tenantId: string): void };
+  /** The tenant's stored webhook events are deleted with it; absent when missions are off. */
+  events?: { deleteForTenant(tenantId: string): void };
   /** Wraps a fresh data key for the tenant (keeps crypto out of the application layer). */
   newWrappedDek(tenantId: string): string;
   dataDir: string;
@@ -466,6 +468,9 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           const missionsDeleted = await step("missions", () =>
             deps.missions.deleteForTenant(tenant.id),
           );
+          const eventsDeleted = await step("webhook_events", () =>
+            deps.events?.deleteForTenant(tenant.id),
+          );
           const revoked = await step("revoke_user", () => user && auth.revokeUser(user.id));
           const evicted = await step("evict", () => registry.evict(tenant.id));
           const whatsappCleanup = worst(
@@ -478,7 +483,7 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
               force: true,
             }),
           );
-          const localCleanup = worst(missionsDeleted, revoked, evicted, removed);
+          const localCleanup = worst(missionsDeleted, eventsDeleted, revoked, evicted, removed);
           return whatsappCleanup === "ok" && localCleanup === "ok"
             ? { whatsappCleanup, localCleanup }
             : { whatsappCleanup, localCleanup, wahaSession: tenant.wahaSession };

@@ -106,6 +106,17 @@ describe("sqliteMissionStore", () => {
     expect(store.get("t2", other.id)).not.toBeNull();
   });
 
+  it("deleteMissions removes only the given tenant's given missions", () => {
+    const store = setup();
+    const a = store.create(base);
+    const b = store.create(base);
+    const other = store.create({ ...base, tenantId: "t2" });
+    store.deleteMissions("t1", [a.id, other.id]);
+    expect(store.get("t1", a.id)).toBeNull();
+    expect(store.get("t1", b.id)).not.toBeNull();
+    expect(store.get("t2", other.id)).not.toBeNull();
+  });
+
   it("keeps a tenant's reach-out pause across store instances until it is lifted", () => {
     const db = openAuthDatabase(":memory:");
     const store = createSqliteMissionStore(db);

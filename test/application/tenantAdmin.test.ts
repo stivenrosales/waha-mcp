@@ -13,6 +13,7 @@ import {
   wrapDek,
 } from "../../src/infrastructure/crypto/envelope.js";
 import { createSealedMissionLog } from "../../src/infrastructure/missions/sealedMissionLog.js";
+import { createSqliteEventStore } from "../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { FakeSessionAdmin } from "../fakes/FakeSessionAdmin.js";
@@ -39,6 +40,7 @@ async function setup() {
     tenants,
     auth,
     missions: createSqliteMissionStore(db),
+    events: createSqliteEventStore(db),
     sessions,
     registry: { evict: (id: string) => void evicted.push(id) },
     newWrappedDek: (id: string) => wrapDek(KEK, generateDek(), id),
@@ -313,6 +315,32 @@ describe("delete_tenant", () => {
 
     expect(store.get(tenantId, m.id)).toBeNull();
     expect(fs.existsSync(path.join(dir, "cache.db"))).toBe(false);
+  });
+
+  it("deletes the tenant's webhook events and mission pause, and keeps other tenants'", async () => {
+    const s = await setup();
+    const { tenantId } = await onboard(s);
+    const missions = createSqliteMissionStore(s.db);
+    const events = createSqliteEventStore(s.db);
+    const event = (tenant: string, eventId: string) => ({
+      tenantId: tenant,
+      eventId,
+      kind: "message" as const,
+      receivedAt: "2026-11-17T10:00:00.000Z",
+      payloadSealed: "sealed",
+    });
+    events.put(event(tenantId, "evt_1"));
+    events.put(event(s.adminTenant.id, "evt_2"));
+    missions.setPaused(tenantId, true, "2026-11-17T10:00:00.000Z");
+    missions.setPaused(s.adminTenant.id, true, "2026-11-17T10:00:00.000Z");
+
+    await s.admin.delete(tenantId, "Acme");
+
+    const rows = s.db.prepare("SELECT tenant_id FROM webhook_events").all() as {
+      tenant_id: string;
+    }[];
+    expect(rows.map((r) => r.tenant_id)).toEqual([s.adminTenant.id]);
+    expect(missions.pausedTenants()).toEqual([s.adminTenant.id]);
   });
 
   it("still cleans WAHA and the directory when deleting mission rows fails", async () => {

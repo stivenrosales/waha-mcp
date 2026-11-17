@@ -645,6 +645,9 @@ describe("privacy", () => {
     expect(html).toContain("Anthropic");
     expect(html).toContain("30 días");
     expect(html).toContain("El administrador no accede al contenido de las misiones");
+    // Honest about the two exceptions: suspended accounts, and metadata without encryption.
+    expect(html).toContain("Si tu cuenta está suspendida, se guardan hasta que la reactiven");
+    expect(html).toContain("se guardan sin ese cifrado");
     // The existing sections stay.
     expect(html).toContain("<h2>Qué se guarda</h2>");
     expect(html).toContain("<h2>Cómo salir</h2>");

@@ -116,7 +116,7 @@ export function privacyPage(): string {
 <ul class="steps">
 <li><span>Una copia de tus mensajes y de las transcripciones de tus notas de voz, cifrada con una llave propia de tu cuenta.</span></li>
 <li><span>Tu usuario y tu contraseña; la contraseña solo como hash, nunca en texto.</span></li>
-<li><span>Si usas misiones: las instrucciones, la conversación y los resúmenes de cada misión, cifrados con la misma llave de tu cuenta.</span></li>
+<li><span>Si usas misiones: las instrucciones, la conversación, las preguntas y los resúmenes de cada misión, cifrados con la misma llave de tu cuenta. Los datos de control de cada misión (con qué chat o contacto, fechas, estado y contadores) se guardan sin ese cifrado, igual que los identificadores de chat de tus mensajes.</span></li>
 <li><span>Registros de uso: qué herramienta se usó, cuándo, si funcionó, cuánto costó cada transcripción y cuántos tokens usó y cuánto costó cada llamada al modelo de las misiones. Nunca el contenido de tus mensajes.</span></li>
 </ul>
 <h2>Quién puede verlo</h2>
@@ -129,7 +129,7 @@ export function privacyPage(): string {
 <h2>Misiones</h2>
 <ul class="steps">
 <li><span>Una misión es una conversación que un asistente de IA lleva por ti en un chat de WhatsApp. Para escribir cada respuesta, la conversación de la misión (tus instrucciones y los mensajes de ese chat, incluidos audios transcritos, imágenes y documentos que te envíen) se manda a <strong>OpenRouter</strong>, que la entrega al modelo Claude de <strong>Anthropic</strong> (o, si Anthropic falla, a otro proveedor del mismo modelo).</span></li>
-<li><span>El contenido de cada misión se borra 30 días después de que termina. Si eliminan tu cuenta, se borra en ese momento junto con todo lo demás.</span></li>
+<li><span>El contenido de cada misión y sus datos de control se borran 30 días después de que termina, en una limpieza que corre una vez al día. Si tu cuenta está suspendida, se guardan hasta que la reactiven (entonces se borran en el plazo de un día) o la eliminen. Si eliminan tu cuenta, se borran en ese momento junto con todo lo demás.</span></li>
 <li><span>El administrador no accede al contenido de las misiones: no tiene herramientas para leerlo y se compromete a no hacerlo. Solo ve cuántas llamadas al modelo hizo cada cuenta y cuánto costaron.</span></li>
 </ul>
 <h2>Cómo salir</h2>

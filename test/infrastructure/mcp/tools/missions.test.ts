@@ -168,6 +168,7 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
     ...q,
   });
   return {
+    authDb,
     store,
     log,
     sender,
@@ -371,6 +372,19 @@ describe("mission tools", () => {
     expect(r.text).not.toContain("quiet hours");
     expect(h.log.read(m?.id as string).map((e) => e.kind)).toEqual(["prompt", "spec"]);
     expect(h.wakes).toHaveLength(1);
+  });
+
+  it("keeps no mission content in plaintext in auth.db: closing_message is only a flag", async () => {
+    const h = harness();
+    const input = h.startInput({ closing_message: true });
+    await h.call("start_mission", input);
+    const rows = JSON.stringify(h.authDb.prepare("SELECT * FROM missions").all());
+    for (const text of [input.system_prompt, input.objective, input.done_when])
+      expect(rows).not.toContain(text as string);
+    const row = h.authDb.prepare("SELECT closing_message FROM missions").get() as {
+      closing_message: string | null;
+    };
+    expect(row.closing_message).toBe("yes");
   });
 
   it("marks a chat without prior messages as a new contact", async () => {

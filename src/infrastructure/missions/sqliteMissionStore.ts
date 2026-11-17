@@ -47,7 +47,7 @@ interface Raw {
   llm_calls: number;
   last_agent_at: string | null;
   last_inbound_at: string | null;
-  closing_message: string | null;
+  closing_message: "yes" | null;
   expects_files: number;
   notice_seen: number;
 }

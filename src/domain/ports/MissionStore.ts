@@ -16,7 +16,11 @@ export interface MissionRow {
   llmCalls: number;
   lastAgentAt: string | null;
   lastInboundAt: string | null;
-  closingMessage: string | null;
+  /**
+   * Whether to send a closing line ("yes") or not (null). Only a flag: the agent writes the line
+   * itself, so no owner text is ever stored in this (unencrypted) row.
+   */
+  closingMessage: "yes" | null;
   expectsFiles: boolean;
   noticeSeen: boolean;
 }

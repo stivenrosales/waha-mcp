@@ -983,7 +983,7 @@ describe("mission engine: retention", () => {
   const DAY = 24 * 60 * MIN;
   /** An ended mission (no closing due) with content, `daysAgo` days before the clock. */
   function ended(h: ReturnType<typeof harness>, daysAgo: number): MissionRow {
-    const m = h.start({ nextWakeAt: null, closingMessage: "Le paso esto a Stiven." });
+    const m = h.start({ nextWakeAt: null, closingMessage: "yes" });
     h.missions.update(m.id, {
       state: "cancelled",
       stopReason: null,
@@ -1001,7 +1001,7 @@ describe("mission engine: retention", () => {
     expect(h.log.read(old.id)).toEqual([]);
     expect(h.missions.get(TENANT, old.id)).toBeNull();
     expect(h.log.read(recent.id).length).toBeGreaterThan(0);
-    expect(h.get(recent.id).closingMessage).toBe("Le paso esto a Stiven.");
+    expect(h.get(recent.id).closingMessage).toBe("yes");
     expect(h.log.read(active.id).length).toBeGreaterThan(0);
     expect(h.get(active.id).state).toBe("active");
   });

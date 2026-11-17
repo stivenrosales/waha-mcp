@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import type { MissionEngine } from "./application/missions/engine.js";
-import { composeApp, composeMissionEngine } from "./composition.js";
+import { composeApp, composeMissionEngine, composeMissionPurge } from "./composition.js";
 import { loadConfig } from "./config.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
@@ -32,7 +32,9 @@ async function main(): Promise<void> {
   const store = createAuthStore(authDb);
   const tenants = createSqliteTenantStore(authDb);
   const missions = createSqliteMissionStore(authDb);
-  const events = config.missions ? createSqliteEventStore(authDb) : undefined;
+  // Always opened, also with missions off: the purge and tenant deletion still reach rows left
+  // from a period when missions were on.
+  const events = createSqliteEventStore(authDb);
   const sessions = createWahaSessionAdmin({
     baseUrl: config.wahaApiUrl,
     apiKey: config.wahaApiKey,
@@ -66,16 +68,27 @@ async function main(): Promise<void> {
     store,
     tenants,
     missions,
-    ...(events ? { events } : {}),
+    events,
     onWebhookEvent: () => missionEngine?.wake(),
     missionEngine: () => missionEngine,
     sessions,
     mediaSecret,
     logger,
   });
-  missionEngine = composeMissionEngine({ config, registry, tenants, missions, events, logger });
-  // Migrations are done: process stored events and due missions every 5 s.
-  missionEngine?.start();
+  const purge = composeMissionPurge({ registry, tenants, missions, events, logger });
+  missionEngine = composeMissionEngine({
+    config,
+    registry,
+    tenants,
+    missions,
+    events,
+    logger,
+    purge,
+  });
+  // Migrations are done: process stored events and due missions every 5 s (the engine also runs
+  // the daily retention purge). With missions off, the purge runs on its own.
+  if (missionEngine) missionEngine.start();
+  else purge.start(() => new Date());
 
   const server = serve({ fetch: app.fetch, port: config.port });
 
@@ -109,6 +122,7 @@ async function main(): Promise<void> {
     // No new turn, LLM call or send starts after stop(); the one in flight (LLM call, paced send,
     // logging its sent id) gets up to MISSION_DRAIN_MS before the stores close under it.
     missionEngine?.stop();
+    purge.stop();
     let finished = false;
     const finish = (): void => {
       if (finished) return;

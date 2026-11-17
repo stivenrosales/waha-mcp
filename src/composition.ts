@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Hono } from "hono";
 import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
+import { createMissionPurge, type MissionPurge } from "./application/missions/retention.js";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
 import type { EventStore } from "./domain/ports/EventStore.js";
@@ -188,6 +189,8 @@ export function composeMissionEngine(deps: {
   logger: Logger;
   /** Test seam; defaults to OpenRouter with `config.missions`. */
   llm?: LlmClient;
+  /** The shared retention purge (`composeMissionPurge`); the engine runs it in its tick. */
+  purge?: MissionPurge;
 }): MissionEngine | null {
   const m = deps.config.missions;
   if (!m || !deps.events) return null;
@@ -208,6 +211,30 @@ export function composeMissionEngine(deps: {
     rand: Math.random,
     sleep: async (ms) => {
       await delay(ms);
+    },
+    logger: deps.logger,
+    ...(deps.purge ? { purge: deps.purge } : {}),
+  });
+}
+
+/**
+ * The mission retention purge over the registry. It runs whether missions are on or off: with
+ * the engine it runs in the engine's tick; without it, `main.ts` calls `start()`.
+ */
+export function composeMissionPurge(deps: {
+  registry: Pick<TenantRegistry, "acquire">;
+  tenants: Pick<TenantStore, "listTenants">;
+  missions: MissionStore;
+  events: EventStore | undefined;
+  logger: Logger;
+}): MissionPurge {
+  return createMissionPurge({
+    missions: deps.missions,
+    ...(deps.events ? { events: deps.events } : {}),
+    tenants: deps.tenants,
+    acquireLog: (tenantId) => {
+      const held = deps.registry.acquire(tenantId);
+      return held ? { log: held.runtime.missionLog, release: held.release } : null;
     },
     logger: deps.logger,
   });

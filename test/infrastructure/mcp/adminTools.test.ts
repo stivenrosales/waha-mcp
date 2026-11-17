@@ -20,11 +20,12 @@ const tools = createAdminTools();
 const byName = (n: string) => tools.find((t) => t.name === n);
 
 describe("admin tools", () => {
-  it("exposes the eight tools with the right annotations", () => {
+  it("exposes the nine tools with the right annotations", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "create_invite",
         "delete_tenant",
+        "get_llm_usage",
         "get_tool_usage",
         "get_transcription_usage",
         "list_tenants",

@@ -378,4 +378,123 @@ describe("sqlite tenant store", () => {
       expect(store.toolUsage(RANGE)).toHaveLength(2);
     });
   });
+
+  describe("llm usage", () => {
+    const RANGE = { fromIso: "2026-11-01T00:00:00.000Z", toIso: "2026-11-30T23:59:59.999Z" };
+    const llm = (
+      tenantId: string,
+      at: string,
+      costUsd: number | null,
+      missionId = "m1",
+      kind: "agent" | "triage" = "agent",
+    ) => ({
+      tenantId,
+      missionId,
+      at,
+      model: "anthropic/claude-haiku-5.5",
+      kind,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 50,
+        cacheWriteTokens: 5,
+        costUsd,
+      },
+    });
+
+    it("aggregates per tenant, most expensive first", () => {
+      const { store, tenant } = setup();
+      const b = store.createTenant({
+        displayName: "B",
+        wahaSession: "t_bbbbbbbbbb",
+        wrappedDek: "w",
+      });
+      store.recordLlmUsage(llm(tenant.id, "2026-11-02T10:00:00.000Z", 0.01, "m1"));
+      store.recordLlmUsage(llm(tenant.id, "2026-11-02T10:01:00.000Z", 0.02, "m1", "triage"));
+      store.recordLlmUsage(llm(tenant.id, "2026-11-03T10:00:00.000Z", null, "m2"));
+      store.recordLlmUsage(llm(b.id, "2026-11-04T10:00:00.000Z", 0.5, "m9"));
+      const rows = store.llmUsage(RANGE);
+      expect(rows.map((r) => r.tenantId)).toEqual([b.id, tenant.id]);
+      expect(rows[1]).toMatchObject({
+        tenantId: tenant.id,
+        displayName: "Acme",
+        calls: 3,
+        missions: 2,
+        inputTokens: 300,
+        outputTokens: 60,
+        cacheReadTokens: 150,
+        rowsWithoutCost: 1,
+      });
+      expect(rows[1]?.costUsd).toBeCloseTo(0.03, 10);
+      expect(rows[0]).toMatchObject({
+        displayName: "B",
+        calls: 1,
+        missions: 1,
+        rowsWithoutCost: 0,
+      });
+    });
+
+    it("filters by inclusive range bounds and tenant", () => {
+      const { store, tenant } = setup();
+      store.recordLlmUsage(llm(tenant.id, "2026-10-31T23:59:59.999Z", 1));
+      store.recordLlmUsage(llm(tenant.id, RANGE.fromIso, 0.1));
+      store.recordLlmUsage(llm(tenant.id, RANGE.toIso, 0.2));
+      store.recordLlmUsage(llm(tenant.id, "2026-12-01T00:00:00.000Z", 1));
+      store.recordLlmUsage(llm("other", "2026-11-10T00:00:00.000Z", 0.5));
+      const one = store.llmUsage({ ...RANGE, tenantId: tenant.id });
+      expect(one).toHaveLength(1);
+      expect(one[0]?.calls).toBe(2);
+      expect(one[0]?.costUsd).toBeCloseTo(0.3, 10);
+      expect(store.llmUsage(RANGE)).toHaveLength(2);
+    });
+
+    it("llmSpendUsd ignores null costs, other tenants and rows outside the range", () => {
+      const { store, tenant } = setup();
+      store.recordLlmUsage(llm(tenant.id, "2026-11-02T10:00:00.000Z", 0.25));
+      store.recordLlmUsage(llm(tenant.id, "2026-11-02T11:00:00.000Z", null));
+      store.recordLlmUsage(llm(tenant.id, "2026-11-03T10:00:00.000Z", 0.5, "m2", "triage"));
+      store.recordLlmUsage(llm(tenant.id, "2026-12-01T00:00:00.000Z", 9));
+      store.recordLlmUsage(llm("other", "2026-11-02T10:00:00.000Z", 7));
+      expect(store.llmSpendUsd({ tenantId: tenant.id, ...RANGE })).toBeCloseTo(0.75, 10);
+      expect(store.llmSpendUsd({ tenantId: "nobody", ...RANGE })).toBe(0);
+    });
+
+    it("keeps usage after deleteTenant, with displayName null", () => {
+      const { store, tenant } = setup();
+      store.recordLlmUsage(llm(tenant.id, "2026-11-02T10:00:00.000Z", 0.04));
+      store.deleteTenant(tenant.id);
+      expect(store.llmUsage(RANGE)).toMatchObject([
+        { tenantId: tenant.id, displayName: null, calls: 1 },
+      ]);
+      expect(store.llmSpendUsd({ tenantId: tenant.id, ...RANGE })).toBeCloseTo(0.04, 10);
+    });
+
+    it("rejects an unknown kind and stores no content", () => {
+      const { store, tenant, db } = setup();
+      expect(() =>
+        store.recordLlmUsage({ ...llm(tenant.id, RANGE.fromIso, 0.1), kind: "other" as "agent" }),
+      ).toThrow();
+      const cols = (db.prepare("PRAGMA table_info(llm_usage)").all() as { name: string }[]).map(
+        (c) => c.name,
+      );
+      expect(cols).toEqual([
+        "id",
+        "tenant_id",
+        "mission_id",
+        "at",
+        "model",
+        "kind",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "cost_usd",
+      ]);
+    });
+
+    it("returns nothing for an empty range", () => {
+      const { store } = setup();
+      expect(store.llmUsage(RANGE)).toEqual([]);
+    });
+  });
 });

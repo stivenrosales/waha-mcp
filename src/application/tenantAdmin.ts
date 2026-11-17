@@ -40,6 +40,27 @@ export interface TranscriptionUsageReport {
   total: UsageTotals;
 }
 
+export interface LlmUsageTotals {
+  calls: number;
+  /** Distinct missions; a mission belongs to one tenant, so tenant counts add up. */
+  missions: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  /** Calls whose provider reported no cost: `costUsd` does not include them. */
+  rowsWithoutCost: number;
+}
+
+export interface LlmUsageReport {
+  /** ISO instants, both inclusive. */
+  from: string;
+  to: string;
+  /** Most expensive first; `displayName` is null for a tenant deleted since. */
+  tenants: Array<{ id: string; displayName: string | null } & LlmUsageTotals>;
+  total: LlmUsageTotals;
+}
+
 export interface ToolUsageTotals {
   calls: number;
   /** Calls that ended in an error. */
@@ -94,6 +115,8 @@ export interface TenantAdmin {
     to?: string;
     tenantId?: string;
   }): Promise<TranscriptionUsageReport>;
+  /** Mission LLM calls per tenant; same range rules as `transcriptionUsage`. */
+  llmUsage(q: { from?: string; to?: string; tenantId?: string }): Promise<LlmUsageReport>;
   /** MCP tool calls per tenant and tool; same range rules as `transcriptionUsage`. */
   toolUsage(q: { from?: string; to?: string; tenantId?: string }): Promise<ToolUsageReport>;
 }
@@ -246,6 +269,39 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           displayName: tenants.getTenant(tenantId)?.displayName ?? null,
           ...totals,
         })),
+        total,
+      };
+    },
+
+    async llmUsage(q) {
+      const { from, to } = usageRange(q);
+      const rows = tenants.llmUsage({
+        fromIso: from,
+        toIso: to,
+        ...(q.tenantId ? { tenantId: q.tenantId } : {}),
+      });
+      const total: LlmUsageTotals = {
+        calls: 0,
+        missions: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        costUsd: 0,
+        rowsWithoutCost: 0,
+      };
+      for (const r of rows) {
+        total.calls += r.calls;
+        total.missions += r.missions;
+        total.inputTokens += r.inputTokens;
+        total.outputTokens += r.outputTokens;
+        total.cacheReadTokens += r.cacheReadTokens;
+        total.costUsd += r.costUsd;
+        total.rowsWithoutCost += r.rowsWithoutCost;
+      }
+      return {
+        from,
+        to,
+        tenants: rows.map(({ tenantId, ...totals }) => ({ id: tenantId, ...totals })),
         total,
       };
     },

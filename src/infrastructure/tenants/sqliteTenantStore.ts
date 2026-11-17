@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   LinkKind,
+  LlmUsageRow,
   Role,
   Tenant,
   TenantStatus,
@@ -48,6 +49,21 @@ CREATE TABLE IF NOT EXISTS transcription_usage (
   cost_usd REAL
 );
 CREATE INDEX IF NOT EXISTS transcription_usage_at ON transcription_usage (at, tenant_id);
+-- Same accounting rule: no foreign key. Tokens and cost of mission LLM calls, never content.
+CREATE TABLE IF NOT EXISTS llm_usage (
+  id INTEGER PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  mission_id TEXT NOT NULL,
+  at TEXT NOT NULL,
+  model TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('agent', 'triage')),
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  cache_read_tokens INTEGER NOT NULL,
+  cache_write_tokens INTEGER NOT NULL,
+  cost_usd REAL
+);
+CREATE INDEX IF NOT EXISTS llm_usage_at ON llm_usage (at, tenant_id);
 -- Same accounting rule: no foreign key. Only the tool name, outcome and duration.
 CREATE TABLE IF NOT EXISTS tool_calls (
   id INTEGER PRIMARY KEY,
@@ -159,6 +175,71 @@ export function createSqliteTenantStore(
           tenantId: r.tenant_id,
           count: Number(r.count),
           seconds: Number(r.seconds),
+          costUsd: Number(r.cost),
+          rowsWithoutCost: Number(r.without_cost),
+        }),
+      );
+    },
+
+    recordLlmUsage({ tenantId, missionId, at, model, kind, usage }) {
+      db.prepare(
+        `INSERT INTO llm_usage (tenant_id, mission_id, at, model, kind, input_tokens, output_tokens,
+           cache_read_tokens, cache_write_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        tenantId,
+        missionId,
+        at,
+        model,
+        kind,
+        usage.inputTokens,
+        usage.outputTokens,
+        usage.cacheReadTokens,
+        usage.cacheWriteTokens,
+        usage.costUsd,
+      );
+    },
+
+    llmSpendUsd({ tenantId, fromIso, toIso }) {
+      const row = db
+        .prepare(
+          `SELECT COALESCE(SUM(cost_usd), 0) AS cost FROM llm_usage
+           WHERE tenant_id = ? AND at >= ? AND at <= ?`,
+        )
+        .get(tenantId, fromIso, toIso) as { cost: number };
+      return Number(row.cost);
+    },
+
+    llmUsage({ fromIso, toIso, tenantId }) {
+      const rows = db
+        .prepare(
+          `SELECT u.tenant_id, t.display_name, COUNT(*) AS calls,
+             COUNT(DISTINCT u.mission_id) AS missions, SUM(u.input_tokens) AS input,
+             SUM(u.output_tokens) AS output, SUM(u.cache_read_tokens) AS cache_read,
+             COALESCE(SUM(u.cost_usd), 0) AS cost, COUNT(*) - COUNT(u.cost_usd) AS without_cost
+           FROM llm_usage u LEFT JOIN tenants t ON t.id = u.tenant_id
+           WHERE u.at >= ? AND u.at <= ? AND (? IS NULL OR u.tenant_id = ?)
+           GROUP BY u.tenant_id ORDER BY cost DESC, u.tenant_id`,
+        )
+        .all(fromIso, toIso, tenantId ?? null, tenantId ?? null) as {
+        tenant_id: string;
+        display_name: string | null;
+        calls: number;
+        missions: number;
+        input: number;
+        output: number;
+        cache_read: number;
+        cost: number;
+        without_cost: number;
+      }[];
+      return rows.map(
+        (r): LlmUsageRow => ({
+          tenantId: r.tenant_id,
+          displayName: r.display_name ?? null,
+          calls: Number(r.calls),
+          missions: Number(r.missions),
+          inputTokens: Number(r.input),
+          outputTokens: Number(r.output),
+          cacheReadTokens: Number(r.cache_read),
           costUsd: Number(r.cost),
           rowsWithoutCost: Number(r.without_cost),
         }),

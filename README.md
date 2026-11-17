@@ -143,6 +143,7 @@ Admin tools, listed only for the admin (members never see them):
 | `list_tenants`            | Every tenant with its status, WhatsApp connection state, creation date and last login. No message data.                                                                      |
 | `get_transcription_usage` | Transcription spend per tenant for a range (default: the current month): count, audio seconds and USD cost, plus the total. See [transcription usage](#transcription-usage). |
 | `get_tool_usage`          | Tool calls per tenant for a range (default: the current month): calls and errors per tool and the last call, plus the total. See [tool usage](#tool-usage).                  |
+| `get_llm_usage`           | Mission LLM spend per tenant for a range (default: the current month): calls, missions, input/output/cached tokens and USD cost, plus the total. Usage rows hold no content. |
 | `create_invite`           | New tenant + invite link; with `tenant_id`, a new link for a tenant that has not signed up yet.                                                                              |
 | `reset_password`          | Single-use password reset link (72 hours) for a tenant's user.                                                                                                               |
 | `revoke_tenant`           | Blocks a tenant: its tokens stop working at once and its links answer 404. Data is kept.                                                                                     |

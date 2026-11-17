@@ -404,6 +404,7 @@ for (const cache of [false, true])
       const adminOnly = [
         "create_invite",
         "delete_tenant",
+        "get_llm_usage",
         "get_tool_usage",
         "get_transcription_usage",
         "list_tenants",

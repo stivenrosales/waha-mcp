@@ -1,3 +1,5 @@
+import type { LlmUsage } from "./LlmClient.js";
+
 export type TenantStatus = "invited" | "pairing" | "active" | "revoked";
 export type Role = "admin" | "member";
 export type LinkKind = "invite" | "reset";
@@ -26,6 +28,22 @@ export interface TranscriptionUsageRow {
   seconds: number;
   costUsd: number;
   /** Transcriptions whose provider reported no cost: `costUsd` does not include them. */
+  rowsWithoutCost: number;
+}
+
+/** One tenant's mission LLM calls in a range (sums skip unknown costs). */
+export interface LlmUsageRow {
+  tenantId: string;
+  /** Null for a tenant deleted since. */
+  displayName: string | null;
+  calls: number;
+  /** Distinct missions that made those calls. */
+  missions: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  /** Calls whose provider reported no cost: `costUsd` does not include them. */
   rowsWithoutCost: number;
 }
 
@@ -90,6 +108,22 @@ export interface TenantStore {
     toIso: string;
     tenantId?: string;
   }): TranscriptionUsageRow[];
+  /**
+   * One mission LLM call: tokens and cost only, never prompts or replies. Kept after the
+   * tenant is deleted (internal accounting).
+   */
+  recordLlmUsage(q: {
+    tenantId: string;
+    missionId: string;
+    at: string;
+    model: string;
+    kind: "agent" | "triage";
+    usage: LlmUsage;
+  }): void;
+  /** The tenant's known LLM spend in USD (calls without cost count as 0); both ISO bounds inclusive. */
+  llmSpendUsd(q: { tenantId: string; fromIso: string; toIso: string }): number;
+  /** Per tenant, most expensive first; both ISO bounds inclusive. */
+  llmUsage(q: { fromIso: string; toIso: string; tenantId?: string }): LlmUsageRow[];
   /**
    * One MCP tool call: its name, "ok" or the error's name, and its duration. Never arguments
    * or results. Kept after the tenant is deleted (internal accounting).

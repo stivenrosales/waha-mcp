@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { NormalizedMessage } from "../../domain/message.js";
+import { isDirectChatId } from "../groups.js";
 
 /** Largest file attached to the agent as a content block (the provider's image limit is 5 MB). */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -29,9 +30,10 @@ function normalizeJid(jid: string): string {
 }
 
 /**
- * Every id this message's chat may go by (spike §3.13): `from` / `Info.Chat`, the phone JID
- * behind a `@lid` (`SenderAlt` for the contact, `RecipientAlt` for our own sends, else WAHA's
- * lid lookup).
+ * Every id this message's chat may go by (spike §3.13): `from` / `Info.Chat`, plus, for a direct
+ * chat only, the phone JID behind a `@lid` (`SenderAlt` for the contact, `RecipientAlt` for our
+ * own sends, else WAHA's lid lookup). A group, Status or channel message keeps only its chat id:
+ * its sender's alternate ids name the sender, not the chat.
  */
 export async function chatIdsOf(
   payload: Record<string, unknown>,
@@ -40,10 +42,14 @@ export async function chatIdsOf(
   const info = isRecord(payload._data) && isRecord(payload._data.Info) ? payload._data.Info : {};
   const fromMe = payload.fromMe === true || info.IsFromMe === true;
   const ids = new Set<string>();
-  for (const v of [payload.from, info.Chat, fromMe ? info.RecipientAlt : info.SenderAlt]) {
+  const add = (v: unknown): void => {
     const id = str(v);
     if (id?.includes("@")) ids.add(normalizeJid(id));
-  }
+  };
+  add(payload.from);
+  add(info.Chat);
+  if (ids.size === 0 || [...ids].some((id) => !isDirectChatId(id))) return ids;
+  add(fromMe ? info.RecipientAlt : info.SenderAlt);
   for (const id of [...ids]) {
     if (!id.endsWith("@lid")) continue;
     try {

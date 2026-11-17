@@ -487,6 +487,34 @@ describe("mission engine: inbound messages", () => {
     expect(h.get(m.id).lastInboundAt).toBe(new Date(T0.getTime() + 2 * SEC).toISOString());
   });
 
+  it("ignores the contact's group and Status messages (only the direct chat feeds the mission)", async () => {
+    const h = harness();
+    const m = await opened(h);
+    const before = h.entries(m.id).length;
+    h.message({
+      from: "120363000000000001@g.us",
+      senderAlt: "51911111111@s.whatsapp.net",
+      text: "en el grupo",
+    });
+    h.message({ from: "120363000000000002@g.us", senderAlt: LID, text: "otro grupo" });
+    h.message({
+      from: "status@broadcast",
+      senderAlt: "51911111111:3@s.whatsapp.net",
+      text: "mi estado",
+    });
+    await h.tickAt(1 * SEC);
+    await h.tickAt(30 * SEC);
+    expect(h.llm.requests).toHaveLength(1);
+    expect(h.contactSends()).toHaveLength(1);
+    expect(h.entries(m.id)).toHaveLength(before);
+    expect(h.get(m.id).lastInboundAt).toBeNull();
+    expect(h.get(m.id).state).toBe("active");
+
+    h.message({ text: "hola" });
+    await h.tickAt(31 * SEC);
+    expect(h.get(m.id).lastInboundAt).not.toBeNull();
+  });
+
   it("ignores the echo of its own sends", async () => {
     const h = harness();
     const m = await opened(h);

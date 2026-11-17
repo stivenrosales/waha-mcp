@@ -49,7 +49,8 @@ export async function getGroupInfo(
 // --- direct chats ---------------------------------------------------------------
 
 const DIRECT_SUFFIXES = ["@c.us", "@s.whatsapp.net", "@lid"];
-const isDirectChatId = (id: string) => DIRECT_SUFFIXES.some((s) => id.endsWith(s));
+/** True for a 1:1 chat id (phone JID or `@lid`); false for groups, Status, channels. */
+export const isDirectChatId = (id: string) => DIRECT_SUFFIXES.some((s) => id.endsWith(s));
 
 const CHAT_PAGE = 500;
 const CONTACT_PAGE = 5000;

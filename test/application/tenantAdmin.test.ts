@@ -110,6 +110,21 @@ describe("create_invite", () => {
     expect(s.logs).toContain(`admin create_invite tenant=${out.tenantId} outcome=ok`);
   });
 
+  it("creates the session with the missions webhook only when one is configured", async () => {
+    const off = await setup();
+    const a = await off.admin.createInvite({ displayName: "Acme" });
+    const sessionA = off.tenants.getTenant(a.tenantId)?.wahaSession as string;
+    expect(off.sessions.createdWith.get(sessionA)).toBeUndefined();
+
+    const s = await setup();
+    const webhook = { url: "https://mcp.example.com/webhooks/waha", secret: "whsec-1" };
+    const admin = createTenantAdmin({ ...s.deps, webhook });
+    const b = await admin.createInvite({ displayName: "Beta" });
+    const sessionB = s.tenants.getTenant(b.tenantId)?.wahaSession as string;
+    expect(s.sessions.createdWith.get(sessionB)).toEqual({ webhook });
+    expect(s.logs.join("\n")).not.toContain("whsec-1");
+  });
+
   it("re-issue invalidates the previous link and keeps one WAHA session", async () => {
     const s = await setup();
     const first = await s.admin.createInvite({ displayName: "Acme" });

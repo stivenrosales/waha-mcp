@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { InvalidInputError } from "../domain/errors.js";
-import type { SessionAdmin, SessionState } from "../domain/ports/SessionAdmin.js";
+import type { SessionAdmin, SessionState, WebhookTarget } from "../domain/ports/SessionAdmin.js";
 import type { TenantStatus, TenantStore } from "../domain/ports/TenantStore.js";
 import { localMidnight, parseRange, zoneFormatter, zoneParts } from "./dates.js";
 
@@ -135,6 +135,8 @@ export interface TenantAdminDeps {
   logger: { info(message: string): void };
   /** IANA zone for usage ranges (`TIMEZONE`); defaults to UTC. */
   timezone?: string;
+  /** The missions webhook new sessions are created with; absent when missions are off. */
+  webhook?: WebhookTarget;
   /** Injectable clock for tests. */
   now?: () => number;
 }
@@ -235,7 +237,8 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           id = tenant.id;
           try {
             tenants.setWrappedDek(tenant.id, deps.newWrappedDek(tenant.id));
-            await sessions.create(wahaSession);
+            if (deps.webhook) await sessions.create(wahaSession, { webhook: deps.webhook });
+            else await sessions.create(wahaSession);
           } catch (error) {
             tenants.deleteTenant(tenant.id);
             // The session may exist even if create threw (e.g. a timeout); never mask `error`.

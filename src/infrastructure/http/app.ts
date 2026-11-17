@@ -34,6 +34,8 @@ export interface CreateAppDeps {
   mcpHandler: (req: Request, opts: { authInfo: AuthInfo }) => Promise<Response>;
   /** Resolves the tenant named by a signed link to its runtime. */
   registry: Pick<TenantRegistry, "acquire">;
+  /** `POST /webhooks/waha`; only when missions are on (otherwise that path is a 404). */
+  webhooks?: Hono | null;
 }
 
 /**
@@ -44,6 +46,7 @@ export interface CreateAppDeps {
  * - `ALL /mcp`: behind the bearer guard; the verified client is passed as `authInfo`.
  * - `GET /media/:token`: signed, short-lived media links.
  * - `GET|PUT|POST /upload/:token`: signed, single-use upload links.
+ * - `POST /webhooks/waha`: WAHA's signed events, mounted only when missions are on.
  *
  * Links carry their tenant id: the route acquires that tenant's runtime, whose handler verifies
  * the signature with that tenant's keys, and releases it when the response body is done.
@@ -82,6 +85,7 @@ export function createApp(deps: CreateAppDeps): Hono {
   });
   app.route("/", deps.oauth);
   app.route("/", deps.onboarding);
+  if (deps.webhooks) app.route("/", deps.webhooks);
   app.all("/mcp", deps.guard, (c) => deps.mcpHandler(c.req.raw, { authInfo: c.get("auth") }));
   app.get("/media/:token", (c) => {
     const token = c.req.param("token");

@@ -1,0 +1,26 @@
+/** What a stored WAHA webhook event is about: `message.any` or `session.status`. */
+export type WebhookEventKind = "message" | "session.status";
+
+/** One received webhook event waiting for (or already handled by) the mission engine. */
+export interface StoredEvent {
+  /** Store-assigned, increasing in arrival order. */
+  id: number;
+  tenantId: string;
+  /** WAHA's envelope id (`evt_…`), unique per tenant. */
+  eventId: string;
+  kind: WebhookEventKind;
+  /** ISO instant the server received it. */
+  receivedAt: string;
+  /** The raw webhook body, sealed with the tenant's cipher (AAD `webhook:<tenantId>:<eventId>`). */
+  payloadSealed: string;
+}
+
+/** Durable inbox of WAHA webhook events (the mission engine consumes it). */
+export interface EventStore {
+  /** "duplicate" (and no change) when this tenant already has an event with this id. */
+  put(q: Omit<StoredEvent, "id">): "stored" | "duplicate";
+  /** Events not yet marked done, oldest first. */
+  pending(limit: number): StoredEvent[];
+  /** Marks the event handled and drops its sealed payload; the id is kept for dedupe. */
+  markDone(id: number): void;
+}

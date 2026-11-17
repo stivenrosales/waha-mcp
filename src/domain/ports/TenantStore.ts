@@ -61,6 +61,8 @@ export interface ToolUsageRow {
 export interface TenantStore {
   createTenant(q: { displayName: string; wahaSession: string; wrappedDek: string }): Tenant;
   getTenant(id: string): Tenant | null;
+  /** The tenant whose WAHA session this is (any status); null when none. */
+  getTenantBySession(session: string): Tenant | null;
   listTenants(): Tenant[];
   getWrappedDek(id: string): string | null;
   setWrappedDek(id: string, wrapped: string): void;

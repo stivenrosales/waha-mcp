@@ -5,6 +5,7 @@ import { composeApp } from "./composition.js";
 import { loadConfig } from "./config.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
+import { createSqliteEventStore } from "./infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "./infrastructure/missions/sqliteMissionStore.js";
 import { migrateToMultiTenant } from "./infrastructure/tenants/migrate.js";
 import { createSqliteTenantStore } from "./infrastructure/tenants/sqliteTenantStore.js";
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   const store = createAuthStore(authDb);
   const tenants = createSqliteTenantStore(authDb);
   const missions = createSqliteMissionStore(authDb);
+  const events = config.missions ? createSqliteEventStore(authDb) : undefined;
   const sessions = createWahaSessionAdmin({
     baseUrl: config.wahaApiUrl,
     apiKey: config.wahaApiKey,
@@ -52,11 +54,12 @@ async function main(): Promise<void> {
   if (store.syncApiKey(config.wahaApiKey)) logger.info("API key changed — all sessions revoked");
 
   const mediaSecret = loadOrCreateMediaSecret(config.dataDir);
-  const { app, registry, toolCount } = composeApp({
+  const { app, registry, toolCount, configureWebhooks } = composeApp({
     config,
     store,
     tenants,
     missions,
+    ...(events ? { events } : {}),
     sessions,
     mediaSecret,
     logger,
@@ -82,6 +85,9 @@ async function main(): Promise<void> {
   if (engine !== "GOWS" && !engine.startsWith("unknown")) {
     console.warn(`Engine ${engine} is not supported (GOWS only); tools will report this.`);
   }
+  // Missions: point active tenants' sessions at /webhooks/waha in the background (best effort,
+  // one tenant at a time, never fatal; a no-op when missions are off).
+  void configureWebhooks().catch(() => {});
 
   let stopping = false;
   const shutdown = (signal: string): void => {

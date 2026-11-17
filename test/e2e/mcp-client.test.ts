@@ -269,6 +269,7 @@ function setup(
       maxBytes: b.config.uploadMaxBytes,
     }),
     missionLog: {} as TenantRuntime["missionLog"],
+    cipher: {} as TenantRuntime["cipher"],
     close() {},
   });
   const { app } = composeApp({

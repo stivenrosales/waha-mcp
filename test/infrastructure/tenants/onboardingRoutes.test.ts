@@ -14,7 +14,7 @@ const PRIVACY_LINK = '<a href="/privacidad">Cómo se tratan tus datos</a>';
 const USED = "Este enlace ya se usó.";
 const TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
 
-function setup() {
+function setup(opts: { webhook?: { url: string; secret: string } } = {}) {
   let t = 1_800_000_000_000;
   const now = () => t;
   const db = openAuthDatabase(":memory:");
@@ -31,6 +31,7 @@ function setup() {
     publicBaseUrl: BASE,
     limiter: createLoginLimiter({ now }),
     now,
+    ...(opts.webhook ? { webhook: opts.webhook } : {}),
   });
 
   // Every response body and header, to prove secrets never leak.
@@ -350,6 +351,43 @@ describe("pair", () => {
       expect(await ctx.sessions.state(tenant.wahaSession)).toBe("STARTING");
     });
   }
+
+  it("pair configures the missions webhook before starting a session, when missions are on", async () => {
+    const webhook = { url: `${BASE}/webhooks/waha`, secret: "whsec-1" };
+    for (const [stopped, action] of [
+      ["STOPPED", "start"],
+      ["FAILED", "restart"],
+    ] as const) {
+      const ctx = setup({ webhook });
+      const { tenant, cookie } = await ctx.onboarded();
+      ctx.sessions.setState(tenant.wahaSession, stopped);
+      expect((await ctx.pairPage(cookie)).status).toBe(200);
+      const calls = ctx.sessions.calls.filter((c) => !c.startsWith("state:"));
+      expect(calls).toEqual([
+        `configureWebhook:${tenant.wahaSession}`,
+        `${action}:${tenant.wahaSession}`,
+      ]);
+      expect(ctx.sessions.webhooks.get(tenant.wahaSession)).toEqual(webhook);
+    }
+    // Missions off: nothing to configure.
+    const off = setup();
+    const { tenant, cookie } = await off.onboarded();
+    off.sessions.setState(tenant.wahaSession, "STOPPED");
+    await off.pairPage(cookie);
+    expect(off.sessions.calls).not.toContain(`configureWebhook:${tenant.wahaSession}`);
+  });
+
+  it("pair still starts the session when configuring the webhook fails", async () => {
+    const ctx = setup({ webhook: { url: `${BASE}/webhooks/waha`, secret: "whsec-1" } });
+    ctx.sessions.configureWebhook = async () => {
+      throw new Error("WAHA down");
+    };
+    const { tenant, cookie } = await ctx.onboarded();
+    ctx.sessions.setState(tenant.wahaSession, "STOPPED");
+    const res = await ctx.pairPage(cookie);
+    expect(res.status).toBe(200);
+    expect(ctx.sessions.calls).toContain(`start:${tenant.wahaSession}`);
+  });
 
   it("pair does not restart a session that is already starting", async () => {
     const ctx = setup();

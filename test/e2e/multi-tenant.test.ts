@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { DISABLED_TRANSCRIPTION } from "../../src/application/transcripts.js";
 import { composeApp } from "../../src/composition.js";
 import { type Config, loadConfig } from "../../src/config.js";
+import type { EventStore } from "../../src/domain/ports/EventStore.js";
 import type { TenantStore } from "../../src/domain/ports/TenantStore.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
 import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
@@ -16,6 +17,7 @@ import { createTenantCipher } from "../../src/infrastructure/crypto/envelope.js"
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { MEDIA_GONE } from "../../src/infrastructure/media/resolveMedia.js";
 import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
+import { createSqliteEventStore } from "../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import { migrateToMultiTenant } from "../../src/infrastructure/tenants/migrate.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
@@ -155,6 +157,8 @@ const configFor = (dataDir: string, extra: Record<string, string> = {}): Config 
 
 interface World {
   app: Hono;
+  events: EventStore;
+  configureWebhooks: () => Promise<void>;
   tenants: TenantStore;
   sessions: FakeSessionAdmin;
   registry: TenantRegistry;
@@ -209,6 +213,7 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
         maxBytes: b.config.uploadMaxBytes,
       }),
       missionLog: {} as TenantRuntime["missionLog"],
+      cipher: createTenantCipher(b.dek, b.tenant.id),
       close() {},
     };
   };
@@ -308,9 +313,9 @@ const rawMcp = (app: Hono, token: string) =>
   });
 
 /** Admin tenant #1 seeded by the real migration (FakeSessionAdmin), then the composed app. */
-async function world(): Promise<World> {
+async function world(extra: Record<string, string> = {}): Promise<World> {
   const dataDir = scratch();
-  const config = configFor(dataDir, { CACHE_ENABLED: "false" });
+  const config = configFor(dataDir, { CACHE_ENABLED: "false", ...extra });
   const authDb = openAuthDatabase(join(dataDir, "auth.db"));
   const store = createAuthStore(authDb);
   const tenants = createSqliteTenantStore(authDb);
@@ -328,11 +333,13 @@ async function world(): Promise<World> {
     logger: { info: () => {} },
   });
   const fakes = new Map<string, Fakes>();
-  const { app, registry } = composeApp({
+  const events = createSqliteEventStore(authDb);
+  const { app, registry, configureWebhooks } = composeApp({
     config,
     store,
     tenants,
     missions: createSqliteMissionStore(authDb),
+    events,
     sessions,
     mediaSecret: MEDIA_SECRET,
     logger: { info: () => {} },
@@ -346,7 +353,7 @@ async function world(): Promise<World> {
   const login = await oauthLogin(app, "admin", ADMIN_PASSWORD);
   expect(login.status).toBe(302);
   const admin = await connect(app, login.token as string);
-  return { app, tenants, sessions, registry, fakes, admin };
+  return { app, events, configureWebhooks, tenants, sessions, registry, fakes, admin };
 }
 
 interface Member {
@@ -692,6 +699,66 @@ describe("e2e: tenant isolation through the composed app", () => {
     // A keeps working.
     expect((await call(alice.client, "list_chats")).isError).toBeFalsy();
     expect((await request(w.app, aliceLink)).status).toBe(200);
+  });
+});
+
+describe("e2e: WAHA webhooks for missions", () => {
+  const SECRET = "whsec-e2e-secret";
+  const MISSIONS = { OPENROUTER_API_KEY: "or-key", WAHA_WEBHOOK_SECRET: SECRET };
+  const signed = (body: string, key = SECRET): RequestInit => ({
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-webhook-hmac": createHmac("sha512", key).update(body).digest("hex"),
+    },
+    body,
+  });
+  const envelope = (adminTenantId: string) =>
+    JSON.stringify({
+      id: "evt_e2e_1",
+      timestamp: Date.now(),
+      event: "message.any",
+      session: "default",
+      metadata: { tenant: adminTenantId },
+      payload: { id: "m1", from: A_CHAT, fromMe: false, source: "app", body: "hola" },
+    });
+
+  it("without missions the route is not mounted (404) and the app works as before", async () => {
+    const w = await world();
+    const adminId = w.tenants.getAdmin()?.tenantId as string;
+    const res = await request(w.app, "/webhooks/waha", signed(envelope(adminId)));
+    expect(res.status).toBe(404);
+    expect(w.events.pending(10)).toHaveLength(0);
+    await w.configureWebhooks();
+    expect(w.sessions.calls.some((c) => c.startsWith("configureWebhook:"))).toBe(false);
+    expect((await request(w.app, "/health")).status).toBe(200);
+    const chats = await call(w.admin, "list_chats");
+    expect(chats.isError).toBeFalsy();
+  });
+
+  it("with missions a signed event for an active tenant is stored once; startup configures WAHA", async () => {
+    const w = await world(MISSIONS);
+    const adminId = w.tenants.getAdmin()?.tenantId as string;
+    const body = envelope(adminId);
+    expect((await request(w.app, "/webhooks/waha", signed(body, "wrong"))).status).toBe(401);
+    expect((await request(w.app, "/webhooks/waha", signed(body))).status).toBe(200);
+    expect((await request(w.app, "/webhooks/waha", signed(body))).status).toBe(200);
+    const stored = w.events.pending(10);
+    expect(stored.map((e) => [e.tenantId, e.eventId, e.kind])).toEqual([
+      [adminId, "evt_e2e_1", "message"],
+    ]);
+    expect(stored[0]?.payloadSealed).not.toContain("hola");
+
+    await w.configureWebhooks();
+    expect(w.sessions.calls.filter((c) => c.startsWith("configureWebhook:"))).toEqual([
+      "configureWebhook:default",
+    ]);
+    expect(w.sessions.webhooks.get("default")).toEqual({
+      url: `${BASE}/webhooks/waha`,
+      secret: SECRET,
+    });
+    // The rest of the app is unaffected.
+    expect((await call(w.admin, "list_chats")).isError).toBeFalsy();
   });
 });
 

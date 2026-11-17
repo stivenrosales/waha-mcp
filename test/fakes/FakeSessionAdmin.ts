@@ -1,4 +1,8 @@
-import type { SessionAdmin, SessionState } from "../../src/domain/ports/SessionAdmin.js";
+import type {
+  SessionAdmin,
+  SessionState,
+  WebhookTarget,
+} from "../../src/domain/ports/SessionAdmin.js";
 
 interface FakeSession {
   state: SessionState;
@@ -11,6 +15,10 @@ export class FakeSessionAdmin implements SessionAdmin {
   readonly sessions = new Map<string, FakeSession>();
   /** Every call as `method:name`, in order. */
   readonly calls: string[] = [];
+  /** The options each session was created with (only when some were given). */
+  readonly createdWith = new Map<string, { webhook?: WebhookTarget }>();
+  /** The missions webhook configured per session. */
+  readonly webhooks = new Map<string, WebhookTarget>();
 
   setState(name: string, state: SessionState): void {
     this.ensure(name).state = state;
@@ -29,8 +37,9 @@ export class FakeSessionAdmin implements SessionAdmin {
     return s;
   }
 
-  async create(name: string): Promise<void> {
+  async create(name: string, opts?: { webhook?: WebhookTarget }): Promise<void> {
     this.calls.push(`create:${name}`);
+    if (opts) this.createdWith.set(name, opts);
     const s = this.ensure(name);
     s.state = "STARTING";
   }
@@ -73,5 +82,10 @@ export class FakeSessionAdmin implements SessionAdmin {
   async remove(name: string): Promise<void> {
     this.calls.push(`remove:${name}`);
     this.sessions.delete(name);
+  }
+
+  async configureWebhook(name: string, target: WebhookTarget): Promise<void> {
+    this.calls.push(`configureWebhook:${name}`);
+    this.webhooks.set(name, target);
   }
 }

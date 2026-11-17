@@ -1,5 +1,5 @@
 import { WahaAuthError, WahaUnavailableError } from "../../domain/errors.js";
-import type { SessionAdmin, SessionState } from "../../domain/ports/SessionAdmin.js";
+import type { SessionAdmin, SessionState, WebhookTarget } from "../../domain/ports/SessionAdmin.js";
 
 export interface WahaSessionAdminOptions {
   baseUrl: string;
@@ -20,6 +20,38 @@ const KNOWN_STATES: readonly SessionState[] = [
 const asRecord = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
 
+/** Missions only consume these: `message.any` already carries incoming messages (spike §3.8). */
+const WEBHOOK_EVENTS = ["message.any", "session.status"] as const;
+/**
+ * WAHA's own defaults (spike §2.6), made explicit so the stored config is self-describing:
+ * a constant 2 s delay, 15 attempts (~30 s), which covers a server restart or deploy.
+ */
+const WEBHOOK_RETRIES = { policy: "constant", delaySeconds: 2, attempts: 15 } as const;
+
+/** The session-config webhook entry WAHA expects (spike §2.1). */
+const webhookEntry = (target: WebhookTarget) => ({
+  url: target.url,
+  events: [...WEBHOOK_EVENTS],
+  hmac: { key: target.secret },
+  retries: { ...WEBHOOK_RETRIES },
+  customHeaders: null,
+});
+
+/** Whether WAHA's echo of a webhook entry says the same thing as ours (extra defaults ignored). */
+function sameWebhook(current: unknown, target: WebhookTarget): boolean {
+  const c = asRecord(current);
+  const events = Array.isArray(c.events) ? [...c.events].map(String).sort() : [];
+  const retries = asRecord(c.retries);
+  return (
+    c.url === target.url &&
+    events.join(",") === [...WEBHOOK_EVENTS].sort().join(",") &&
+    asRecord(c.hmac).key === target.secret &&
+    retries.policy === WEBHOOK_RETRIES.policy &&
+    retries.delaySeconds === WEBHOOK_RETRIES.delaySeconds &&
+    retries.attempts === WEBHOOK_RETRIES.attempts
+  );
+}
+
 /**
  * WAHA session administration client (create, status, QR, me, logout, delete).
  * Errors map to domain errors with fixed messages: neither the API key nor the base URL leaks.
@@ -33,7 +65,7 @@ export function createWahaSessionAdmin(opts: WahaSessionAdminOptions): SessionAd
 
   /** One request; the timeout also covers reading the body. Non-2xx responses are returned as-is. */
   async function call(
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     body?: unknown,
   ): Promise<{ status: number; ok: boolean; data: unknown }> {
@@ -86,7 +118,7 @@ export function createWahaSessionAdmin(opts: WahaSessionAdminOptions): SessionAd
 
   /** Throws for failures; statuses in `tolerated` are returned to the caller instead. */
   async function request(
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     o: { body?: unknown; tolerate?: number[] } = {},
   ) {
@@ -103,8 +135,9 @@ export function createWahaSessionAdmin(opts: WahaSessionAdminOptions): SessionAd
   }
 
   return {
-    async create(name) {
-      await request("POST", "/api/sessions", { body: { name, start: true } });
+    async create(name, opts) {
+      const config = opts?.webhook ? { config: { webhooks: [webhookEntry(opts.webhook)] } } : {};
+      await request("POST", "/api/sessions", { body: { name, start: true, ...config } });
     },
     async start(name) {
       await request("POST", `${sessionPath(name)}/start`);
@@ -132,6 +165,20 @@ export function createWahaSessionAdmin(opts: WahaSessionAdminOptions): SessionAd
     },
     async remove(name) {
       await request("DELETE", sessionPath(name), { tolerate: [404] });
+    },
+    async configureWebhook(name, target) {
+      const res = await request("GET", sessionPath(name), { tolerate: [404] });
+      if (!res.ok) throw new WahaUnavailableError("WAHA session not found.");
+      const config = asRecord(asRecord(res.data).config);
+      const current = Array.isArray(config.webhooks) ? (config.webhooks as unknown[]) : [];
+      const ours = current.filter((w) => asRecord(w).url === target.url);
+      if (ours.length === 1 && sameWebhook(ours[0], target)) return;
+      // PUT replaces the whole config and restarts a running session (spike §2.2), so write
+      // only when something changed, and keep every other webhook and setting as it was.
+      const others = current.filter((w) => asRecord(w).url !== target.url);
+      await request("PUT", sessionPath(name), {
+        body: { name, config: { ...config, webhooks: [...others, webhookEntry(target)] } },
+      });
     },
   };
 }

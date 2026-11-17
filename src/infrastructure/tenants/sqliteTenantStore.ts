@@ -295,6 +295,13 @@ export function createSqliteTenantStore(
       return row ? toTenant(row) : null;
     },
 
+    getTenantBySession(session) {
+      const row = db
+        .prepare(`SELECT ${TENANT_COLS} FROM tenants WHERE waha_session = ?`)
+        .get(session) as TenantRow | undefined;
+      return row ? toTenant(row) : null;
+    },
+
     listTenants() {
       const rows = db
         .prepare(`SELECT ${TENANT_COLS} FROM tenants ORDER BY created_at, rowid`)

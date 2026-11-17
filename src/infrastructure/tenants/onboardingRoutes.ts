@@ -3,13 +3,14 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { getCookie } from "hono/cookie";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { SessionAdmin } from "../../domain/ports/SessionAdmin.js";
+import type { SessionAdmin, WebhookTarget } from "../../domain/ports/SessionAdmin.js";
 import type { LinkKind, Tenant, TenantStore, User } from "../../domain/ports/TenantStore.js";
 import { USERNAME_PATTERN, USERNAME_RULE } from "../../domain/username.js";
 import { authenticateLogin } from "../auth/login.js";
 import { HTML_SECURITY_HEADERS, messagePage } from "../auth/loginPage.js";
 import type { LoginLimiter } from "../auth/rateLimit.js";
 import type { AuthStore } from "../auth/store.js";
+import type { Logger } from "../mcp/defineTool.js";
 import {
   invitePage,
   PRIVACY_PATH,
@@ -58,6 +59,9 @@ export function createOnboardingRoutes(deps: {
   publicBaseUrl: string;
   limiter: LoginLimiter;
   now?: () => number;
+  /** The missions webhook a session gets before it is (re)started; absent when missions are off. */
+  webhook?: WebhookTarget;
+  logger?: Logger;
 }): Hono {
   const { tenants, auth, sessions, registry, limiter } = deps;
   const now = deps.now ?? Date.now;
@@ -262,6 +266,20 @@ export function createOnboardingRoutes(deps: {
 
   // --- Pair: link WhatsApp by scanning the session's QR ---
 
+  /**
+   * Best effort, before a (re)start: a stopped session takes its new config without an extra
+   * restart. A failure must not block pairing (startup configures it again); only the tenant id
+   * is logged.
+   */
+  const configureWebhook = async (tenant: Tenant): Promise<void> => {
+    if (!deps.webhook) return;
+    try {
+      await sessions.configureWebhook(tenant.wahaSession, deps.webhook);
+    } catch {
+      deps.logger?.info(`webhook configure tenant=${tenant.id} outcome=failed`);
+    }
+  };
+
   const pairStatus = async (html: Html, user: User, tenant: Tenant): Promise<Response> => {
     const name = tenant.wahaSession;
     try {
@@ -291,11 +309,13 @@ export function createOnboardingRoutes(deps: {
           return html(pairDonePage(`${base}/mcp`));
         }
       } else if (state === "STOPPED") {
+        await configureWebhook(tenant);
         await sessions.start(name);
       } else if (state === "FAILED") {
         // WAHA fails a session whose QR nobody scanned in time (e.g. an invite opened days
         // later). It still counts as running, so only restart (stop + start) revives it;
         // the next refresh shows a fresh QR.
+        await configureWebhook(tenant);
         await sessions.restart(name);
       }
       return html(pairWaitPage("Conectando", "Preparando tu sesión de WhatsApp…"));

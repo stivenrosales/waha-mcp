@@ -2,8 +2,9 @@ import { createHmac } from "node:crypto";
 import type { Hono } from "hono";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
+import type { EventStore } from "./domain/ports/EventStore.js";
 import type { MissionStore } from "./domain/ports/MissionStore.js";
-import type { SessionAdmin } from "./domain/ports/SessionAdmin.js";
+import type { SessionAdmin, WebhookTarget } from "./domain/ports/SessionAdmin.js";
 import type { TenantStore } from "./domain/ports/TenantStore.js";
 import { bearerGuard } from "./infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "./infrastructure/auth/oauth.js";
@@ -19,6 +20,12 @@ import { createTools } from "./infrastructure/mcp/tools/index.js";
 import { createOnboardingRoutes } from "./infrastructure/tenants/onboardingRoutes.js";
 import { createTenantRegistry, type TenantRegistry } from "./infrastructure/tenants/registry.js";
 import type { buildTenantRuntime } from "./infrastructure/tenants/runtime.js";
+import {
+  configureTenantWebhooks,
+  createWahaWebhookRoute,
+  type WahaWebhookDeps,
+  WEBHOOK_PATH,
+} from "./infrastructure/webhooks/wahaWebhook.js";
 
 export interface ComposeDeps {
   config: Config;
@@ -27,6 +34,10 @@ export interface ComposeDeps {
   tenants: TenantStore;
   /** Mission rows, deleted with their tenant. */
   missions: MissionStore;
+  /** The WAHA webhook inbox; required for the webhook route when missions are on. */
+  events?: EventStore;
+  /** Wakes the mission engine when a webhook event is stored. */
+  onWebhookEvent?: WahaWebhookDeps["onEvent"];
   sessions: SessionAdmin;
   mediaSecret: Uint8Array;
   logger: Logger;
@@ -40,6 +51,11 @@ export interface ComposedApp {
   registry: TenantRegistry;
   /** Tools every tenant gets (admin tools excluded). */
   toolCount: number;
+  /**
+   * Points every active tenant's WAHA session at `/webhooks/waha` (missions on), one by one;
+   * never throws. A no-op when missions are off.
+   */
+  configureWebhooks(): Promise<void>;
 }
 
 /**
@@ -50,6 +66,14 @@ export interface ComposedApp {
 export function composeApp(deps: ComposeDeps): ComposedApp {
   const { config, store, tenants, missions, sessions, mediaSecret, logger } = deps;
   const limiter = createLoginLimiter();
+  const missionsOn = config.missions;
+  if (missionsOn && !deps.events) throw new Error("Missions need the webhook event store.");
+  const webhook: WebhookTarget | null = missionsOn
+    ? {
+        url: `${config.publicBaseUrl.replace(/\/+$/, "")}${WEBHOOK_PATH}`,
+        secret: missionsOn.webhookSecret,
+      }
+    : null;
   const registry = createTenantRegistry({
     config,
     tenants,
@@ -69,6 +93,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     publicBaseUrl: config.publicBaseUrl,
     logger,
     timezone: config.timezone,
+    ...(webhook ? { webhook } : {}),
   });
   const tools = createTools();
   const mcp = createMcpServer({
@@ -100,10 +125,26 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       cookieSecret,
       publicBaseUrl: config.publicBaseUrl,
       limiter,
+      logger,
+      ...(webhook ? { webhook } : {}),
     }),
     guard: bearerGuard({ store, tenants, publicBaseUrl: config.publicBaseUrl }),
     mcpHandler: mcp.handler,
     registry,
+    webhooks:
+      missionsOn && deps.events
+        ? createWahaWebhookRoute({
+            secret: missionsOn.webhookSecret,
+            tenants,
+            registry,
+            events: deps.events,
+            logger,
+            ...(deps.onWebhookEvent ? { onEvent: deps.onWebhookEvent } : {}),
+          })
+        : null,
   });
-  return { app, registry, toolCount: tools.length };
+  const configureWebhooks = async (): Promise<void> => {
+    if (webhook) await configureTenantWebhooks({ tenants, sessions, target: webhook, logger });
+  };
+  return { app, registry, toolCount: tools.length, configureWebhooks };
 }

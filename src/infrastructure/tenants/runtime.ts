@@ -10,7 +10,7 @@ import type { EngineMapper } from "../../domain/message.js";
 import type { Tenant } from "../../domain/ports/TenantStore.js";
 import { createSqliteMessageStore, openCacheDatabase } from "../cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../cache/sqliteTranscriptStore.js";
-import { createTenantCipher } from "../crypto/envelope.js";
+import { createTenantCipher, type TenantCipher } from "../crypto/envelope.js";
 import type { Logger, ToolRunContext } from "../mcp/defineTool.js";
 import { createMediaHandler } from "../media/mediaRoute.js";
 import { createSignedLinks } from "../media/signedLink.js";
@@ -50,6 +50,8 @@ export interface TenantRuntime {
   upload(req: Request, token: string): Promise<Response>;
   /** Sealed mission content of this tenant (`cache.db`). */
   missionLog: MissionLog;
+  /** This tenant's data cipher (e.g. to seal received webhook payloads). */
+  cipher: TenantCipher;
   /** Closes the cache database and stops the upload sweep. Idempotent. */
   close(): void;
 }
@@ -178,6 +180,7 @@ export function buildTenantRuntime(deps: {
       media,
       upload,
       missionLog: createSealedMissionLog(cacheDb, cipher),
+      cipher,
       close() {
         if (closed) return;
         closed = true;

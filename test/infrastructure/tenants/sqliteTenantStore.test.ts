@@ -70,6 +70,12 @@ describe("sqlite tenant store", () => {
     expect(store.getTenant(tenant.id)?.status).toBe("active");
   });
 
+  it("getTenantBySession finds the tenant owning a WAHA session, or null", () => {
+    const { store, tenant } = setup();
+    expect(store.getTenantBySession("t_aaaaaaaaaa")).toEqual(tenant);
+    expect(store.getTenantBySession("t_unknown")).toBeNull();
+  });
+
   it("createUser returns username_taken for a duplicate, case-insensitively", async () => {
     const { store, tenant } = setup();
     const other = store.createTenant({

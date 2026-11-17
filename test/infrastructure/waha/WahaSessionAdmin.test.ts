@@ -186,4 +186,87 @@ describe("WahaSessionAdmin", () => {
       expect(await make(fn).qr("t_abc")).toBeNull();
     }
   });
+
+  describe("webhooks", () => {
+    const HOOK = { url: "https://mcp.example.com/webhooks/waha", secret: "whsec-123" };
+    const OURS = {
+      url: HOOK.url,
+      events: ["message.any", "session.status"],
+      hmac: { key: HOOK.secret },
+      retries: { policy: "constant", delaySeconds: 2, attempts: 15 },
+      customHeaders: null,
+    };
+    const OTHER = { url: "https://n8n.example.com/hook", events: ["message"], hmac: null };
+
+    /** GET answers `session`; PUT records the body and answers 200. */
+    function wahaWith(session: unknown, getStatus = 200) {
+      return fakeFetch((r) => (r.method === "GET" ? json(session, getStatus) : json({}, 200)));
+    }
+
+    it("create sends the webhook in the new session's config when given one", async () => {
+      const { fn, calls } = fakeFetch(() => json({ name: "t_abc" }, 201));
+      await make(fn).create("t_abc", { webhook: HOOK });
+      expect(JSON.parse(calls[0]?.body ?? "")).toEqual({
+        name: "t_abc",
+        start: true,
+        config: { webhooks: [OURS] },
+      });
+    });
+
+    it("configureWebhook adds ours, keeping other webhooks and config untouched", async () => {
+      const config = { metadata: { a: "1" }, proxy: null, webhooks: [OTHER] };
+      const { fn, calls } = wahaWith({ name: "t_abc", status: "WORKING", config });
+      await make(fn).configureWebhook("t_abc", HOOK);
+      expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+        `GET ${BASE}/api/sessions/t_abc`,
+        `PUT ${BASE}/api/sessions/t_abc`,
+      ]);
+      expect(JSON.parse(calls[1]?.body ?? "")).toEqual({
+        name: "t_abc",
+        config: { metadata: { a: "1" }, proxy: null, webhooks: [OTHER, OURS] },
+      });
+    });
+
+    it("configureWebhook replaces an outdated webhook with our url (e.g. a rotated secret)", async () => {
+      const stale = { ...OURS, hmac: { key: "old" }, events: ["message"] };
+      const { fn, calls } = wahaWith({
+        name: "t_abc",
+        config: { webhooks: [stale, OTHER, { ...stale }] },
+      });
+      await make(fn).configureWebhook("t_abc", HOOK);
+      expect(JSON.parse(calls[1]?.body ?? "").config.webhooks).toEqual([OTHER, OURS]);
+    });
+
+    it("configureWebhook does not PUT (no session restart) when ours is already there", async () => {
+      // WAHA may echo extra defaults and another event order; neither is a difference.
+      const echoed = { ...OURS, events: ["session.status", "message.any"], customHeaders: [] };
+      const { fn, calls } = wahaWith({ name: "t_abc", config: { webhooks: [OTHER, echoed] } });
+      await make(fn).configureWebhook("t_abc", HOOK);
+      expect(calls.map((c) => c.method)).toEqual(["GET"]);
+    });
+
+    it("configureWebhook writes a config for a session that has none", async () => {
+      const { fn, calls } = wahaWith({ name: "t_abc", status: "STOPPED", config: null });
+      await make(fn).configureWebhook("t_abc", HOOK);
+      expect(JSON.parse(calls[1]?.body ?? "")).toEqual({
+        name: "t_abc",
+        config: { webhooks: [OURS] },
+      });
+    });
+
+    it("configureWebhook fails for a missing session and never leaks the secret", async () => {
+      const missing = await make(wahaWith({}, 404).fn)
+        .configureWebhook("t_abc", HOOK)
+        .catch((e: unknown) => e);
+      expect(missing).toBeInstanceOf(WahaUnavailableError);
+      const failing = fakeFetch((r) =>
+        r.method === "GET" ? json({ config: null }) : json({ echo: HOOK.secret }, 500),
+      );
+      const err = await make(failing.fn)
+        .configureWebhook("t_abc", HOOK)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(WahaUnavailableError);
+      expect(String((err as Error).message)).not.toContain(HOOK.secret);
+    });
+  });
 });

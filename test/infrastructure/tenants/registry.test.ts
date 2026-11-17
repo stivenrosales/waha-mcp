@@ -81,6 +81,7 @@ function fakeBuild() {
       tenantId: tenant.id,
       context: {} as TenantRuntime["context"],
       missionLog: {} as TenantRuntime["missionLog"],
+      cipher: {} as TenantRuntime["cipher"],
       media: async () => new Response(null),
       upload: async () => new Response(null),
       close: () => {

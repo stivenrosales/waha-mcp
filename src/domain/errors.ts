@@ -99,7 +99,7 @@ export class WhatsAppDisconnectedError extends Error {
 }
 
 /**
- * The LLM provider could not answer right now (network failure, 429 or 5xx); the caller may
+ * The LLM provider could not answer right now (network failure, timeout, 408, 429, 499 or 5xx); the caller may
  * retry later. `status` is the HTTP status (null when no response arrived), for the log only.
  */
 export class LlmUnavailableError extends Error {
@@ -110,12 +110,17 @@ export class LlmUnavailableError extends Error {
 }
 
 /**
- * The LLM provider rejected the request (a 4xx other than 429: bad key, no credits, invalid
- * request). Retrying the same request will not help. The provider's body is never kept.
+ * The LLM provider rejected the request (a 4xx other than 408/429/499: bad key, no credits,
+ * invalid request), or the client failed in an unexpected way (`status` undefined, fixed
+ * message). Retrying the same request will not help. The provider's body is never kept.
  */
 export class LlmRejectedError extends Error {
-  constructor(public readonly status: number) {
-    super(`The LLM provider rejected the request (HTTP ${status}).`);
+  constructor(public readonly status?: number) {
+    super(
+      status === undefined
+        ? "Unexpected LLM client error."
+        : `The LLM provider rejected the request (HTTP ${status}).`,
+    );
     this.name = "LlmRejectedError";
   }
 }

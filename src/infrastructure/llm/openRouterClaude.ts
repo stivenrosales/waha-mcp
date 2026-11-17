@@ -17,6 +17,12 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api";
  */
 const PROVIDER_ROUTING = { order: ["anthropic"], allow_fallbacks: true } as const;
 
+/** Per-request ceiling; a slower answer surfaces as `LlmUnavailableError`. */
+const REQUEST_TIMEOUT_MS = 90_000;
+
+/** Timeouts (408) and client-closed requests (499) are transient, like 429 and 5xx. */
+const RETRYABLE_4XX = new Set([408, 429, 499]);
+
 type OpenRouterParams = Anthropic.MessageCreateParamsNonStreaming & {
   provider: typeof PROVIDER_ROUTING;
 };
@@ -37,6 +43,9 @@ export function createOpenRouterClaude(opts: {
     apiKey: null,
     authToken: opts.apiKey,
     maxRetries: 0,
+    timeout: REQUEST_TIMEOUT_MS,
+    // Explicit, so ANTHROPIC_LOG can never make the SDK log prompts, keys or provider bodies.
+    logLevel: "off",
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
 
@@ -78,12 +87,16 @@ function toUsage(usage: Anthropic.Usage): LlmUsage {
   };
 }
 
-/** Typed SDK errors only; the provider's message and body are dropped (they may echo input). */
+/**
+ * Typed SDK errors only; the provider's message and body are always dropped (they may echo
+ * input). Anything else (abort, unparseable body) becomes a fixed-text `LlmRejectedError`.
+ */
 function toDomainError(err: unknown): Error {
   if (err instanceof Anthropic.APIConnectionError) return new LlmUnavailableError(null);
-  if (err instanceof Anthropic.RateLimitError) return new LlmUnavailableError(429);
   if (err instanceof Anthropic.InternalServerError) return new LlmUnavailableError(err.status);
   if (err instanceof Anthropic.APIError && typeof err.status === "number")
-    return new LlmRejectedError(err.status);
-  return err instanceof Error ? err : new Error("Unexpected LLM client failure.");
+    return RETRYABLE_4XX.has(err.status) || err.status >= 500
+      ? new LlmUnavailableError(err.status)
+      : new LlmRejectedError(err.status);
+  return new LlmRejectedError();
 }

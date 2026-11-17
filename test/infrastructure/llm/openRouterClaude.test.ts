@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LlmRejectedError, LlmUnavailableError } from "../../../src/domain/errors.js";
 import type { LlmTurnRequest } from "../../../src/domain/ports/LlmClient.js";
 import { createOpenRouterClaude } from "../../../src/infrastructure/llm/openRouterClaude.js";
@@ -159,5 +159,84 @@ describe("OpenRouter Claude client", () => {
       expect((err as Error).message).not.toContain(KEY);
       expect((err as Error).message).not.toContain("bad request");
     }
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("never logs, even with ANTHROPIC_LOG=debug", async () => {
+    vi.stubEnv("ANTHROPIC_LOG", "debug");
+    const spies = (["log", "debug", "info", "warn", "error"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    const ok = fakeOpenRouter(() => json(message(usage)));
+    await createOpenRouterClaude({ apiKey: KEY, model: MODEL, fetch: ok.fetch }).turn(turn);
+    const failing = fakeOpenRouter(() => json({ error: { message: "nope" } }, 400));
+    await createOpenRouterClaude({ apiKey: KEY, model: MODEL, fetch: failing.fetch })
+      .turn(turn)
+      .catch(() => {});
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("times out after 90 s with LlmUnavailableError", async () => {
+    vi.useFakeTimers();
+    const hang = ((_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")),
+        );
+      })) as typeof globalThis.fetch;
+    let settled: unknown;
+    const pending = createOpenRouterClaude({ apiKey: KEY, model: MODEL, fetch: hang })
+      .turn(turn)
+      .then(
+        () => {
+          settled = "resolved";
+        },
+        (e: unknown) => {
+          settled = e;
+        },
+      );
+    await vi.advanceTimersByTimeAsync(89_999);
+    expect(settled).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2);
+    await pending;
+    expect(settled).toBeInstanceOf(LlmUnavailableError);
+    expect((settled as LlmUnavailableError).status).toBeNull();
+  });
+
+  it("408 and 499 throw LlmUnavailableError; 409 stays LlmRejectedError", async () => {
+    for (const status of [408, 499]) {
+      const p = fakeOpenRouter(() => json({ error: { message: "later" } }, status));
+      const err = await createOpenRouterClaude({ apiKey: KEY, model: MODEL, fetch: p.fetch })
+        .turn(turn)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(LlmUnavailableError);
+      expect((err as LlmUnavailableError).status).toBe(status);
+    }
+    const conflict = fakeOpenRouter(() => json({ error: { message: "conflict" } }, 409));
+    const err = await createOpenRouterClaude({ apiKey: KEY, model: MODEL, fetch: conflict.fetch })
+      .turn(turn)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmRejectedError);
+    expect((err as LlmRejectedError).status).toBe(409);
+  });
+
+  it("a malformed 2xx body throws LlmRejectedError 'Unexpected LLM client error.' without the body", async () => {
+    const p = fakeOpenRouter(
+      () =>
+        new Response(`{"oops": "${KEY} provider said`, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const err = await createOpenRouterClaude({ apiKey: KEY, model: MODEL, fetch: p.fetch })
+      .turn(turn)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmRejectedError);
+    expect((err as Error).message).toBe("Unexpected LLM client error.");
+    expect((err as LlmRejectedError).status).toBeUndefined();
   });
 });

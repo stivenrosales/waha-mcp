@@ -15,7 +15,7 @@ import {
   envelopePayload,
   type MediaReader,
   payloadShortId,
-  timelockActive,
+  timelockOf,
 } from "./inbound.js";
 import { notifyOwner, ownerChatId, ownerTexts } from "./notify.js";
 import { createMissionPurge, type MissionPurge } from "./retention.js";
@@ -79,6 +79,8 @@ const EVENT_BATCH = 100;
 const EVENT_ATTEMPTS = 3;
 /** A message older than its mission (by more than clock skew) is history, not an event of it. */
 const SKEW_MS = 1000;
+/** How long a reach-out lock with no end time of its own pauses the tenant's missions. */
+const REACHOUT_PAUSE_DEFAULT_MS = 24 * 3_600_000;
 
 /**
  * The mission engine: consumes stored webhook events and mission timers, runs agent turns on the
@@ -125,7 +127,7 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
 
   async function step(c: Ctx): Promise<void> {
     if (c.now.getTime() >= Date.parse(c.m.deadlineAt)) return end(c, { type: "expire" });
-    if (paused(c.m.tenantId)) return;
+    if (paused(c.m.tenantId, c.now)) return;
     const conv = buildConversation(c.port.log.read(c.m.id));
     const replying = conv.pending.contactIds.length > 0;
     const later = (): void => schedule(c, nextAllowedInitiatedSend(c.now, deps.timezone, limits));
@@ -206,14 +208,18 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     const payload = envelopePayload(port.openEvent(e));
     if (!payload) return;
     if (e.kind === "message") return handleMessage(e, port, payload, now);
-    const lock = timelockActive(payload);
-    const wasPaused = paused(e.tenantId);
-    // Persisted: a restart keeps the pause until a status explicitly reports no active lock.
-    if (lock === true && !wasPaused) {
-      missions.setPaused(e.tenantId, true, iso(now));
+    const lock = timelockOf(payload);
+    if (!lock) return;
+    const wasPaused = paused(e.tenantId, now);
+    if (lock.active) {
+      // Bounded: the lock's own end when the status gives one, else a fixed ceiling, so a lock
+      // that lifts without a status change never pauses the tenant for good.
+      const until = lock.endsAt ?? new Date(now.getTime() + REACHOUT_PAUSE_DEFAULT_MS);
+      if (until <= now) return;
+      missions.pause(e.tenantId, iso(now), iso(until));
+      if (wasPaused) return;
       logger.info(`tenant=${e.tenantId} missions=paused`);
-      const active = missions.list(e.tenantId, "active");
-      const first = active[0];
+      const first = missions.list(e.tenantId, "active")[0];
       if (first) {
         const tenant = deps.tenants.getTenant(e.tenantId);
         await notifyOwner(
@@ -225,9 +231,9 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
           },
         );
       }
-    } else if (lock === false && wasPaused) {
-      missions.setPaused(e.tenantId, false, iso(now));
-      logger.info(`tenant=${e.tenantId} missions=resumed`);
+    } else {
+      missions.resume(e.tenantId);
+      if (wasPaused) logger.info(`tenant=${e.tenantId} missions=resumed`);
     }
   }
 

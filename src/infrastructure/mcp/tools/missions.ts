@@ -155,6 +155,8 @@ const startOutput = z.object({
   deadline_at: z.string(),
   new_contact: z.boolean(),
   deadline_in_quiet_hours: z.boolean(),
+  /** ISO end of WhatsApp's limit on new conversations for this account; null when not limited. */
+  reachout_paused_until: z.string().nullable(),
 });
 
 export const startMissionTool: ToolDefinition<typeof startInput, typeof startOutput> = {
@@ -191,6 +193,7 @@ The server paces messages, avoids quiet hours for messages it starts and enforce
       `Mission ${m.id} started with ${m.chatId}${m.newContact ? " (new contact)" : ""}. Deadline: ${m.deadlineAt}.`,
     ];
     if (started.quietHoursNote) lines.push(started.quietHoursNote);
+    if (started.pauseNote) lines.push(started.pauseNote);
     return {
       text: lines.join("\n"),
       data: {
@@ -199,6 +202,7 @@ The server paces messages, avoids quiet hours for messages it starts and enforce
         deadline_at: m.deadlineAt,
         new_contact: m.newContact,
         deadline_in_quiet_hours: started.quietHoursNote !== null,
+        reachout_paused_until: started.pausedUntil,
       },
     };
   },

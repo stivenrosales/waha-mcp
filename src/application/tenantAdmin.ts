@@ -126,8 +126,11 @@ export interface TenantAdminDeps {
   auth: { revokeUser(userId: string): void };
   sessions: SessionAdmin;
   registry: { evict(id: string): void };
-  /** Mission rows are deleted with the tenant (their sealed log goes with the tenant directory). */
-  missions: { deleteForTenant(tenantId: string): void };
+  /**
+   * Mission rows are deleted with the tenant (their sealed log goes with the tenant directory);
+   * a restore lifts the tenant's mission reach-out pause.
+   */
+  missions: { deleteForTenant(tenantId: string): void; resume(tenantId: string): void };
   /** The tenant's stored webhook events are deleted with it; absent when missions are off. */
   events?: { deleteForTenant(tenantId: string): void };
   /** Wraps a fresh data key for the tenant (keeps crypto out of the application layer). */
@@ -406,6 +409,8 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           tenants.transitionStatus(tenantId, "revoked", next);
           status = tenants.getTenant(tenantId)?.status ?? next;
         }
+        // A pause from before the revoke says nothing about the restored account.
+        deps.missions.resume(tenantId);
         outcome = "ok";
         return status;
       } finally {

@@ -80,13 +80,39 @@ export function payloadShortId(payload: Record<string, unknown>): string | null 
   return str(info.ID);
 }
 
-/** `reachoutTimelock.isActive` anywhere in a `session.status` payload; null when absent. */
-export function timelockActive(payload: unknown, depth = 0): boolean | null {
+export interface Timelock {
+  active: boolean;
+  /** When WhatsApp lifts the lock, if the status says so. */
+  endsAt: Date | null;
+}
+
+/** An end-time field of a lock: an ISO string or epoch seconds/milliseconds. */
+function lockEnd(lock: Record<string, unknown>): Date | null {
+  for (const [key, v] of Object.entries(lock)) {
+    if (!/end|expir|until/i.test(key)) continue;
+    const ms =
+      typeof v === "number"
+        ? v < 1e12
+          ? v * 1000
+          : v
+        : typeof v === "string"
+          ? Date.parse(v)
+          : NaN;
+    if (Number.isFinite(ms) && ms > 0) return new Date(ms);
+  }
+  return null;
+}
+
+/** `reachoutTimelock` anywhere in a `session.status` payload; null when absent. */
+export function timelockOf(payload: unknown, depth = 0): Timelock | null {
   if (!isRecord(payload) || depth > 4) return null;
   const lock = payload.reachoutTimelock;
-  if (isRecord(lock) && typeof lock.isActive === "boolean") return lock.isActive;
+  if (isRecord(lock)) {
+    const active = typeof lock.isActive === "boolean" ? lock.isActive : lock.IsActive;
+    if (typeof active === "boolean") return { active, endsAt: active ? lockEnd(lock) : null };
+  }
   for (const v of Object.values(payload)) {
-    const found = timelockActive(v, depth + 1);
+    const found = timelockOf(v, depth + 1);
     if (found !== null) return found;
   }
   return null;

@@ -46,6 +46,10 @@ export interface StartedMission {
   mission: MissionRow;
   /** Set when the deadline falls in quiet hours (the agent starts nothing then). */
   quietHoursNote: string | null;
+  /** End of WhatsApp's reach-out limit on this account when it is on now (the agent waits). */
+  pausedUntil: string | null;
+  /** Says until when the agent waits for that limit; null when the account is not limited. */
+  pauseNote: string | null;
 }
 
 /** A mission with what its log says: objective, questions, outcome, collected items. */
@@ -89,6 +93,8 @@ export const MISSION_TEXTS = {
   notActive: (id: string, state: MissionState) => `Mission ${id} is not active (${state}).`,
   quietDeadline: (start: number, end: number) =>
     `The deadline falls in quiet hours (${hh(start)}–${hh(end)}); the agent will not start conversations then.`,
+  paused: (until: string) =>
+    `WhatsApp is limiting new conversations on this account until ${until}; the agent will wait.`,
   notice: (n: number) => `\n\nMissions: ${n} finished — call list_missions.`,
 };
 
@@ -97,6 +103,17 @@ const DIRECT_CHAT = /^[^@\s]+@(c\.us|s\.whatsapp\.net|lid)$/;
 
 const errorName = (error: unknown): string =>
   error instanceof Error ? error.name : "UnknownError";
+
+/** `2026-11-18 10:00 (America/Lima)`. */
+function localTime(at: Date, timezone: string): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    dateStyle: "short",
+    timeStyle: "short",
+    hourCycle: "h23",
+  });
+  return `${fmt.format(at).replace(",", "")} (${timezone})`;
+}
 
 const hh = (hour: number): string => `${String(hour).padStart(2, "0")}:00`;
 
@@ -213,10 +230,15 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
       );
       engine.wake();
       const quiet = inQuietHours(deadline, deps.timezone, limits);
+      const pausedUntil = store.pausedUntil(tenantId, iso(now));
       return {
         mission,
         quietHoursNote: quiet
           ? MISSION_TEXTS.quietDeadline(limits.quietStartHour, limits.quietEndHour)
+          : null,
+        pausedUntil,
+        pauseNote: pausedUntil
+          ? MISSION_TEXTS.paused(localTime(new Date(pausedUntil), deps.timezone))
           : null,
       };
     },

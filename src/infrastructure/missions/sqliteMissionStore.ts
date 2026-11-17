@@ -27,9 +27,31 @@ CREATE INDEX IF NOT EXISTS missions_tenant ON missions (tenant_id, state);
 CREATE INDEX IF NOT EXISTS missions_due ON missions (state, next_wake_at);
 CREATE TABLE IF NOT EXISTS mission_pauses (
   tenant_id TEXT PRIMARY KEY,
-  since TEXT NOT NULL
+  since TEXT NOT NULL,
+  until TEXT
 );
 `;
+
+/** How long a pause stored before pauses had an end (no `until`) is kept: 24 h from `since`. */
+const LEGACY_PAUSE_MS = 24 * 3_600_000;
+
+/** Adds `until` to a `mission_pauses` table created before pauses expired, and fills it. */
+function migratePauses(db: DatabaseSync): void {
+  const cols = db.prepare("PRAGMA table_info(mission_pauses)").all() as unknown as {
+    name: string;
+  }[];
+  if (!cols.some((c) => c.name === "until"))
+    db.exec("ALTER TABLE mission_pauses ADD COLUMN until TEXT");
+  const legacy = db
+    .prepare("SELECT tenant_id, since FROM mission_pauses WHERE until IS NULL")
+    .all() as unknown as { tenant_id: string; since: string }[];
+  const fill = db.prepare("UPDATE mission_pauses SET until = ? WHERE tenant_id = ?");
+  for (const r of legacy) {
+    const since = Date.parse(r.since);
+    const until = new Date((Number.isNaN(since) ? 0 : since) + LEGACY_PAUSE_MS).toISOString();
+    fill.run(until, r.tenant_id);
+  }
+}
 
 interface Raw {
   id: string;
@@ -105,6 +127,7 @@ export function createSqliteMissionStore(
   now: () => string = () => new Date().toISOString(),
 ): MissionStore {
   db.exec(SCHEMA);
+  migratePauses(db);
   const all = (sql: string, ...args: (string | number)[]): MissionRow[] =>
     (db.prepare(sql).all(...args) as unknown as Raw[]).map(toRow);
 
@@ -206,19 +229,20 @@ export function createSqliteMissionStore(
         nowIso,
       );
     },
-    setPaused(tenantId, paused, atIso) {
-      if (paused)
-        db.prepare(
-          "INSERT INTO mission_pauses (tenant_id, since) VALUES (?, ?) ON CONFLICT (tenant_id) DO NOTHING",
-        ).run(tenantId, atIso);
-      else db.prepare("DELETE FROM mission_pauses WHERE tenant_id = ?").run(tenantId);
+    pause(tenantId, sinceIso, untilIso) {
+      db.prepare(
+        `INSERT INTO mission_pauses (tenant_id, since, until) VALUES (?, ?, ?)
+           ON CONFLICT (tenant_id) DO UPDATE SET until = excluded.until`,
+      ).run(tenantId, sinceIso, untilIso);
     },
-    pausedTenants() {
-      return (
-        db.prepare("SELECT tenant_id FROM mission_pauses").all() as unknown as {
-          tenant_id: string;
-        }[]
-      ).map((r) => r.tenant_id);
+    resume(tenantId) {
+      db.prepare("DELETE FROM mission_pauses WHERE tenant_id = ?").run(tenantId);
+    },
+    pausedUntil(tenantId, nowIso) {
+      const row = db
+        .prepare("SELECT until FROM mission_pauses WHERE tenant_id = ? AND until > ?")
+        .get(tenantId, nowIso) as { until: string } | undefined;
+      return row?.until ?? null;
     },
     deleteForTenant(tenantId) {
       db.prepare("DELETE FROM missions WHERE tenant_id = ?").run(tenantId);

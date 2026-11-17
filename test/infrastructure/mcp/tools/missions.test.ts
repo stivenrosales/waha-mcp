@@ -405,6 +405,26 @@ describe("mission tools", () => {
     expect(r.data).toMatchObject({ deadline_in_quiet_hours: true });
   });
 
+  it("still starts a mission while WhatsApp limits new conversations, and says until when", async () => {
+    const h = harness();
+    h.store.pause(TENANT, T0.toISOString(), "2026-11-18T15:00:00.000Z");
+    const r = await h.call("start_mission", h.startInput());
+    expect(r.isError).toBe(false);
+    expect(h.store.list(TENANT, "active")).toHaveLength(1);
+    expect(r.text).toContain(
+      "WhatsApp is limiting new conversations on this account until 2026-11-18 10:00 (America/Lima); the agent will wait.",
+    );
+    expect(r.data).toMatchObject({ reachout_paused_until: "2026-11-18T15:00:00.000Z" });
+  });
+
+  it("says nothing about a reach-out pause that already ended", async () => {
+    const h = harness();
+    h.store.pause(TENANT, "2026-11-16T10:00:00.000Z", "2026-11-17T10:00:00.000Z");
+    const r = await h.call("start_mission", h.startInput());
+    expect(r.text).not.toContain("limiting new conversations");
+    expect(r.data).toMatchObject({ reachout_paused_until: null });
+  });
+
   it("refuses when the monthly budget is used up", async () => {
     const h = harness({ spend: 1 });
     const r = await h.call("start_mission", h.startInput());

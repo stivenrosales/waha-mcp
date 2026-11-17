@@ -199,6 +199,19 @@ describe("revoke / restore", () => {
     expect(s.tenants.getTenant(tenantId)?.status).toBe("revoked");
   });
 
+  it("restore lifts the tenant's mission reach-out pause and keeps other tenants'", async () => {
+    const s = await setup();
+    const { tenantId } = await onboard(s);
+    const other = await onboard(s, "Other", true);
+    const missions = s.deps.missions;
+    missions.pause(tenantId, "2026-11-17T10:00:00.000Z", "2026-11-18T10:00:00.000Z");
+    missions.pause(other.tenantId, "2026-11-17T10:00:00.000Z", "2026-11-18T10:00:00.000Z");
+    s.admin.revoke(tenantId);
+    s.admin.restore(tenantId);
+    expect(missions.pausedUntil(tenantId, "2026-11-17T11:00:00.000Z")).toBeNull();
+    expect(missions.pausedUntil(other.tenantId, "2026-11-17T11:00:00.000Z")).not.toBeNull();
+  });
+
   it("restore goes to active, pairing or invited depending on how far onboarding got", async () => {
     const s = await setup();
     const full = await onboard(s, "Full", true);
@@ -331,8 +344,8 @@ describe("delete_tenant", () => {
     });
     events.put(event(tenantId, "evt_1"));
     events.put(event(s.adminTenant.id, "evt_2"));
-    missions.setPaused(tenantId, true, "2026-11-17T10:00:00.000Z");
-    missions.setPaused(s.adminTenant.id, true, "2026-11-17T10:00:00.000Z");
+    missions.pause(tenantId, "2026-11-17T10:00:00.000Z", "2026-11-18T10:00:00.000Z");
+    missions.pause(s.adminTenant.id, "2026-11-17T10:00:00.000Z", "2026-11-18T10:00:00.000Z");
 
     await s.admin.delete(tenantId, "Acme");
 
@@ -340,7 +353,8 @@ describe("delete_tenant", () => {
       tenant_id: string;
     }[];
     expect(rows.map((r) => r.tenant_id)).toEqual([s.adminTenant.id]);
-    expect(missions.pausedTenants()).toEqual([s.adminTenant.id]);
+    expect(missions.pausedUntil(tenantId, "2026-11-17T11:00:00.000Z")).toBeNull();
+    expect(missions.pausedUntil(s.adminTenant.id, "2026-11-17T11:00:00.000Z")).not.toBeNull();
   });
 
   it("still cleans WAHA and the directory when deleting mission rows fails", async () => {
@@ -355,6 +369,7 @@ describe("delete_tenant", () => {
         deleteForTenant: () => {
           throw new Error("db locked");
         },
+        resume: () => {},
       },
     });
     const out = await admin.delete(tenantId, "Acme");

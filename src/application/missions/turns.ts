@@ -75,10 +75,10 @@ export interface TurnState {
 export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
   const { missions, limits, logger } = deps;
   const { llmFailures, isStopped, ownerSteppedIn } = state;
-  /** WhatsApp reach-out timelock, persisted per tenant so a restart never lifts it. */
-  const paused = (tenantId: string): boolean => missions.pausedTenants().includes(tenantId);
-
   const iso = (d: Date): string => d.toISOString();
+  /** WhatsApp reach-out timelock: persisted per tenant (a restart never lifts it), with an end. */
+  const paused = (tenantId: string, at: Date): boolean =>
+    missions.pausedUntil(tenantId, iso(at)) !== null;
   const quiet = (at: Date): boolean => inQuietHours(at, deps.timezone, limits);
   const reload = (m: MissionRow): MissionRow => missions.get(m.tenantId, m.id) ?? m;
 
@@ -173,7 +173,7 @@ export function createMissionTurns(deps: MissionEngineDeps, state: TurnState) {
     // Stopping: keep it due so the next process sends it.
     if (isStopped()) return wakeAt(c.now);
     if (quiet(c.now)) return wakeAt(nextAllowedInitiatedSend(c.now, deps.timezone, limits));
-    if (paused(c.m.tenantId)) return wakeAt(new Date(c.now.getTime() + PAUSE_RECHECK_MS));
+    if (paused(c.m.tenantId, c.now)) return wakeAt(new Date(c.now.getTime() + PAUSE_RECHECK_MS));
     wakeAt(null);
     await turn({ ...c, m: reload(c.m) }, { instruction: TURN_TEXT.closing(reason), closing: true });
   }

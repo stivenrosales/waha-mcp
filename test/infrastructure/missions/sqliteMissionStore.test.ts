@@ -117,18 +117,34 @@ describe("sqliteMissionStore", () => {
     expect(store.get("t2", other.id)).not.toBeNull();
   });
 
-  it("keeps a tenant's reach-out pause across store instances until it is lifted", () => {
+  it("keeps a tenant's reach-out pause across store instances until it ends or is lifted", () => {
     const db = openAuthDatabase(":memory:");
     const store = createSqliteMissionStore(db);
-    store.setPaused("t1", true, "2026-11-17T10:00:00.000Z");
-    store.setPaused("t1", true, "2026-11-17T11:00:00.000Z");
-    store.setPaused("t2", true, "2026-11-17T10:00:00.000Z");
+    store.pause("t1", "2026-11-17T10:00:00.000Z", "2026-11-17T12:00:00.000Z");
+    store.pause("t1", "2026-11-17T11:00:00.000Z", "2026-11-17T14:00:00.000Z");
+    store.pause("t2", "2026-11-17T10:00:00.000Z", "2026-11-18T10:00:00.000Z");
+    store.pause("t3", "2026-11-17T10:00:00.000Z", "2026-11-18T10:00:00.000Z");
     const reopened = createSqliteMissionStore(db);
-    expect(reopened.pausedTenants().sort()).toEqual(["t1", "t2"]);
-    reopened.setPaused("t1", false, "2026-11-17T12:00:00.000Z");
-    expect(reopened.pausedTenants()).toEqual(["t2"]);
-    reopened.deleteForTenant("t2");
-    expect(reopened.pausedTenants()).toEqual([]);
+    expect(reopened.pausedUntil("t1", "2026-11-17T13:00:00.000Z")).toBe("2026-11-17T14:00:00.000Z");
+    expect(reopened.pausedUntil("t1", "2026-11-17T14:00:00.000Z")).toBeNull();
+    expect(reopened.pausedUntil("t2", "2026-11-17T13:00:00.000Z")).toBe("2026-11-18T10:00:00.000Z");
+    reopened.resume("t2");
+    expect(reopened.pausedUntil("t2", "2026-11-17T13:00:00.000Z")).toBeNull();
+    reopened.deleteForTenant("t3");
+    expect(reopened.pausedUntil("t3", "2026-11-17T13:00:00.000Z")).toBeNull();
+    expect(reopened.pausedUntil("t9", "2026-11-17T13:00:00.000Z")).toBeNull();
+  });
+
+  it("gives a pause stored before pauses had an end 24 h from its start", () => {
+    const db = openAuthDatabase(":memory:");
+    db.exec("CREATE TABLE mission_pauses (tenant_id TEXT PRIMARY KEY, since TEXT NOT NULL)");
+    db.prepare("INSERT INTO mission_pauses (tenant_id, since) VALUES (?, ?)").run(
+      "t1",
+      "2026-11-17T10:00:00.000Z",
+    );
+    const store = createSqliteMissionStore(db);
+    expect(store.pausedUntil("t1", "2026-11-18T09:59:00.000Z")).toBe("2026-11-18T10:00:00.000Z");
+    expect(store.pausedUntil("t1", "2026-11-18T10:00:00.000Z")).toBeNull();
   });
 
   it("dueClosings returns ended missions with a due wake (postponed closing lines)", () => {

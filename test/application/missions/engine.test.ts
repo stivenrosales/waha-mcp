@@ -805,6 +805,63 @@ describe("mission engine: reach-out timelock", () => {
   });
 });
 
+describe("mission engine: reach-out pause expiry", () => {
+  const HOUR = 60 * MIN;
+  const status = (reachoutTimelock: Record<string, unknown>) => ({
+    name: "s1",
+    status: "WORKING",
+    statuses: [],
+    data: null,
+    reachoutTimelock,
+  });
+
+  it("lifts a pause with no end time after 24 h, even when no unlock status arrives", async () => {
+    const h = harness();
+    const m = await opened(h, { minutes: 30 * 60 });
+    h.envelope("session.status", status({ isActive: true }));
+    h.message({ text: "hola" });
+    await h.tickAt(1 * SEC);
+    await h.tickAt(23 * HOUR);
+    expect(h.llm.requests).toHaveLength(1);
+
+    h.llm.queue.push(reply("Hola de nuevo."));
+    await h.tickAt(24 * HOUR + 1 * SEC);
+    expect(h.llm.requests).toHaveLength(2);
+    expect(h.contactSends().at(-1)).toBe("Hola de nuevo.");
+    expect(h.get(m.id).state).toBe("active");
+  });
+
+  it("uses the lock's own end time when the status carries one", async () => {
+    const h = harness();
+    await opened(h, { minutes: 5 * 60 });
+    const ends = new Date(T0.getTime() + 2 * HOUR).toISOString();
+    h.envelope("session.status", status({ isActive: true, timeEnforcementEnds: ends }));
+    h.message({ text: "hola" });
+    await h.tickAt(1 * SEC);
+    await h.tickAt(2 * HOUR - 1 * SEC);
+    expect(h.llm.requests).toHaveLength(1);
+
+    h.llm.queue.push(reply("Ya puedo escribirte."));
+    await h.tickAt(2 * HOUR + 1 * SEC);
+    expect(h.llm.requests).toHaveLength(2);
+    expect(h.contactSends().at(-1)).toBe("Ya puedo escribirte.");
+  });
+
+  it("an explicit unlock still lifts the pause at once", async () => {
+    const h = harness();
+    await opened(h);
+    h.envelope("session.status", status({ isActive: true }));
+    await h.tickAt(1 * SEC);
+    h.at(10 * SEC);
+    h.envelope("session.status", status({ isActive: false }));
+    h.message({ text: "hola" });
+    h.llm.queue.push(reply("Hola."));
+    await h.tickAt(10 * SEC);
+    await h.tickAt(30 * SEC);
+    expect(h.llm.requests).toHaveLength(2);
+  });
+});
+
 describe("mission engine: closing message", () => {
   it("sends one paced closing line when an expired mission has a closing message", async () => {
     const h = harness();

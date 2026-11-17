@@ -53,11 +53,14 @@ export interface MissionStore {
   /** Terminal missions whose `nextWakeAt` is due: a closing line postponed (quiet hours, pause). */
   dueClosings(nowIso: string): MissionRow[];
   /**
-   * WhatsApp's reach-out timelock on a tenant (from `session.status`); kept across restarts so a
-   * deploy never lifts a pause. `paused: false` lifts it.
+   * WhatsApp's reach-out timelock on a tenant (from `session.status`), until `untilIso`; kept
+   * across restarts so a deploy never lifts a pause. A later call replaces the end time.
    */
-  setPaused(tenantId: string, paused: boolean, atIso: string): void;
-  pausedTenants(): string[];
+  pause(tenantId: string, sinceIso: string, untilIso: string): void;
+  /** Lifts the tenant's pause at once (an explicit unlock, `restore_tenant`). */
+  resume(tenantId: string): void;
+  /** End of the tenant's pause when it still runs at `nowIso`; null when not paused. */
+  pausedUntil(tenantId: string, nowIso: string): string | null;
   /** Deletes the tenant's missions and its pause. */
   deleteForTenant(tenantId: string): void;
 }

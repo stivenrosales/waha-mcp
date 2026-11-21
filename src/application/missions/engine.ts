@@ -207,6 +207,9 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
     const tenant = deps.tenants.getTenant(e.tenantId);
     const c: Ctx = { m, port, owner: ownerChatId(tenant?.waId ?? null), now };
     if (msg.fromMe) {
+      // The owner's edits and deletions (edit_message, delete_message or the phone) are not new
+      // messages: like reactions, they never take the mission over.
+      if (msg.edited || msg.type === "deleted") return;
       const sent = buildConversation(port.log.read(m.id)).sentIds;
       const short = payloadShortId(payload) ?? shortMessageId(msg.id);
       if (sent.has(short)) return;

@@ -554,6 +554,36 @@ describe("mission engine: inbound messages", () => {
     await h.tickAt(1 * SEC);
     expect(h.get(m.id).state).toBe("taken_over");
   });
+
+  it("the owner's own edit, revoke and reaction echoes do not take the mission over", async () => {
+    const h = harness();
+    const m = await opened(h);
+    const key = { ID: "3EB0OLD", RemoteJID: CHAT, FromMe: true };
+    // edit_message echo: protocolMessage wrapping the edited content.
+    h.message({
+      fromMe: true,
+      source: "api",
+      message: {
+        protocolMessage: { type: 14, key, editedMessage: { conversation: "texto corregido" } },
+      },
+    });
+    // delete_message echo: protocolMessage REVOKE (numeric 0 and named form).
+    h.message({ fromMe: true, source: "api", message: { protocolMessage: { type: 0, key } } });
+    h.message({ fromMe: true, source: "api", message: { protocolMessage: { type: "REVOKE", key } } });
+    // A top-level editedMessage container.
+    h.message({
+      fromMe: true,
+      source: "api",
+      message: { editedMessage: { message: { conversation: "otro" } } },
+    });
+    h.message({
+      fromMe: true,
+      source: "api",
+      message: { reactionMessage: { key, text: "👍" } },
+    });
+    await h.tickAt(1 * SEC);
+    expect(h.get(m.id).state).toBe("active");
+  });
 });
 
 describe("mission engine: agent tools", () => {

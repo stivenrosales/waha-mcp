@@ -391,6 +391,7 @@ for (const cache of [false, true])
         "get_media",
         "get_messages",
         "get_thread",
+        "get_poll_results",
         "get_mission",
         "list_chats",
         "list_groups",

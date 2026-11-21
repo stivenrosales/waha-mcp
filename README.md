@@ -102,6 +102,7 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 | **Read**     |                        |                                                                                   |
 | 📜           | `get_messages`         | Reads messages of a chat, newest first, with cursor pagination.                   |
 | 🧵           | `get_thread`           | The conversation around a message.                                                |
+| 🗳️           | `get_poll_results`     | Votes of a poll: counts per option and who voted what (needs webhooks).           |
 | 📎           | `get_media`            | Fetches an attachment by `media_id` (inline when small, otherwise a signed link). |
 | 🎙️           | `transcribe_audio`     | Transcribes an audio or voice note by `media_id` (optional, see below).           |
 | **Analyze**  |                        |                                                                                   |

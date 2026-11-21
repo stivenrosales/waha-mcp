@@ -7,6 +7,7 @@
 - Webhooks no longer depend on missions: with `WAHA_WEBHOOK_SECRET` set, `/webhooks/waha` is mounted and every WAHA session is pointed at it.
 - The webhook route also stores `message.edited`, `message.revoked`, `message.reaction`, `poll.vote` and `poll.vote.failed` events, sealed per tenant, for the message cache.
 - New tool `send_poll`: sends a poll (2–12 options, single or multiple answers) and takes over an active mission like any other send.
+- New tool `get_poll_results`: reads a poll's question, counts per option and who voted what, from the votes received through webhooks since the server started listening (votes WhatsApp could not decrypt are reported as a count). Without webhooks it returns the options with zero counts.
 - New tool `react_message`: reacts to any message with one emoji, or removes your reaction with `""`. The reaction shows up in later reads right away and does not take over a mission.
 - New tool `edit_message`: edits the text of a message you sent (WhatsApp only allows recent ones). The edit shows up in later reads right away and does not take over a mission.
 - New tool `delete_message`: deletes a message you sent, for everyone; it cannot be undone. The text is removed from the message cache, transcripts and overrides; mission logs, schedule history and WAHA's own storage keep their own retention.

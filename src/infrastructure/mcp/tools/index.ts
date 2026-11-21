@@ -8,6 +8,7 @@ import { getContactTool } from "./getContact.js";
 import { getGroupInfoTool } from "./getGroupInfo.js";
 import { getMediaTool } from "./getMedia.js";
 import { getMessagesTool } from "./getMessages.js";
+import { getPollResultsTool } from "./getPollResults.js";
 import { getThreadTool } from "./getThread.js";
 import { listChatsTool } from "./listChats.js";
 import { listGroupsTool } from "./listGroups.js";
@@ -43,6 +44,7 @@ export function createTools(): ToolDefinition[] {
     getActivityDigestTool,
     searchMessagesTool,
     getThreadTool,
+    getPollResultsTool,
     listSharedFilesTool,
     getContactTool,
     transcribeAudioTool,

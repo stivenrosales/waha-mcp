@@ -13,6 +13,7 @@ Reading:
 - Read messages with get_messages (newest first, paginate with nextCursor).
 - To find what needs an answer, use list_pending_replies (who is waiting for the owner, longest first); to review a day across all chats, use get_activity_digest. Both default to direct chats (scope "all" adds groups) and report coverage; build to-do lists yourself from their results.
 - To find where something was said, use search_messages (case- and accent-insensitive; one chat with chat_id, otherwise direct chats or the scope you choose; newest hits first). To read the conversation around a message, use get_thread with a message id from get_messages or search_messages.
+- To read a poll's votes, use get_poll_results with the poll's message id (counts per option and who voted what; votes are counted from when the server started receiving webhooks).
 - To list documents, media and links shared in chats, use list_shared_files (newest first; kind filter; media_id feeds get_media).
 - To identify a person (ids, names, shared groups, last interaction), use get_contact with exactly one of contact_id, phone or name; an ambiguous name returns candidates to choose from.
 - Prompts daily-review, pending-to-todoist and group-summary package the common workflows; offer them when the user asks for a day review, to-dos from pending replies, or a group summary.

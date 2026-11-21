@@ -34,7 +34,7 @@
 
 `waha-mcp` is an [MCP](https://modelcontextprotocol.io) server over [WAHA](https://waha.devlike.pro) (the WhatsApp HTTP API). It lets Claude, ChatGPT and Gemini CLI analyze your WhatsApp groups and direct chats (summaries, activity stats, pending replies, search, shared files and media) and send messages from your number: text, images, documents, voice notes, video, locations and contact cards.
 
-Sending tools are marked as writes, so your client asks you to approve every send. Nothing can be edited or deleted. See [Sending](#sending).
+Sending tools are marked as writes, so your client asks you to approve every send. You can also react to messages, edit or delete (for everyone) messages you sent, send polls and mark chats read or unread; a deletion cannot be undone. See [Sending](#sending) and [Deleting messages](#deleting-messages).
 
 ## What you can ask
 
@@ -50,7 +50,7 @@ Sending tools are marked as writes, so your client asks you to approve every sen
 ```mermaid
 flowchart LR
   Client["Client<br/>(Claude / ChatGPT / Gemini CLI)"] -->|"OAuth 2.1 + MCP /mcp"| MCP["waha-mcp"]
-  MCP -->|"read (GET) + send (POST)"| WAHA["WAHA (GOWS)"]
+  MCP -->|"read (GET) + write (POST/PUT/DELETE)"| WAHA["WAHA (GOWS)"]
   WAHA --> WA["WhatsApp"]
   MCP -.-> Data[("/data<br/>auth.db, media secret,<br/>tenants/&lt;id&gt;/cache.db + uploads")]
 ```
@@ -196,12 +196,12 @@ Your clients are signed out once: log in again with `ADMIN_USERNAME` and `ADMIN_
 
 ## Message cache
 
-Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the messages it reads in `DATA_DIR/tenants/<id>/cache.db` (one per tenant, encrypted), so repeated questions about a chat do not re-read its whole history from WAHA. A chat is cached the first time a tool reads it. Later reads ask WAHA only for messages newer than (newest cached message minus `CACHE_REFRESH_HOURS`), and a chat read less than 60 s ago is answered without calling WAHA. `CACHE_MAX_AGE_DAYS` prunes old messages (`0` keeps them forever). Media files are never cached. Set `CACHE_ENABLED=false` to turn it off.
+Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the messages it reads in `DATA_DIR/tenants/<id>/cache.db` (one per tenant, encrypted), so repeated questions about a chat do not re-read its whole history from WAHA. A chat is cached the first time a tool reads it. Later reads ask WAHA only for messages newer than (newest cached message minus `CACHE_REFRESH_HOURS`), and a chat read less than 60 s ago is answered without calling WAHA. `CACHE_MAX_AGE_DAYS` prunes old messages (`0` keeps them forever), together with the stored edits, reactions and poll votes older than that; with `CACHE_ENABLED=false` nothing is pruned and those small, encrypted tables are kept. Media files are never cached. Set `CACHE_ENABLED=false` to turn it off.
 
 Sizing: every message read is kept, so on a busy account `cache.db` grows without limit by default. Set a retention such as `CACHE_MAX_AGE_DAYS=90` there; older messages are simply read from WAHA again when asked for.
 
 > [!WARNING]
-> The cache is a copy of your conversations at rest on the server (`DATA_DIR/tenants/<id>/cache.db`, `0600`, message bodies encrypted with the tenant's key). It is wiped when the tenant's WhatsApp account changes: pairing a different number at `<base>/pair` drops the tenant's runtime, so the next tool call re-checks the account and starts from an empty cache. A session re-linked to another number directly in WAHA (outside `/pair`) is only noticed after the next restart, because the account is checked once per runtime. Logout does not clear the cache: delete that `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Edits and deletions older than the refresh window are not picked up, so a deleted message can stay cached.
+> The cache is a copy of your conversations at rest on the server (`DATA_DIR/tenants/<id>/cache.db`, `0600`, message bodies encrypted with the tenant's key). It is wiped when the tenant's WhatsApp account changes: pairing a different number at `<base>/pair` drops the tenant's runtime, so the next tool call re-checks the account and starts from an empty cache. A session re-linked to another number directly in WAHA (outside `/pair`) is only noticed after the next restart, because the account is checked once per runtime. Logout does not clear the cache: delete that `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Without webhooks (`WAHA_WEBHOOK_SECRET` unset), edits and deletions made outside waha-mcp and older than the refresh window are not picked up, so a deleted message can stay cached; with webhooks they arrive as events and are applied to the cache, and `edit_message`/`delete_message` always apply their own change.
 
 ### Deleting messages
 
@@ -219,7 +219,7 @@ TRANSCRIPTION_MODEL=openai/whisper-large-v3-turbo
 TRANSCRIPTION_LANGUAGE=es
 ```
 
-OpenAI and Groq endpoints also work (the server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions`). When on, voice notes returned by `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` carry a `transcript`, `search_messages` also matches stored transcripts, and `transcribe_audio` transcribes any audio or voice note on demand. Automatic transcription is limited by `TRANSCRIPTION_MAX_SECONDS` and `TRANSCRIPTION_MAX_PER_CALL`; coverage notes say which voice notes were skipped (`TRANSCRIPTION_MAX_PER_CALL=0` leaves everything to `transcribe_audio`). Each transcript is stored in `cache.db`, also when `CACHE_ENABLED=false`, so it is never paid twice. Transcripts are not pruned by `CACHE_MAX_AGE_DAYS` and stay after their message is deleted in WhatsApp; they are wiped with the rest of `cache.db` when the account changes (see the message cache warning above), or when you delete the file.
+OpenAI and Groq endpoints also work (the server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions`). When on, voice notes returned by `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` carry a `transcript`, `search_messages` also matches stored transcripts, and `transcribe_audio` transcribes any audio or voice note on demand. Automatic transcription is limited by `TRANSCRIPTION_MAX_SECONDS` and `TRANSCRIPTION_MAX_PER_CALL`; coverage notes say which voice notes were skipped (`TRANSCRIPTION_MAX_PER_CALL=0` leaves everything to `transcribe_audio`). Each transcript is stored in `cache.db`, also when `CACHE_ENABLED=false`, so it is never paid twice. Transcripts are not pruned by `CACHE_MAX_AGE_DAYS`. A deleted voice note's transcript is removed when the deletion reaches waha-mcp (through `delete_message`, or by webhook when `WAHA_WEBHOOK_SECRET` is set); without webhooks, a deletion made elsewhere leaves it in place; they are wiped with the rest of `cache.db` when the account changes (see the message cache warning above), or when you delete the file.
 
 New automatic transcriptions stop starting after 25 s within one tool call so answers stay fast; the coverage note lists the ones "not transcribed yet (time budget)", and the next call picks them up. Each failure is logged as one line `transcription failed status=<code> kind=<kind>` (never the audio, the URL or the key). `kind=auth` means the key was rejected, `kind=config` (HTTP 400/404/405/422) a wrong `TRANSCRIPTION_API_URL` or `TRANSCRIPTION_MODEL`, `kind=rateLimited` a provider limit; the coverage note names the same kind.
 
@@ -236,7 +236,7 @@ Every MCP tool call is recorded in the central store (`auth.db`, table `tool_cal
 
 ## Missions (optional)
 
-A mission hands one direct chat to an agent that runs on the server: it writes to the contact on your behalf, as your assistant, until the objective is met, it fails, the deadline passes, you cancel it, or you write in that chat yourself (that takes the mission over and the agent goes silent). The agent is Claude Haiku 5.5 through [OpenRouter](https://openrouter.ai), which routes to Anthropic first and to other providers of the same model only when Anthropic fails. One `OPENROUTER_API_KEY` serves every tenant, so all mission spend is billed to the admin. Missions to groups are not available yet.
+A mission hands one direct chat to an agent that runs on the server: it writes to the contact on your behalf, as your assistant, until the objective is met, it fails, the deadline passes, you cancel it, or you write in that chat yourself (that takes the mission over and the agent goes silent; your reactions, edits, deletions and read marks do not). The agent is Claude Haiku 5.5 through [OpenRouter](https://openrouter.ai), which routes to Anthropic first and to other providers of the same model only when Anthropic fails. One `OPENROUTER_API_KEY` serves every tenant, so all mission spend is billed to the admin. Missions to groups are not available yet.
 
 | Tool             | What it does                                                                                                                                                                                                            |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -439,7 +439,7 @@ To sign out everywhere, open `<base>/logout` and log in: it revokes every client
 > The client address is the last hop of `X-Forwarded-For`, which is only trustworthy behind a reverse proxy that appends it (Traefik on EasyPanel). Do not expose the server directly to the internet.
 
 > [!WARNING]
-> Any client you connect can send WhatsApp messages from your number, subject to the approval prompt of that client. Only connect clients you trust, and keep approvals on for the sending tools.
+> Any client you connect can send WhatsApp messages from your number, and edit or delete (for everyone) messages you sent, subject to the approval prompt of that client. Only connect clients you trust, and keep approvals on for the sending tools.
 
 > [!WARNING]
 > Upload links work once, expire after `UPLOAD_TTL_SECONDS`, are capped at `UPLOAD_MAX_BYTES` and never talk to WAHA; until used, anyone holding one can put one file in that slot. Uploaded files are stored encrypted with `0600` permissions in `DATA_DIR/tenants/<id>/uploads` and deleted after sending or expiry.
@@ -452,7 +452,7 @@ To sign out everywhere, open `<base>/logout` and log in: it revokes every client
 ## Known limitations
 
 > [!NOTE]
-> GOWS does not return reactions or polls on the messages endpoint.
+> GOWS does not return reactions or poll votes on the messages endpoint: without webhooks reads show none; with `WAHA_WEBHOOK_SECRET` set they arrive by webhook from then on (earlier ones stay unknown).
 >
 > The chats list may omit some active chats; pending-reply and digest results say so in their coverage notes.
 

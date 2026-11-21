@@ -12,6 +12,7 @@
 - New tool `edit_message`: edits the text of a message you sent (WhatsApp only allows recent ones). The edit shows up in later reads right away and does not take over a mission.
 - New tool `delete_message`: deletes a message you sent, for everyone; it cannot be undone. The text is removed from the message cache, transcripts and overrides; mission logs, schedule history and WAHA's own storage keep their own retention.
 - New tools `mark_read` and `mark_unread`: mark a whole chat as read or unread. They do not take over a mission.
+- New tools `delete_my_data` and `unlink_account` (every account, `confirm: true` required): delete your own cached messages, transcripts and ended missions and schedules, or log your WhatsApp out of the server and sign out every connected app. They only ever act on the calling account. The `/privacidad` page explains them and the retention.
 - Automatic retention: cached message data (messages, edits, deletions, reactions, poll votes and voice-note transcripts) older than `CACHE_RETENTION_DAYS` (default 90) is deleted by the daily retention purge, for every active tenant, with the message cache on or off.
 
 ### Upgrade

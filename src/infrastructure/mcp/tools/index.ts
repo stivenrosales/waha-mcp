@@ -25,6 +25,7 @@ import {
 import { reactMessageTool } from "./reactMessage.js";
 import { cancelScheduledTool, listScheduledTool, scheduleMessageTool } from "./schedules.js";
 import { searchMessagesTool } from "./searchMessages.js";
+import { deleteMyDataTool, unlinkAccountTool } from "./selfService.js";
 import { sendContactTool } from "./sendContact.js";
 import { sendLocationTool } from "./sendLocation.js";
 import { sendMediaTool } from "./sendMedia.js";
@@ -68,5 +69,7 @@ export function createTools(): ToolDefinition[] {
     startMissionTool,
     answerMissionTool,
     cancelMissionTool,
+    deleteMyDataTool,
+    unlinkAccountTool,
   ] as unknown as ToolDefinition[];
 }

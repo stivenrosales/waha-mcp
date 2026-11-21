@@ -5,6 +5,7 @@ import { type CacheEventProcessor, createCacheEventProcessor } from "./applicati
 import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
 import { createMissionPurge, type MissionPurge } from "./application/missions/retention.js";
 import { createScheduleRunner, type ScheduleRunner } from "./application/schedules/runner.js";
+import { createSelfService } from "./application/selfService.js";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
 import {
@@ -66,6 +67,11 @@ export interface ComposeDeps {
    * `restore_tenant` catches up through it.
    */
   scheduleRunner?: () => ScheduleRunner | null;
+  /**
+   * The retention purge, read lazily (it is composed after the registry it needs):
+   * `delete_my_data` deletes the caller's ended missions and schedules through it.
+   */
+  missionPurge?: () => Pick<MissionPurge, "purgeTenantHistory"> | null;
   sessions: SessionAdmin;
   mediaSecret: Uint8Array;
   logger: Logger;
@@ -159,6 +165,17 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     timezone: config.timezone,
     ...(webhook ? { webhook } : {}),
   });
+  const selfService = createSelfService({
+    tenants,
+    auth: store,
+    sessions,
+    registry,
+    history: {
+      purgeTenantHistory: (tenantId, now) =>
+        deps.missionPurge?.()?.purgeTenantHistory(tenantId, now) ?? { missions: 0, schedules: 0 },
+    },
+    logger,
+  });
   const tools = createTools();
   const mcp = createMcpServer({
     tools,
@@ -167,6 +184,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     config,
     registry,
     admin,
+    selfService,
     logger,
     recordToolCall: (tenantId, call) =>
       tenants.recordToolCall({ tenantId, at: new Date().toISOString(), ...call }),
@@ -190,6 +208,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       publicBaseUrl: config.publicBaseUrl,
       limiter,
       logger,
+      cacheRetentionDays: config.cacheRetentionDays,
       ...(webhook ? { webhook } : {}),
     }),
     guard: bearerGuard({ store, tenants, publicBaseUrl: config.publicBaseUrl }),

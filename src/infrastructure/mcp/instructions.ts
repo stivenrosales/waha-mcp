@@ -31,7 +31,10 @@ Message actions:
 Missions (start_mission, get_mission, list_missions, answer_mission, cancel_mission; only when the server has them configured):
 - A mission hands one direct chat to a server-side assistant that converses on the owner's behalf until the objective is met, it fails, the deadline passes, or the owner cancels it. Start one only when the owner asked; show them the system prompt and the recipient first.
 - When the assistant needs the owner, they get a WhatsApp message to themselves; relay their reply with answer_mission. Any message the owner sends in that chat (including through send_text or send_media) takes the mission over and the assistant goes silent.
-- Results can end with "Missions: <n> finished — call list_missions."; when they do, check list_missions and tell the owner the outcomes.`;
+- Results can end with "Missions: <n> finished — call list_missions."; when they do, check list_missions and tell the owner the outcomes.
+
+Privacy (delete_my_data, unlink_account; they act only on this account):
+- delete_my_data deletes the data this server stores about the owner's conversations (cached messages, transcripts, ended missions and scheduled messages); unlink_account logs WhatsApp out of this server and signs out every connected app. Both cannot be undone: call them only when the owner explicitly asked in this conversation, after saying what will happen.`;
 
 /** Appended to the instructions for the admin only (members never see the admin tools). */
 export const ADMIN_INSTRUCTIONS = `Tenant management (admin only; list_tenants, get_transcription_usage, get_tool_usage, get_llm_usage, create_invite, reset_password, revoke_tenant, restore_tenant, delete_tenant):

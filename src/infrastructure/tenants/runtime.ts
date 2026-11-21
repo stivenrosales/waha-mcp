@@ -73,7 +73,7 @@ const TENANT_ID = /^[A-Za-z0-9_-]+$/;
  */
 export type TenantToolContext = Omit<
   ToolRunContext,
-  "mediaIdleTimeoutMs" | "mapper" | "admin" | "logger"
+  "mediaIdleTimeoutMs" | "mapper" | "admin" | "logger" | "self"
 > & {
   mapper: () => Promise<EngineMapper>;
 };

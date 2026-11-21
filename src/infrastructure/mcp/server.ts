@@ -1,4 +1,5 @@
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import type { createSelfService } from "../../application/selfService.js";
 import type { TenantAdmin } from "../../application/tenantAdmin.js";
 import type { Config } from "../../config.js";
 import type { AuthInfo } from "../auth/bearer.js";
@@ -22,6 +23,11 @@ export interface CreateMcpServerOptions {
   registry: Pick<TenantRegistry, "acquire">;
   /** Tenant management handed to admin tools; members get null. */
   admin: TenantAdmin;
+  /**
+   * Self-service actions, bound per request to the token's tenant and that request's runtime
+   * (`delete_my_data`, `unlink_account`); absent: those tools refuse.
+   */
+  selfService?: ReturnType<typeof createSelfService>;
   /** Idle timeout for media bodies read by `get_media` (default 30 s); injectable for tests. */
   mediaIdleTimeoutMs?: number;
   logger?: Logger;
@@ -75,6 +81,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
     logger,
     mediaIdleTimeoutMs,
     recordToolCall,
+    selfService,
   } = options;
   const adminInstructions = `${instructions}\n\n${ADMIN_INSTRUCTIONS}`;
 
@@ -94,6 +101,10 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
       ...extra.runtime.context,
       mediaIdleTimeoutMs,
       admin: isAdmin ? admin : null,
+      // The tenant comes from the verified token, the data from this request's own runtime.
+      self: selfService
+        ? selfService.forTenant(extra.auth.tenantId, extra.runtime.cacheData)
+        : null,
       logger,
       ...(recordToolCall
         ? { onToolCall: (call: ToolCallRecord) => recordToolCall(extra.auth.tenantId, call) }

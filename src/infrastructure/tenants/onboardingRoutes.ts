@@ -3,6 +3,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { getCookie } from "hono/cookie";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { DEFAULT_CACHE_RETENTION_DAYS } from "../../config.js";
 import type { SessionAdmin, WebhookTarget } from "../../domain/ports/SessionAdmin.js";
 import type { LinkKind, Tenant, TenantStore, User } from "../../domain/ports/TenantStore.js";
 import { USERNAME_PATTERN, USERNAME_RULE } from "../../domain/username.js";
@@ -62,6 +63,8 @@ export function createOnboardingRoutes(deps: {
   /** The missions webhook a session gets before it is (re)started; absent when missions are off. */
   webhook?: WebhookTarget;
   logger?: Logger;
+  /** `CACHE_RETENTION_DAYS`, stated on the privacy page; default 90. */
+  cacheRetentionDays?: number;
 }): Hono {
   const { tenants, auth, sessions, registry, limiter } = deps;
   const now = deps.now ?? Date.now;
@@ -331,7 +334,11 @@ export function createOnboardingRoutes(deps: {
     }
   };
 
-  app.get(PRIVACY_PATH, (c) => page(c)(privacyPage()));
+  app.get(PRIVACY_PATH, (c) =>
+    page(c)(
+      privacyPage({ cacheRetentionDays: deps.cacheRetentionDays ?? DEFAULT_CACHE_RETENTION_DAYS }),
+    ),
+  );
 
   app.get("/pair", async (c) => {
     const html = page(c, { qr: true });

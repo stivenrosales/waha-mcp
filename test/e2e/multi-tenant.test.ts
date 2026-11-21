@@ -13,7 +13,11 @@ import type { EventStore } from "../../src/domain/ports/EventStore.js";
 import type { TenantStore } from "../../src/domain/ports/TenantStore.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
 import { createCacheData } from "../../src/infrastructure/cache/cacheData.js";
-import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
+import {
+  createSqliteMessageStore,
+  openCacheDatabase,
+} from "../../src/infrastructure/cache/sqliteMessageStore.js";
+import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
 import { createTenantCipher, type TenantCipher } from "../../src/infrastructure/crypto/envelope.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { MEDIA_GONE } from "../../src/infrastructure/media/resolveMedia.js";
@@ -722,6 +726,70 @@ describe("e2e: tenant isolation through the composed app", () => {
     // A keeps working.
     expect((await call(alice.client, "list_chats")).isError).toBeFalsy();
     expect((await request(w.app, aliceLink)).status).toBe(200);
+  });
+});
+
+describe("e2e: self-service deletion and unlink are scoped to the caller", () => {
+  /** Seeds one cached message and one transcript into the tenant's runtime `cache.db`. */
+  function seed(f: Fakes | undefined, chatId: string, id: string): void {
+    if (!f?.db || !f.cipher) throw new Error("runtime not built yet");
+    createSqliteMessageStore(f.db, f.cipher).upsertRaw(chatId, [
+      { id, ts: Math.floor(Date.now() / 1000), raw: { id, body: "secreto" } },
+    ]);
+    createSqliteTranscriptStore(f.db, f.cipher).put(chatId, id, "nota de voz");
+  }
+  const cached = (f: Fakes | undefined, chatId: string) => {
+    if (!f?.db || !f.cipher) throw new Error("runtime not built yet");
+    return {
+      messages: createSqliteMessageStore(f.db, f.cipher).countRange(chatId, {}),
+      transcripts: Number(
+        (f.db.prepare("SELECT COUNT(*) AS n FROM transcripts").get() as { n: number }).n,
+      ),
+    };
+  };
+
+  it("delete_my_data wipes only the caller's cache; another tenant's data survives", async () => {
+    const w = await world();
+    const alice = await onboard(w, "Alice", "51911110000@c.us");
+    const bob = await onboard(w, "Bob", "51922220000@c.us");
+    seed(w.fakes.get("Alice"), A_CHAT, "true_A_1");
+    seed(w.fakes.get("Bob"), B_CHAT, "true_B_1");
+
+    const refused = await call(alice.client, "delete_my_data", { confirm: false });
+    expect(refused.isError).toBe(true);
+    expect(cached(w.fakes.get("Alice"), A_CHAT)).toEqual({ messages: 1, transcripts: 1 });
+
+    const done = await call(alice.client, "delete_my_data", { confirm: true });
+    expect(done.isError).toBeFalsy();
+    expect(sc(done)).toMatchObject({ messages: 1, transcripts: 1 });
+    expect(cached(w.fakes.get("Alice"), A_CHAT)).toEqual({ messages: 0, transcripts: 0 });
+    expect(cached(w.fakes.get("Bob"), B_CHAT)).toEqual({ messages: 1, transcripts: 1 });
+    // Deleting data is not signing out: both keep working.
+    expect((await call(alice.client, "list_chats")).isError).toBeFalsy();
+    expect((await call(bob.client, "list_chats")).isError).toBeFalsy();
+  });
+
+  it("unlink_account logs out only the caller's WhatsApp and tokens; the other tenant is unaffected", async () => {
+    const w = await world();
+    const alice = await onboard(w, "Alice", "51911110000@c.us");
+    const bob = await onboard(w, "Bob", "51922220000@c.us");
+    const aliceSession = w.tenants.getTenant(alice.tenantId)?.wahaSession as string;
+    const bobSession = w.tenants.getTenant(bob.tenantId)?.wahaSession as string;
+    seed(w.fakes.get("Alice"), A_CHAT, "true_A_1");
+
+    const done = await call(bob.client, "unlink_account", { confirm: true });
+    expect(done.isError).toBeFalsy();
+    expect(sc(done)).toEqual({ whatsapp: "logged_out", signedOut: true });
+    expect(w.sessions.calls).toContain(`logout:${bobSession}`);
+    expect(w.sessions.calls).not.toContain(`logout:${aliceSession}`);
+    expect((await rawMcp(w.app, bob.token)).status).toBe(401);
+    // Bob's account stays active: he can sign in again (e.g. at /pair to re-link WhatsApp).
+    expect(w.tenants.getTenant(bob.tenantId)?.status).toBe("active");
+    expect((await oauthLogin(w.app, bob.username, bob.password)).status).toBe(302);
+
+    expect((await rawMcp(w.app, alice.token)).status).toBe(200);
+    expect((await call(alice.client, "list_chats")).isError).toBeFalsy();
+    expect(cached(w.fakes.get("Alice"), A_CHAT)).toEqual({ messages: 1, transcripts: 1 });
   });
 });
 

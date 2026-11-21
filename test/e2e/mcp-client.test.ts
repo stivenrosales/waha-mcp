@@ -180,6 +180,9 @@ const ANNOTATION_OVERRIDES: Record<string, typeof DESTRUCTIVE_ANNOTATIONS> = {
   delete_message: DESTRUCTIVE_ANNOTATIONS,
   mark_read: IDEMPOTENT_WRITE_ANNOTATIONS,
   mark_unread: IDEMPOTENT_WRITE_ANNOTATIONS,
+  // Local, irreversible changes to the caller's own account (nothing is sent to WhatsApp chats).
+  delete_my_data: { ...DESTRUCTIVE_ANNOTATIONS, openWorldHint: false },
+  unlink_account: { ...DESTRUCTIVE_ANNOTATIONS, openWorldHint: false },
 };
 
 /** Write tools; each later task appends its own. */
@@ -200,6 +203,8 @@ const SEND_TOOLS = [
   "start_mission",
   "answer_mission",
   "cancel_mission",
+  "delete_my_data",
+  "unlink_account",
 ];
 
 /** Every e2e test runs twice: CACHE_ENABLED=false (today's path) and with the message cache. */

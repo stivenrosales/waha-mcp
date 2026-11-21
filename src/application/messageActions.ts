@@ -1,6 +1,7 @@
 import type { EngineMapper } from "../domain/message.js";
 import type {
   MessageActionStore,
+  MessageOverride,
   StoredReaction,
   StoredVote,
 } from "../domain/ports/MessageActionStore.js";
@@ -34,33 +35,39 @@ export function createMessageActions(deps: {
 }): MessageActions {
   const { store, messages, transcripts } = deps;
 
-  /** Rewrites each cached row of `shortId` with what its stored override says (keeps ts). */
-  async function rewriteCached(shortId: string): Promise<void> {
-    if (!messages) return;
-    const override = store.overrides([shortId]).get(shortId);
-    if (!override) return;
+  /**
+   * Resolves everything that can fail (cached rows, mapper lookup) BEFORE any write, so a failure
+   * throws with nothing written and the caller can retry. The returned function only writes.
+   */
+  async function prepareRewrite(shortId: string): Promise<(o: MessageOverride) => void> {
+    if (!messages) return () => {};
     const rows = messages.findByShortId(shortId);
-    if (rows.length === 0) return;
+    if (rows.length === 0) return () => {};
     const mapper = await deps.mapper();
-    for (const row of rows) {
-      const raw =
-        override.kind === "revoked"
-          ? mapper.revokedPayload(row.raw)
-          : mapper.editedPayload(row.raw, override.text);
-      messages.upsertRaw(row.chatId, [{ id: row.id, ts: row.ts, raw }]);
-    }
+    return (override) => {
+      for (const row of rows) {
+        const raw =
+          override.kind === "revoked"
+            ? mapper.revokedPayload(row.raw)
+            : mapper.editedPayload(row.raw, override.text);
+        messages.upsertRaw(row.chatId, [{ id: row.id, ts: row.ts, raw }]);
+      }
+    };
   }
 
   return {
     async applyEdit(shortId, text, at) {
+      const rewrite = await prepareRewrite(shortId);
       store.putOverride(shortId, { kind: "edited", text, at });
       // The stored override wins: a revoke (final) or a newer edit may already be there.
-      await rewriteCached(shortId);
+      const current = store.overrides([shortId]).get(shortId);
+      if (current) rewrite(current);
     },
     async applyRevoke(shortId, at) {
+      const rewrite = await prepareRewrite(shortId);
       store.putOverride(shortId, { kind: "revoked", at });
       transcripts.deleteByShortId(shortId);
-      await rewriteCached(shortId);
+      rewrite({ kind: "revoked", at });
     },
     applyReaction: (r) => store.putReaction(r),
     applyVote: (v) => store.putVote(v),

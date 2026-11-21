@@ -40,7 +40,11 @@ describe("message actions on cached payloads", () => {
     messages.upsertRaw(CHAT, [{ id: a.id as string, ts: 100, raw: a }]);
     messages.upsertRaw(OTHER, [{ id: b.id as string, ts: 100, raw: b }]);
     transcripts.put(CHAT, a.id as string, "spoken secret");
+    const cached = () => JSON.stringify(messages.findByShortId("S1")); // decrypted rows
+    expect(cached()).toContain("old secret words");
     await actions.applyRevoke("S1", 200);
+    expect(messages.findByShortId("S1")).toHaveLength(2);
+    expect(cached()).not.toContain("old secret words");
     for (const chat of [CHAT, OTHER]) {
       const [msg] = read(messages, chat);
       expect(msg?.type).toBe("deleted");
@@ -76,6 +80,34 @@ describe("message actions on cached payloads", () => {
     expect(msg?.type).toBe("deleted");
     expect(msg?.text).toBeNull();
   });
+
+  it.each(["applyRevoke", "applyEdit"] as const)(
+    "%s with a failing mapper lookup writes nothing and throws",
+    async (method) => {
+      const db = openCacheDatabase(":memory:");
+      const cipher = testCipher();
+      const messages = createSqliteMessageStore(db, cipher);
+      const transcripts = createSqliteTranscriptStore(db, cipher);
+      const store = createSqliteMessageActionStore(db, cipher);
+      const actions = createMessageActions({
+        store,
+        messages,
+        transcripts,
+        mapper: async () => {
+          throw new Error("waha down");
+        },
+      });
+      const raw = rawText("F1", 100, "keep me");
+      messages.upsertRaw(CHAT, [{ id: raw.id as string, ts: 100, raw }]);
+      transcripts.put(CHAT, raw.id as string, "spoken");
+      const call =
+        method === "applyRevoke" ? actions.applyRevoke("F1", 5) : actions.applyEdit("F1", "x", 5);
+      await expect(call).rejects.toThrow("waha down");
+      expect(store.overrides(["F1"]).size).toBe(0);
+      expect(transcripts.get(CHAT, raw.id as string)).toBe("spoken");
+      expect(messages.findByShortId("F1")[0]?.raw).toEqual(raw);
+    },
+  );
 
   it("works with the cache off", async () => {
     const { store, actions } = setup(false);

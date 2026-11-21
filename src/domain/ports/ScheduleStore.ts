@@ -19,10 +19,20 @@ export interface ScheduleRow {
   state: ScheduleState;
   createdAt: string;
   endedAt: string | null;
+  /**
+   * Follow-ups only ("if no reply within"): the anchor. The run is skipped when the contact
+   * wrote in the chat after it. Null for a regular schedule.
+   */
+  followUpSince: string | null;
 }
 
+export type NewSchedule = Omit<
+  ScheduleRow,
+  "id" | "runsDone" | "state" | "createdAt" | "endedAt" | "followUpSince"
+> & { followUpSince?: string | null };
+
 export interface ScheduleStore {
-  create(q: Omit<ScheduleRow, "id" | "runsDone" | "state" | "createdAt" | "endedAt">): ScheduleRow;
+  create(q: NewSchedule): ScheduleRow;
   get(tenantId: string, id: string): ScheduleRow | null;
   /** Active schedules of the tenant, newest first. */
   listActive(tenantId: string): ScheduleRow[];

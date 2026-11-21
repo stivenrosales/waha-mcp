@@ -16,11 +16,19 @@ CREATE TABLE IF NOT EXISTS schedules (
   new_contact INTEGER NOT NULL,
   state TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  ended_at TEXT
+  ended_at TEXT,
+  follow_up_since TEXT
 );
 CREATE INDEX IF NOT EXISTS schedules_tenant ON schedules (tenant_id, state);
 CREATE INDEX IF NOT EXISTS schedules_due ON schedules (state, next_run_at);
 `;
+
+/** Adds `follow_up_since` to a `schedules` table created before follow-ups (rows read null). */
+function migrateFollowUps(db: DatabaseSync): void {
+  const cols = db.prepare("PRAGMA table_info(schedules)").all() as unknown as { name: string }[];
+  if (!cols.some((c) => c.name === "follow_up_since"))
+    db.exec("ALTER TABLE schedules ADD COLUMN follow_up_since TEXT");
+}
 
 interface Raw {
   id: string;
@@ -36,6 +44,7 @@ interface Raw {
   state: ScheduleRow["state"];
   created_at: string;
   ended_at: string | null;
+  follow_up_since: string | null;
 }
 
 const toRow = (r: Raw): ScheduleRow => ({
@@ -52,6 +61,7 @@ const toRow = (r: Raw): ScheduleRow => ({
   state: r.state,
   createdAt: r.created_at,
   endedAt: r.ended_at,
+  followUpSince: r.follow_up_since ?? null,
 });
 
 /** Patchable field -> column. */
@@ -75,6 +85,7 @@ export function createSqliteScheduleStore(
   now: () => string = () => new Date().toISOString(),
 ): ScheduleStore {
   db.exec(SCHEMA);
+  migrateFollowUps(db);
   const all = (sql: string, ...args: (string | number)[]): ScheduleRow[] =>
     (db.prepare(sql).all(...args) as unknown as Raw[]).map(toRow);
 
@@ -83,8 +94,8 @@ export function createSqliteScheduleStore(
       const id = newId();
       db.prepare(
         `INSERT INTO schedules (id, tenant_id, chat_id, kind, repeat, first_at, next_run_at,
-           max_runs, new_contact, state, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+           max_runs, new_contact, state, created_at, follow_up_since)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
       ).run(
         id,
         q.tenantId,
@@ -96,6 +107,7 @@ export function createSqliteScheduleStore(
         q.maxRuns,
         q.newContact ? 1 : 0,
         now(),
+        q.followUpSince ?? null,
       );
       return this.get(q.tenantId, id) as ScheduleRow;
     },

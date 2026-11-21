@@ -201,6 +201,97 @@ describe("schedule service: schedule()", () => {
   });
 });
 
+describe("schedule service: follow-ups (if no reply within)", () => {
+  const followUp = (h: ReturnType<typeof harness>, q: Record<string, unknown> = {}) =>
+    h.service.schedule({
+      chatId: CHAT,
+      kind: "ai",
+      instruction: "Recuérdale con buen tono lo de la cotización",
+      repeat: "none",
+      ifNoReplyWithin: "3d",
+      ...q,
+    });
+
+  it("runs once, the window after now, and stores now as the anchor", async () => {
+    const h = harness();
+    const { row, note } = await followUp(h);
+    expect(note).toBeNull();
+    expect(row).toMatchObject({
+      chatId: CHAT,
+      kind: "ai",
+      repeat: "none",
+      maxRuns: 1,
+      state: "active",
+      followUpSince: T0.toISOString(),
+      firstAt: "2026-11-20T15:00:00.000Z",
+      nextRunAt: "2026-11-20T15:00:00.000Z",
+    });
+    expect(h.store.get(TENANT, row.id)?.followUpSince).toBe(T0.toISOString());
+    expect(h.log.content(row.id)).toEqual({
+      instruction: "Recuérdale con buen tono lo de la cotización",
+    });
+    const hours = await followUp(h, { ifNoReplyWithin: "48h" });
+    expect(hours.row.firstAt).toBe("2026-11-19T15:00:00.000Z");
+    const fixed = await followUp(h, {
+      kind: "fixed",
+      instruction: undefined,
+      text: "¿Pudiste ver la cotización?",
+    });
+    expect(fixed.row).toMatchObject({ kind: "fixed", followUpSince: T0.toISOString() });
+  });
+
+  it("stores the normalized chat id, like any schedule", async () => {
+    const h = harness();
+    const { row } = await followUp(h, { chatId: LID });
+    expect(row.chatId).toBe(LID);
+    const phone = await followUp(h, { chatId: "51911111111@s.whatsapp.net" });
+    expect(phone.row.chatId).toBe(CHAT);
+  });
+
+  it("regular schedules have no anchor", async () => {
+    const h = harness();
+    expect((await h.fixed()).row.followUpSince).toBeNull();
+  });
+
+  it("takes either at or if_no_reply_within, never both, and needs one of them", async () => {
+    const h = harness();
+    await expect(followUp(h, { at: "2026-11-18 09:00" })).rejects.toThrow(
+      refusal(SCHEDULE_TEXTS.followUpAt),
+    );
+    await expect(h.fixed({ at: undefined })).rejects.toThrow(refusal(SCHEDULE_TEXTS.needAt));
+    expect(h.store.countActive(TENANT)).toBe(0);
+  });
+
+  it("refuses groups and repetition", async () => {
+    const h = harness();
+    await expect(followUp(h, { chatId: GROUP })).rejects.toThrow(
+      refusal(SCHEDULE_TEXTS.followUpDirect),
+    );
+    await expect(followUp(h, { repeat: "daily" })).rejects.toThrow(
+      refusal(SCHEDULE_TEXTS.followUpOnce),
+    );
+    await expect(followUp(h, { maxRuns: 2 })).rejects.toThrow(refusal(SCHEDULE_TEXTS.maxRunsOnce));
+    expect(h.store.countActive(TENANT)).toBe(0);
+  });
+
+  it("accepts whole hours or days from 1h to 30d", async () => {
+    const h = harness();
+    for (const ok of ["1h", "720h", "1d", "30d", " 2D "])
+      expect((await followUp(h, { ifNoReplyWithin: ok })).row.state).toBe("active");
+    for (const bad of ["0h", "0d", "721h", "31d", "3w", "1.5d", "-1d", "d", "3", ""])
+      await expect(followUp(h, { ifNoReplyWithin: bad })).rejects.toThrow(
+        refusal(SCHEDULE_TEXTS.replyWindow),
+      );
+  });
+
+  it("notes quiet hours for the run time, like any schedule", async () => {
+    const h = harness();
+    // 10:00 + 13 h = 23:00 in Lima.
+    const { note } = await followUp(h, { ifNoReplyWithin: "13h" });
+    expect(note).toBe(SCHEDULE_TEXTS.quietHours("22:00", "08:00", "2026-11-18 08:00"));
+  });
+});
+
 describe("schedule service: list() and cancel()", () => {
   it("lists active schedules newest first with their content and last five runs", async () => {
     const h = harness();

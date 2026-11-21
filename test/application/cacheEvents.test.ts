@@ -171,7 +171,15 @@ describe("cacheEffectOf", () => {
   });
 });
 
-function setup(opts: { failApply?: boolean; failTimes?: number; now?: () => number } = {}) {
+function setup(
+  opts: {
+    failApply?: boolean;
+    failTimes?: number;
+    now?: () => number;
+    /** A second tenant whose revokes always fail. */
+    failingTenant?: string;
+  } = {},
+) {
   const authDb = new DatabaseSync(":memory:");
   const events = createSqliteEventStore(authDb);
   const db = openCacheDatabase(":memory:");
@@ -207,13 +215,22 @@ function setup(opts: { failApply?: boolean; failTimes?: number; now?: () => numb
       cipher.openText(e.payloadSealed, `webhook:${e.tenantId}:${e.eventId}`),
     actions,
   };
+  const failingPort: CacheEventPort = {
+    ...port,
+    actions: {
+      ...real,
+      applyRevoke: async () => {
+        throw new Error("session logged out");
+      },
+    },
+  };
   const processor = createCacheEventProcessor({
     events,
     acquire: (tenantId) => {
-      if (tenantId !== TENANT) return null;
+      if (tenantId !== TENANT && tenantId !== opts.failingTenant) return null;
       held += 1;
       return {
-        port,
+        port: tenantId === TENANT ? port : failingPort,
         release: () => {
           released += 1;
         },
@@ -323,6 +340,21 @@ describe("cache event processor", () => {
     expect(s.events.pending(10)).toHaveLength(0);
     expect(s.read("100000000000009@g.us")[0]?.type).toBe("deleted");
     expect(s.counts().held).toBe(s.counts().released);
+  });
+
+  it("over 100 events backing off for one tenant do not delay a revoke for another", async () => {
+    let now = RECEIVED * 1000;
+    const s = setup({ failingTenant: "tA", now: () => now });
+    for (let i = 0; i < 150; i += 1) s.put("message.revoked", { revokedMessageId: `A${i}` }, "tA");
+    await s.processor.tick();
+    await s.processor.tick();
+    const raw = rawText("B1", 100, "to delete");
+    s.messages.upsertRaw("100000000000009@g.us", [{ id: raw.id as string, ts: 100, raw }]);
+    s.put("message.revoked", { revokedMessageId: "B1" });
+    now += 1_000;
+    await s.processor.tick();
+    expect(s.read("100000000000009@g.us")[0]?.type).toBe("deleted");
+    expect(s.events.pending(200)).toHaveLength(150);
   });
 
   it("a failing event gives up only after the horizon", async () => {

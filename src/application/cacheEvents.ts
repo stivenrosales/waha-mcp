@@ -166,7 +166,9 @@ export function createCacheEventProcessor(deps: {
   };
 
   async function process(): Promise<void> {
-    for (const e of events.pending(EVENT_BATCH, CACHE_EVENT_KINDS)) {
+    // Events backing off are skipped below; reading that many more keeps them from filling the
+    // batch, so one tenant's failing events never hold back another tenant's.
+    for (const e of events.pending(EVENT_BATCH + failures.size, CACHE_EVENT_KINDS)) {
       if (stopped) return;
       const retry = failures.get(e.id);
       if (retry && retry.nextAt > now()) continue;

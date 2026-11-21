@@ -40,6 +40,38 @@ export async function readScheduleContext(
     }));
 }
 
+/** How many messages after a follow-up's anchor are read to find the contact's reply. */
+export const REPLY_CHECK_MESSAGES = 100;
+
+/**
+ * True when the contact wrote in the chat after `sinceIso`: any message not from the owner,
+ * text or media, except reactions and system messages. A chat WAHA has never seen has no reply;
+ * any other read failure is thrown (the runner then skips the follow-up).
+ */
+export async function contactRepliedSince(
+  ctx: Pick<TenantToolContext, "gateway" | "mapper">,
+  chatId: string,
+  sinceIso: string,
+): Promise<boolean> {
+  const mapper = await ctx.mapper();
+  const since = Date.parse(sinceIso);
+  let raws: unknown[];
+  try {
+    raws = await ctx.gateway.getMessages(chatId, {
+      limit: REPLY_CHECK_MESSAGES,
+      offset: 0,
+      from: Math.floor(since / 1000),
+    });
+  } catch (error) {
+    if (error instanceof WahaNotFoundError) return false;
+    throw error;
+  }
+  return raws
+    .filter((raw) => !mapper.reaction(raw))
+    .map((raw) => mapper.message(raw))
+    .some((m) => !m.fromMe && m.type !== "system" && Date.parse(m.timestamp) > since);
+}
+
 /** The schedule runner's view of one tenant runtime. */
 export function scheduleTenantPort(
   runtime: TenantRuntime,
@@ -52,5 +84,6 @@ export function scheduleTenantPort(
     log: runtime.scheduleLog,
     lookupLid: (lid) => ctx.gateway.lookupLid(lid),
     readContext: (chatId) => readScheduleContext(ctx, chatId, timezone, now()),
+    repliedSince: (chatId, sinceIso) => contactRepliedSince(ctx, chatId, sinceIso),
   };
 }

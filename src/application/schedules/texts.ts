@@ -18,4 +18,8 @@ export const SKIP_REASONS = {
   mission: "hay una misión activa en este chat",
   budget: "presupuesto mensual agotado",
   llm: "el modelo no respondió",
+  /** A follow-up whose contact wrote in the chat after it was scheduled. */
+  replied: "ya respondió",
+  /** A follow-up whose chat could not be read: never nudge someone who may have answered. */
+  replyCheck: "no pude revisar si respondió",
 };

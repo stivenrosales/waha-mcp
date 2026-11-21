@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DISABLED_TRANSCRIPTION } from "../../../src/application/transcripts.js";
-import { readScheduleContext } from "../../../src/infrastructure/schedules/tenantPort.js";
+import {
+  contactRepliedSince,
+  readScheduleContext,
+} from "../../../src/infrastructure/schedules/tenantPort.js";
 import { gowsMapper } from "../../../src/infrastructure/waha/engines/gows.js";
-import { ANA, gateway, msg, systemMsg } from "../../application/helpers.js";
+import { ANA, BOB, gateway, msg, systemMsg } from "../../application/helpers.js";
+import { rawReaction, rawVoice } from "../../fakes/InMemoryWahaGateway.js";
 
 const TZ = "America/Lima";
 /** 10:00 in Lima. */
@@ -57,5 +61,65 @@ describe("readScheduleContext", () => {
       NOW,
     );
     expect(older).toEqual([]);
+  });
+});
+
+describe("contactRepliedSince", () => {
+  /** The anchor: three days before NOW. */
+  const SINCE = new Date(NOW.getTime() - 3 * DAY * 1000);
+  const s = sec(SINCE);
+  const replied = (messages: Record<string, unknown>[], chatId = ANA) =>
+    contactRepliedSince(
+      { gateway: gateway({ messages: { [ANA]: messages } }), mapper: async () => gowsMapper },
+      chatId,
+      SINCE.toISOString(),
+    );
+
+  it("is true when the contact wrote after the anchor", async () => {
+    expect(
+      await replied([
+        msg("m2", s + 60, "Sí, ya lo vi", { chat: ANA }),
+        msg("m1", s - 60, "Te mando la cotización", { chat: ANA, mine: true }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("counts a voice note from the contact as a reply", async () => {
+    const voice = rawVoice("v1", s + 60, { url: "http://waha/v1.ogg", chat: ANA, sender: ANA });
+    expect(await replied([voice])).toBe(true);
+  });
+
+  it("is false with only the owner's messages, reactions or system messages after the anchor", async () => {
+    expect(
+      await replied([
+        rawReaction("r1", s + 300, "m1", "👍", { chat: ANA, sender: ANA }),
+        systemMsg("x1", s + 200, ANA),
+        msg("m2", s + 100, "¿Lo viste?", { chat: ANA, mine: true }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("ignores the contact's messages up to the anchor", async () => {
+    expect(
+      await replied([
+        msg("m2", s, "Justo antes", { chat: ANA }),
+        msg("m1", s - 3600, "Hola", { chat: ANA }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("reads only the given chat; a chat with no messages has no reply", async () => {
+    expect(await replied([msg("m1", s + 60, "Hola", { chat: ANA })], BOB)).toBe(false);
+  });
+
+  it("propagates read failures", async () => {
+    const failing = gateway({ failWith: new Error("waha down") });
+    await expect(
+      contactRepliedSince(
+        { gateway: failing, mapper: async () => gowsMapper },
+        ANA,
+        SINCE.toISOString(),
+      ),
+    ).rejects.toThrow("waha down");
   });
 });

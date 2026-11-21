@@ -23,6 +23,8 @@ export interface ScheduleTenantPort {
   sender: WhatsAppSender;
   log: ScheduleLog;
   readContext(chatId: string): Promise<ContextLine[]>;
+  /** True when the contact wrote in the chat after `sinceIso` (reactions do not count). */
+  repliedSince(chatId: string, sinceIso: string): Promise<boolean>;
   lookupLid(id: string): Promise<string | null>;
 }
 
@@ -246,11 +248,28 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
     return d.action === "send" ? { send: d.text } : skip(d.reason);
   }
 
+  /**
+   * Why a follow-up is not sent: the contact replied after `since`, or the chat could not be
+   * read (fail closed). Null when it goes ahead.
+   */
+  async function replySkip(c: Ctx, since: string): Promise<string | null> {
+    try {
+      return (await c.port.repliedSince(c.s.chatId, since)) ? SKIP_REASONS.replied : null;
+    } catch (err) {
+      logger.info(`schedule=${c.s.id} reply-check=failed error=${errName(err)}`);
+      return SKIP_REASONS.replyCheck;
+    }
+  }
+
   /** The outcome of one claimed run, or null when it was cancelled before sending. */
   async function attempt(c: Ctx): Promise<ScheduleRun | null> {
     const { s, now } = c;
     const at = iso(now);
     if (await missionOnChat(c)) return { at, outcome: "skipped", reason: SKIP_REASONS.mission };
+    if (s.followUpSince !== null) {
+      const reason = await replySkip(c, s.followUpSince);
+      if (reason) return { at, outcome: "skipped", reason };
+    }
     const content = c.port.log.content(s.id);
     const source = s.kind === "fixed" ? content?.text : content?.instruction;
     if (!source) {
@@ -302,7 +321,7 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
     else if (run.outcome === "unknown") await notify(c, scheduleTexts.unknown(label(s)));
     else if (s.kind === "ai" && run.outcome === "sent")
       await notify(c, scheduleTexts.sent(label(s), run.text ?? ""));
-    else if (s.kind === "ai" && run.outcome === "skipped")
+    else if ((s.kind === "ai" || s.followUpSince !== null) && run.outcome === "skipped")
       await notify(c, scheduleTexts.skipped(label(s), run.reason ?? ""));
     if (passed.length > 0) await notify(c, scheduleTexts.missed(label(s), passed.length));
     if (ended && s.repeat !== "none") await notify(c, scheduleTexts.ended(label(s)));

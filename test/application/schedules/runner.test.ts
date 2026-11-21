@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { createScheduleRunner } from "../../../src/application/schedules/runner.js";
-import { scheduleTexts } from "../../../src/application/schedules/texts.js";
+import { SKIP_REASONS, scheduleTexts } from "../../../src/application/schedules/texts.js";
 import { LlmUnavailableError, SendOutcomeUnknownError } from "../../../src/domain/errors.js";
 import { DEFAULT_MISSION_LIMITS } from "../../../src/domain/missions/limits.js";
 import type {
@@ -97,7 +97,9 @@ function harness(
   const hooks: {
     sleep?: () => Promise<void>;
     lookupLid?: (lid: string) => Promise<string | null>;
+    repliedSince?: (chatId: string, sinceIso: string) => Promise<boolean>;
   } = {};
+  const replyChecks: [string, string][] = [];
   /** `failAdvance`: recording a finished run fails like a database error would. */
   const faults = { failAdvance: opts.failAdvance ?? false };
   const logs: string[] = [];
@@ -145,6 +147,10 @@ function harness(
                   }
                 : log,
               readContext: async () => [],
+              repliedSince: async (chatId, sinceIso) => {
+                replyChecks.push([chatId, sinceIso]);
+                return hooks.repliedSince ? hooks.repliedSince(chatId, sinceIso) : false;
+              },
               lookupLid: async (lid) =>
                 hooks.lookupLid ? hooks.lookupLid(lid) : lid === LID ? CHAT : null,
             },
@@ -171,6 +177,7 @@ function harness(
       first?: Date;
       maxRuns?: number;
       tenantId?: string;
+      followUpSince?: Date;
     } & ({ text: string } | { instruction: string }),
   ): ScheduleRow {
     const first = q.first ?? T0;
@@ -183,6 +190,7 @@ function harness(
       nextRunAt: first.toISOString(),
       maxRuns: q.maxRuns ?? (q.repeat && q.repeat !== "none" ? 12 : 1),
       newContact: false,
+      followUpSince: q.followUpSince?.toISOString() ?? null,
     });
     log.putContent(row.id, "text" in q ? { text: q.text } : { instruction: q.instruction });
     return row;
@@ -196,6 +204,7 @@ function harness(
     llm,
     usageRows,
     hooks,
+    replyChecks,
     faults,
     logs,
     acquired,
@@ -448,6 +457,108 @@ describe("schedule runner", () => {
     expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.skipped("+51911111111", "ya respondió")]);
     expect(h.log.runs(s.id, 10)[0]).toMatchObject({ outcome: "skipped", reason: "ya respondió" });
     expect(h.row(s.id).state).toBe("done");
+  });
+
+  describe("follow-ups (if no reply within)", () => {
+    const SINCE = at(T0, -3 * DAY);
+
+    it("without a reply since the anchor, runs like any AI schedule and ends", async () => {
+      const h = harness();
+      h.llm.queue.push(decide({ action: "send", text: "Hola Ana, ¿pudiste verlo?", reason: "ok" }));
+      const s = h.schedule({ instruction: "Recuérdale con buen tono", followUpSince: SINCE });
+      await h.tickAt(T0);
+      expect(h.replyChecks).toEqual([[CHAT, SINCE.toISOString()]]);
+      expect(h.sender.texts(CHAT)).toEqual(["Hola Ana, ¿pudiste verlo?"]);
+      expect(h.sender.texts(OWNER)).toEqual([
+        scheduleTexts.sent("+51911111111", "Hola Ana, ¿pudiste verlo?"),
+      ]);
+      expect(h.log.runs(s.id, 10)).toEqual([
+        { at: T0.toISOString(), outcome: "sent", text: "Hola Ana, ¿pudiste verlo?" },
+      ]);
+      expect(h.row(s.id)).toMatchObject({ state: "done", runsDone: 1, nextRunAt: null });
+    });
+
+    it("when the contact replied, skips without asking the model, notifies and ends", async () => {
+      const h = harness();
+      h.hooks.repliedSince = async () => true;
+      const s = h.schedule({ instruction: "Recuérdale con buen tono", followUpSince: SINCE });
+      await h.tickAt(T0);
+      expect(h.llm.requests).toEqual([]);
+      expect(h.usageRows).toEqual([]);
+      expect(h.sender.texts(CHAT)).toEqual([]);
+      expect(h.sender.texts(OWNER)).toEqual([
+        scheduleTexts.skipped("+51911111111", SKIP_REASONS.replied),
+      ]);
+      expect(h.log.runs(s.id, 10)).toEqual([
+        { at: T0.toISOString(), outcome: "skipped", reason: "ya respondió" },
+      ]);
+      expect(h.row(s.id)).toMatchObject({ state: "done", runsDone: 1, nextRunAt: null });
+      await h.tickAt(at(T0, DAY));
+      expect(h.sender.texts(CHAT)).toEqual([]);
+    });
+
+    it("a fixed follow-up is skipped and notified the same way", async () => {
+      const h = harness();
+      h.hooks.repliedSince = async () => true;
+      const s = h.schedule({ text: "¿Pudiste verlo?", followUpSince: SINCE });
+      await h.tickAt(T0);
+      expect(h.sender.texts(CHAT)).toEqual([]);
+      expect(h.sender.texts(OWNER)).toEqual([
+        scheduleTexts.skipped("+51911111111", "ya respondió"),
+      ]);
+      expect(h.row(s.id).state).toBe("done");
+    });
+
+    it("a fixed follow-up without a reply sends its text", async () => {
+      const h = harness();
+      const s = h.schedule({ text: "¿Pudiste verlo?", followUpSince: SINCE });
+      await h.tickAt(T0);
+      expect(h.sender.texts(CHAT)).toEqual(["¿Pudiste verlo?"]);
+      expect(h.sender.texts(OWNER)).toEqual([]);
+      expect(h.row(s.id).state).toBe("done");
+    });
+
+    it("when the chat cannot be read, skips (fail closed) and notifies", async () => {
+      const h = harness();
+      h.hooks.repliedSince = async () => {
+        throw new Error("waha down");
+      };
+      const s = h.schedule({ instruction: "Recuérdale con buen tono", followUpSince: SINCE });
+      await h.tickAt(T0);
+      expect(h.llm.requests).toEqual([]);
+      expect(h.sender.texts(CHAT)).toEqual([]);
+      expect(h.sender.texts(OWNER)).toEqual([
+        scheduleTexts.skipped("+51911111111", "no pude revisar si respondió"),
+      ]);
+      expect(h.log.runs(s.id, 10)).toEqual([
+        { at: T0.toISOString(), outcome: "skipped", reason: SKIP_REASONS.replyCheck },
+      ]);
+      expect(h.logs).toContain(`schedule=${s.id} reply-check=failed error=Error`);
+      expect(h.logs.join("\n")).not.toContain("waha down");
+      expect(h.row(s.id).state).toBe("done");
+    });
+
+    it("waits for quiet hours like any schedule, then checks for a reply", async () => {
+      const h = harness();
+      // 23:00 in Lima.
+      const late = at(T0, 13 * HOUR);
+      h.schedule({ text: "¿Pudiste verlo?", followUpSince: SINCE, first: late });
+      await h.tickAt(late);
+      expect(h.replyChecks).toEqual([]);
+      expect(h.sender.texts(CHAT)).toEqual([]);
+      // 08:00 the next day.
+      await h.tickAt(at(T0, 22 * HOUR));
+      expect(h.replyChecks).toHaveLength(1);
+      expect(h.sender.texts(CHAT)).toEqual(["¿Pudiste verlo?"]);
+    });
+
+    it("regular schedules never check for a reply", async () => {
+      const h = harness();
+      h.schedule({ text: "Hola" });
+      await h.tickAt(T0);
+      expect(h.replyChecks).toEqual([]);
+      expect(h.sender.texts(CHAT)).toEqual(["Hola"]);
+    });
   });
 
   it("ai budget used up skips without calling the llm", async () => {

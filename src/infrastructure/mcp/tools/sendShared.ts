@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InvalidInputError } from "../../../domain/errors.js";
 import type { SentMessage } from "../../../domain/ports/WhatsAppSender.js";
 import type { ToolRunContext } from "../defineTool.js";
 
@@ -61,3 +62,30 @@ export async function noteOwnerSend(
 ): Promise<void> {
   await ctx.missions?.ownerSent(chatId).catch(() => {});
 }
+
+/**
+ * Runs a WhatsApp message action, then mirrors it in the local cache. WhatsApp already accepted
+ * the action by then, so a failing local update never fails the call: it reports `localStale`
+ * and the cache catches up on the next sync. `tooLate` rewrites WAHA's 400/422 refusal.
+ */
+export async function actThenApply(q: {
+  call: () => Promise<unknown>;
+  apply: () => Promise<unknown>;
+  tooLate: string;
+}): Promise<{ localStale: boolean }> {
+  try {
+    await q.call();
+  } catch (err) {
+    if (err instanceof InvalidInputError)
+      throw new InvalidInputError(`${err.message} ${q.tooLate}`);
+    throw err;
+  }
+  try {
+    await q.apply();
+    return { localStale: false };
+  } catch {
+    return { localStale: true };
+  }
+}
+
+export const LOCAL_STALE_NOTE = "The local copy will update on the next sync.";

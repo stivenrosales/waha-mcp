@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InvalidInputError } from "../../src/domain/errors.js";
-import { parseMessageId, shortMessageId } from "../../src/domain/messageId.js";
+import { assertOwnMessage, parseMessageId, shortMessageId } from "../../src/domain/messageId.js";
 
 describe("parseMessageId", () => {
   it("parses a direct id", () => {
@@ -47,5 +47,20 @@ describe("shortMessageId", () => {
     expect(shortMessageId("3EB0ABC")).toBe("3EB0ABC");
     expect(shortMessageId("true_x")).toBe("true_x");
     expect(shortMessageId("")).toBe("");
+  });
+});
+
+describe("assertOwnMessage", () => {
+  it("accepts the owner's own message", () => {
+    expect(() => assertOwnMessage(parseMessageId("true_1@c.us_A"), "edit")).not.toThrow();
+  });
+
+  it("refuses someone else's message, naming the verb", () => {
+    expect(() => assertOwnMessage(parseMessageId("false_1@c.us_A"), "edit")).toThrow(
+      new InvalidInputError("You can only edit your own messages (ids that start with true_)."),
+    );
+    expect(() => assertOwnMessage(parseMessageId("false_1@c.us_A"), "delete")).toThrow(
+      "You can only delete your own messages",
+    );
   });
 });

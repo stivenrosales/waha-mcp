@@ -1,5 +1,5 @@
 /** Sent to clients in `initialize`. Short on purpose: tool descriptions carry the details. */
-export const SERVER_INSTRUCTIONS = `Access to the owner's WhatsApp (via WAHA): read chats and send messages from the owner's number. Nothing can be edited or deleted.
+export const SERVER_INSTRUCTIONS = `Access to the owner's WhatsApp (via WAHA): read chats, send messages from the owner's number, and edit or delete the owner's own messages.
 
 Sending (send_text, send_media, send_location, send_contact):
 - Send only when the owner explicitly asked to send in this conversation. Show the final text and the recipient first. One send per request unless the owner asked for more.
@@ -24,6 +24,7 @@ Reading:
 
 Message actions:
 - React (react_message) only when the owner asked.
+- Edit (edit_message) or delete only when the owner explicitly asked in this conversation; first show the message (text and chat) and, for edits, the new text. Only the owner's own messages.
 
 Missions (start_mission, get_mission, list_missions, answer_mission, cancel_mission; only when the server has them configured):
 - A mission hands one direct chat to a server-side assistant that converses on the owner's behalf until the objective is met, it fails, the deadline passes, or the owner cancels it. Start one only when the owner asked; show them the system prompt and the recipient first.

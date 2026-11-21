@@ -313,4 +313,28 @@ describe("post regression", () => {
       new WahaNotFoundError("message"),
     );
   });
+
+  it("editMessage PUTs the encoded path without session in the body", async () => {
+    const { fn, calls } = fakeFetch(() => json({}));
+    await make(fn).editMessage({
+      chatId: "51999@c.us",
+      messageId: "true_51999@c.us_ABC",
+      text: "x",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      path: "/api/default/chats/51999%40c.us/messages/true_51999%40c.us_ABC",
+      method: "PUT",
+      body: { text: "x" },
+    });
+    expect(calls[0]?.body).not.toHaveProperty("session");
+  });
+
+  it("editMessage: 422 becomes InvalidInputError, 404 WahaNotFoundError(message)", async () => {
+    const q = { chatId: "1@c.us", messageId: "true_1@c.us_A", text: "x" };
+    const bad = fakeFetch(() => json({ message: "too old" }, 422));
+    await expect(make(bad.fn).editMessage(q)).rejects.toBeInstanceOf(InvalidInputError);
+    const gone = fakeFetch(() => json({}, 404));
+    await expect(make(gone.fn).editMessage(q)).rejects.toEqual(new WahaNotFoundError("message"));
+  });
 });

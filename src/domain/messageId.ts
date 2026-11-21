@@ -27,6 +27,14 @@ export function parseMessageId(id: string): ParsedMessageId {
   return { id, fromMe: flag === "true", chatId, shortId, participant: participant ?? null };
 }
 
+/** Edits and deletes only apply to the owner's own messages (ids that start with `true_`). */
+export function assertOwnMessage(parsed: ParsedMessageId, verb: "edit" | "delete"): void {
+  if (!parsed.fromMe)
+    throw new InvalidInputError(
+      `You can only ${verb} your own messages (ids that start with true_).`,
+    );
+}
+
 /**
  * The stable part of a WhatsApp message id: `true_<chat>_<ID>[_<participant>]` → `<ID>`. Our
  * sends and their echoes may name the chat differently (`@c.us` vs `@lid`).

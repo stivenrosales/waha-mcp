@@ -118,6 +118,7 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 | 📍           | `send_location`        | Sends a location pin.                                                             |
 | 👤           | `send_contact`         | Sends a contact card.                                                             |
 | 😀           | `react_message`        | Reacts to a message with an emoji, or removes your reaction.                      |
+| ✏️           | `edit_message`         | Edits the text of a message you sent.                                             |
 | **Delegate** |                        |                                                                                   |
 | 🤖           | `start_mission`        | Hands a direct chat to a server-side agent until an objective is met (optional).  |
 | 🔍           | `get_mission`          | State, timeline, pending questions, collected files and usage of one mission.     |

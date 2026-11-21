@@ -40,6 +40,8 @@ export interface WhatsAppSender {
   sendSeen(q: { chatId: string; messageIds?: string[] }): Promise<void>;
   /** Reacts to a message by its full id; an empty emoji removes the owner's reaction. */
   react(q: { messageId: string; emoji: string }): Promise<void>;
+  /** Replaces the text of one of the owner's own messages (full id). */
+  editMessage(q: { chatId: string; messageId: string; text: string }): Promise<void>;
   startTyping(chatId: string): Promise<void>;
   stopTyping(chatId: string): Promise<void>;
 }

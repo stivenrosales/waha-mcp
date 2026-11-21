@@ -69,6 +69,7 @@ function runtimeFor(tenantId: string): TenantRuntime {
     missionLog: {} as TenantRuntime["missionLog"],
     scheduleLog: {} as TenantRuntime["scheduleLog"],
     cipher: {} as TenantRuntime["cipher"],
+    cacheData: {} as TenantRuntime["cacheData"],
     media: async (token) => (links.verify(token) === null ? notFound() : streamed()),
     upload: async (_req, token) => (links.verify(token) === null ? notFound() : streamed()),
     close() {},

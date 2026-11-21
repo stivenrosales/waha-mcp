@@ -9,6 +9,7 @@ import { composeApp, composeScheduleRunner } from "../../src/composition.js";
 import { loadConfig } from "../../src/config.js";
 import type { LlmClient } from "../../src/domain/ports/LlmClient.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
+import { createCacheData } from "../../src/infrastructure/cache/cacheData.js";
 import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
 import {
   createTenantCipher,
@@ -186,6 +187,7 @@ async function world() {
       missionLog,
       scheduleLog,
       cipher,
+      cacheData: createCacheData(cacheDb, cipher),
       close() {
         cacheDb.close();
       },

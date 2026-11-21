@@ -293,6 +293,7 @@ function setup(
     missionLog: {} as TenantRuntime["missionLog"],
     scheduleLog: {} as TenantRuntime["scheduleLog"],
     cipher: {} as TenantRuntime["cipher"],
+    cacheData: {} as TenantRuntime["cacheData"],
     close() {},
   });
   const { app } = composeApp({

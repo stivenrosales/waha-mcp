@@ -18,11 +18,13 @@ import {
 import type { Config } from "../../config.js";
 import { WahaNotFoundError } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
+import type { CacheData } from "../../domain/ports/CacheData.js";
 import type { ScheduleLog } from "../../domain/ports/ScheduleLog.js";
 import type { ScheduleStore } from "../../domain/ports/ScheduleStore.js";
 import type { Tenant } from "../../domain/ports/TenantStore.js";
 import type { TranscriptStore } from "../../domain/ports/TranscriptStore.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
+import { createCacheData } from "../cache/cacheData.js";
 import { createSqliteMessageActionStore } from "../cache/sqliteMessageActionStore.js";
 import { createSqliteMessageStore, openCacheDatabase } from "../cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../cache/sqliteTranscriptStore.js";
@@ -89,6 +91,8 @@ export interface TenantRuntime {
   scheduleLog: ScheduleLog;
   /** This tenant's data cipher (e.g. to seal received webhook payloads). */
   cipher: TenantCipher;
+  /** This tenant's cached message data as a whole: retention prunes it, `delete_my_data` wipes it. */
+  cacheData: CacheData;
   /** Closes the cache database and stops the upload sweep. Idempotent. */
   close(): void;
 }
@@ -262,7 +266,7 @@ export function buildTenantRuntime(deps: {
       cipher,
       session,
       cache: config.cacheEnabled
-        ? { refreshHours: config.cacheRefreshHours, maxAgeDays: config.cacheMaxAgeDays }
+        ? { refreshHours: config.cacheRefreshHours, maxAgeDays: config.cacheRetentionDays }
         : null,
     });
     const transcription = config.transcription
@@ -342,6 +346,7 @@ export function buildTenantRuntime(deps: {
       missionLog,
       scheduleLog,
       cipher,
+      cacheData: createCacheData(cacheDb, cipher),
       close() {
         if (closed) return;
         closed = true;

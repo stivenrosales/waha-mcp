@@ -15,6 +15,7 @@ import { WahaNotFoundError } from "../../src/domain/errors.js";
 import type { EventStore } from "../../src/domain/ports/EventStore.js";
 import type { LlmClient, LlmTurnRequest, LlmTurnResult } from "../../src/domain/ports/LlmClient.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
+import { createCacheData } from "../../src/infrastructure/cache/cacheData.js";
 import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
 import {
   createTenantCipher,
@@ -316,6 +317,7 @@ async function world(): Promise<World> {
       missionLog,
       scheduleLog: createSealedScheduleLog(cacheDb, cipher),
       cipher,
+      cacheData: createCacheData(cacheDb, cipher),
       close() {
         cacheDb.close();
       },

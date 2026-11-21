@@ -12,8 +12,9 @@ import { type Config, loadConfig } from "../../src/config.js";
 import type { EventStore } from "../../src/domain/ports/EventStore.js";
 import type { TenantStore } from "../../src/domain/ports/TenantStore.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
+import { createCacheData } from "../../src/infrastructure/cache/cacheData.js";
 import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
-import { createTenantCipher } from "../../src/infrastructure/crypto/envelope.js";
+import { createTenantCipher, type TenantCipher } from "../../src/infrastructure/crypto/envelope.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { MEDIA_GONE } from "../../src/infrastructure/media/resolveMedia.js";
 import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
@@ -124,6 +125,9 @@ const DATA: Record<string, () => InMemoryData> = {
 interface Fakes {
   gateway: InMemoryWahaGateway;
   sender: RecordingSender;
+  /** The `cache.db` of the tenant's latest runtime, and the tenant's cipher. */
+  db?: DatabaseSync;
+  cipher?: TenantCipher;
 }
 
 const scratchDirs: string[] = [];
@@ -195,6 +199,11 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
       maxBytes: b.config.uploadMaxBytes,
       cipher: createTenantCipher(b.dek, b.tenant.id),
     });
+    // One `cache.db` per runtime, as production: message actions and cache data share it.
+    const db = openCacheDatabase(":memory:");
+    const cipher = createTenantCipher(b.dek, b.tenant.id);
+    f.db = db;
+    f.cipher = cipher;
     return {
       tenantId: b.tenant.id,
       context: {
@@ -210,8 +219,8 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
         schedules: null,
         messageActions: wireMessageActions({
           wahaGateway: f.gateway,
-          db: openCacheDatabase(":memory:"),
-          cipher: createTenantCipher(b.dek, b.tenant.id),
+          db,
+          cipher,
           session: b.tenant.wahaSession,
           cache: null,
         }).messageActions,
@@ -224,8 +233,11 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
       }),
       missionLog: {} as TenantRuntime["missionLog"],
       scheduleLog: {} as TenantRuntime["scheduleLog"],
-      cipher: createTenantCipher(b.dek, b.tenant.id),
-      close() {},
+      cipher,
+      cacheData: createCacheData(db, cipher),
+      close() {
+        db.close();
+      },
     };
   };
 }

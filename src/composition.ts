@@ -286,8 +286,9 @@ export function composeCacheEventProcessor(deps: {
 }
 
 /**
- * The mission retention purge over the registry. It runs whether missions are on or off: with
- * the engine it runs in the engine's tick; without it, `main.ts` calls `start()`.
+ * The daily retention purge over the registry (mission and schedule history, webhook events and
+ * cached message data). It runs whether missions are on or off: with the engine it runs in the
+ * engine's tick; without it, `main.ts` calls `start()`.
  */
 export function composeMissionPurge(deps: {
   registry: Pick<TenantRegistry, "acquire">;
@@ -297,9 +298,14 @@ export function composeMissionPurge(deps: {
   schedules?: ScheduleStore;
   events: EventStore | undefined;
   logger: Logger;
+  /** `CACHE_RETENTION_DAYS`: cached message data older than this is pruned daily (0 keeps it). */
+  cacheRetentionDays?: number;
 }): MissionPurge {
   return createMissionPurge({
     missions: deps.missions,
+    ...(deps.cacheRetentionDays !== undefined
+      ? { cacheRetentionDays: deps.cacheRetentionDays }
+      : {}),
     ...(deps.schedules ? { schedules: deps.schedules } : {}),
     ...(deps.events ? { events: deps.events } : {}),
     tenants: deps.tenants,
@@ -309,6 +315,7 @@ export function composeMissionPurge(deps: {
         ? {
             log: held.runtime.missionLog,
             scheduleLog: held.runtime.scheduleLog,
+            cache: held.runtime.cacheData,
             release: held.release,
           }
         : null;

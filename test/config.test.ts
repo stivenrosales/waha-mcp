@@ -25,7 +25,25 @@ describe("loadConfig", () => {
     expect(c.mediaMaxBytes).toBe(104857600);
     expect(c.cacheEnabled).toBe(true);
     expect(c.cacheRefreshHours).toBe(48);
-    expect(c.cacheMaxAgeDays).toBe(0);
+    expect(c.cacheRetentionDays).toBe(90);
+  });
+
+  it("reads CACHE_RETENTION_DAYS, falls back to the legacy CACHE_MAX_AGE_DAYS, rejects bad values", () => {
+    expect(loadConfig({ ...minimal, CACHE_RETENTION_DAYS: "30" }).cacheRetentionDays).toBe(30);
+    expect(loadConfig({ ...minimal, CACHE_RETENTION_DAYS: "0" }).cacheRetentionDays).toBe(0);
+    expect(loadConfig({ ...minimal, CACHE_RETENTION_DAYS: "" }).cacheRetentionDays).toBe(90);
+    // The legacy name still works when the new one is unset (an explicit 0 keeps data forever).
+    expect(loadConfig({ ...minimal, CACHE_MAX_AGE_DAYS: "0" }).cacheRetentionDays).toBe(0);
+    expect(
+      loadConfig({ ...minimal, CACHE_MAX_AGE_DAYS: "7", CACHE_RETENTION_DAYS: "45" })
+        .cacheRetentionDays,
+    ).toBe(45);
+    expect(() => loadConfig({ ...minimal, CACHE_RETENTION_DAYS: "-1" })).toThrow(
+      /CACHE_RETENTION_DAYS/,
+    );
+    expect(() => loadConfig({ ...minimal, CACHE_RETENTION_DAYS: "forever" })).toThrow(
+      /CACHE_RETENTION_DAYS/,
+    );
   });
 
   it("reads the cache settings and rejects invalid values", () => {
@@ -37,7 +55,7 @@ describe("loadConfig", () => {
     });
     expect(c.cacheEnabled).toBe(false);
     expect(c.cacheRefreshHours).toBe(6);
-    expect(c.cacheMaxAgeDays).toBe(30);
+    expect(c.cacheRetentionDays).toBe(30);
     expect(loadConfig({ ...minimal, CACHE_ENABLED: "true" }).cacheEnabled).toBe(true);
     expect(loadConfig({ ...minimal, CACHE_ENABLED: "" }).cacheEnabled).toBe(true);
     expect(() => loadConfig({ ...minimal, CACHE_ENABLED: "yes" })).toThrow(/CACHE_ENABLED/);

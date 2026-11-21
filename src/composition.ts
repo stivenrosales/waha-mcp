@@ -73,8 +73,8 @@ export interface ComposedApp {
   /** Tools every tenant gets (admin tools excluded). */
   toolCount: number;
   /**
-   * Points every active tenant's WAHA session at `/webhooks/waha` (missions on), one by one;
-   * never throws. A no-op when missions are off.
+   * Points every active tenant's WAHA session at `/webhooks/waha` (webhooks on), one by one;
+   * never throws. A no-op when webhooks are off.
    */
   configureWebhooks(): Promise<void>;
 }
@@ -89,10 +89,12 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   const limiter = createLoginLimiter();
   const missionsOn = config.missions;
   if (missionsOn && !deps.events) throw new Error("Missions need the webhook event store.");
-  const webhook: WebhookTarget | null = missionsOn
+  if (config.webhookSecret && !deps.events)
+    throw new Error("Webhooks need the webhook event store.");
+  const webhook: WebhookTarget | null = config.webhookSecret
     ? {
         url: `${config.publicBaseUrl.replace(/\/+$/, "")}${WEBHOOK_PATH}`,
-        secret: missionsOn.webhookSecret,
+        secret: config.webhookSecret,
       }
     : null;
   const engine = (): MissionEngine | null => deps.missionEngine?.() ?? null;
@@ -187,9 +189,9 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     mcpHandler: mcp.handler,
     registry,
     webhooks:
-      missionsOn && deps.events
+      webhook && deps.events
         ? createWahaWebhookRoute({
-            secret: missionsOn.webhookSecret,
+            secret: webhook.secret,
             tenants,
             registry,
             events: deps.events,

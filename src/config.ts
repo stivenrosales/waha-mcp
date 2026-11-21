@@ -47,6 +47,8 @@ export interface Config {
   transcription: TranscriptionConfig | null;
   /** Server-side Claude agent on WhatsApp missions; null when off (the default). */
   missions: MissionsConfig | null;
+  /** Shared secret WAHA signs webhook deliveries with; null turns webhooks off. Never logged. */
+  webhookSecret: string | null;
 }
 
 export interface MissionsConfig {
@@ -81,8 +83,6 @@ const TRANSCRIPTION_REQUIRED = [
   "TRANSCRIPTION_API_KEY",
   "TRANSCRIPTION_MODEL",
 ] as const;
-
-const MISSIONS_REQUIRED = ["OPENROUTER_API_KEY", "WAHA_WEBHOOK_SECRET"] as const;
 
 const stripTrailingSlashes = (value: string): string => value.replace(/\/+$/, "");
 
@@ -325,13 +325,13 @@ const envSchema = z
         message: "SCHEDULES_DEFAULT_RUNS cannot be above SCHEDULES_MAX_RUNS.",
       });
 
-    // Both or neither: missions need the model key and the webhook secret together.
-    const missions = MISSIONS_REQUIRED.filter((name) => Boolean(env[name]));
-    if (missions.length > 0 && missions.length < MISSIONS_REQUIRED.length)
+    // Missions receive messages through webhooks; the secret alone is valid (webhooks only).
+    if (env.OPENROUTER_API_KEY && !env.WAHA_WEBHOOK_SECRET)
       ctx.addIssue({
         code: "custom",
-        path: [MISSIONS_REQUIRED.find((name) => !env[name]) ?? MISSIONS_REQUIRED[0]],
-        message: "OPENROUTER_API_KEY and WAHA_WEBHOOK_SECRET must be set together.",
+        path: ["WAHA_WEBHOOK_SECRET"],
+        message:
+          "OPENROUTER_API_KEY needs WAHA_WEBHOOK_SECRET (missions receive messages through webhooks).",
       });
 
     // All three or none: a half-configured provider is a mistake, not "off".
@@ -391,6 +391,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
             maxPerCall: v.TRANSCRIPTION_MAX_PER_CALL,
           }
         : null,
+    webhookSecret: v.WAHA_WEBHOOK_SECRET ?? null,
     missions:
       v.OPENROUTER_API_KEY && v.WAHA_WEBHOOK_SECRET
         ? {

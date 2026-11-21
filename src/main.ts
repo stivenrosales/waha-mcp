@@ -84,6 +84,7 @@ async function main(): Promise<void> {
     tenants,
     missions,
     events,
+    // Engine-only for now: the wake is a no-op when missions are off.
     onWebhookEvent: () => missionEngine?.wake(),
     missionEngine: () => missionEngine,
     schedules,
@@ -132,8 +133,8 @@ async function main(): Promise<void> {
   if (engine !== "GOWS" && !engine.startsWith("unknown")) {
     console.warn(`Engine ${engine} is not supported (GOWS only); tools will report this.`);
   }
-  // Missions: point active tenants' sessions at /webhooks/waha in the background (best effort,
-  // one tenant at a time, never fatal; a no-op when missions are off).
+  // Webhooks: point active tenants' sessions at /webhooks/waha in the background (best effort,
+  // one tenant at a time, never fatal; a no-op when WAHA_WEBHOOK_SECRET is unset).
   void configureWebhooks().catch(() => {});
 
   let stopping = false;

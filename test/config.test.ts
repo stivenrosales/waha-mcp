@@ -334,24 +334,34 @@ describe("loadConfig", () => {
       expect(loadConfig(minimal).missions).toBeNull();
     });
 
-    it("setting only one of them fails with 'OPENROUTER_API_KEY and WAHA_WEBHOOK_SECRET must be set together.'", () => {
-      for (const only of [
-        { OPENROUTER_API_KEY: "sk-or-mission-secret" },
-        { WAHA_WEBHOOK_SECRET: "hook-secret" },
-      ]) {
-        let message = "";
-        try {
-          loadConfig({ ...minimal, ...only });
-          expect.unreachable();
-        } catch (e) {
-          message = (e as Error).message;
-        }
-        expect(message).toContain(
-          "OPENROUTER_API_KEY and WAHA_WEBHOOK_SECRET must be set together.",
-        );
-        expect(message).not.toContain("sk-or-mission-secret");
-        expect(message).not.toContain("hook-secret");
+    it("key without secret fails with 'OPENROUTER_API_KEY needs WAHA_WEBHOOK_SECRET …'", () => {
+      let message = "";
+      try {
+        loadConfig({ ...minimal, OPENROUTER_API_KEY: "sk-or-mission-secret" });
+        expect.unreachable();
+      } catch (e) {
+        message = (e as Error).message;
       }
+      expect(message).toContain(
+        "OPENROUTER_API_KEY needs WAHA_WEBHOOK_SECRET (missions receive messages through webhooks).",
+      );
+      expect(message).not.toContain("sk-or-mission-secret");
+    });
+
+    it("secret alone turns webhooks on and missions off", () => {
+      const c = loadConfig({ ...minimal, WAHA_WEBHOOK_SECRET: " s " });
+      expect(c.webhookSecret).toBe("s");
+      expect(c.missions).toBeNull();
+    });
+
+    it("neither: webhookSecret null", () => {
+      expect(loadConfig(minimal).webhookSecret).toBeNull();
+    });
+
+    it("with both, missions.webhookSecret equals webhookSecret", () => {
+      const c = loadConfig(on);
+      expect(c.webhookSecret).toBe("hook-secret");
+      expect(c.missions?.webhookSecret).toBe("hook-secret");
     });
 
     it("defaults: model anthropic/claude-haiku-5.5, budget 1, limits as above", () => {

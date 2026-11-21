@@ -739,6 +739,32 @@ describe("e2e: WAHA webhooks for missions", () => {
     expect(chats.isError).toBeFalsy();
   });
 
+  it("with only the secret the route exists and startup configures WAHA (no missions)", async () => {
+    const w = await world({ WAHA_WEBHOOK_SECRET: SECRET });
+    const adminId = w.tenants.getAdmin()?.tenantId as string;
+    const body = JSON.stringify({
+      id: "evt_e2e_status",
+      timestamp: Date.now(),
+      event: "session.status",
+      session: "default",
+      metadata: { tenant: adminId },
+      payload: { status: "WORKING" },
+    });
+    expect((await request(w.app, "/webhooks/waha", signed(body, "wrong"))).status).toBe(401);
+    expect((await request(w.app, "/webhooks/waha", signed(body))).status).toBe(200);
+    expect(w.events.pending(10).map((e) => [e.eventId, e.kind])).toEqual([
+      ["evt_e2e_status", "session.status"],
+    ]);
+    await w.configureWebhooks();
+    expect(w.sessions.calls.filter((c) => c.startsWith("configureWebhook:"))).toEqual([
+      "configureWebhook:default",
+    ]);
+    expect(w.sessions.webhooks.get("default")).toEqual({
+      url: `${BASE}/webhooks/waha`,
+      secret: SECRET,
+    });
+  });
+
   it("with missions a signed event for an active tenant is stored once; startup configures WAHA", async () => {
     const w = await world(MISSIONS);
     const adminId = w.tenants.getAdmin()?.tenantId as string;

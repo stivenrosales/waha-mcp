@@ -337,4 +337,25 @@ describe("post regression", () => {
     const gone = fakeFetch(() => json({}, 404));
     await expect(make(gone.fn).editMessage(q)).rejects.toEqual(new WahaNotFoundError("message"));
   });
+
+  it("deleteMessage sends DELETE to the encoded path with no body and no Content-Type", async () => {
+    const { fn, calls } = fakeFetch(() => json({}));
+    await make(fn).deleteMessage({ chatId: "51999@c.us", messageId: "true_51999@c.us_ABC" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      path: "/api/default/chats/51999%40c.us/messages/true_51999%40c.us_ABC",
+      method: "DELETE",
+      body: {},
+    });
+    expect(calls[0]?.headers).not.toHaveProperty("content-type");
+    expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+  });
+
+  it("deleteMessage: 404 becomes WahaNotFoundError(message), 422 InvalidInputError", async () => {
+    const q = { chatId: "1@c.us", messageId: "true_1@c.us_A" };
+    const gone = fakeFetch(() => json({}, 404));
+    await expect(make(gone.fn).deleteMessage(q)).rejects.toEqual(new WahaNotFoundError("message"));
+    const bad = fakeFetch(() => json({ message: "too old" }, 422));
+    await expect(make(bad.fn).deleteMessage(q)).rejects.toBeInstanceOf(InvalidInputError);
+  });
 });

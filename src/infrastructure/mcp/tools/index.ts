@@ -1,5 +1,6 @@
 import type { ToolDefinition } from "../defineTool.js";
 import { createUploadLinkTool } from "./createUploadLink.js";
+import { deleteMessageTool } from "./deleteMessage.js";
 import { editMessageTool } from "./editMessage.js";
 import { getActivityDigestTool } from "./getActivityDigest.js";
 import { getChatStatsTool } from "./getChatStats.js";
@@ -54,6 +55,7 @@ export function createTools(): ToolDefinition[] {
     sendContactTool,
     reactMessageTool,
     editMessageTool,
+    deleteMessageTool,
     scheduleMessageTool,
     cancelScheduledTool,
     startMissionTool,

@@ -119,6 +119,7 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 | 👤           | `send_contact`         | Sends a contact card.                                                             |
 | 😀           | `react_message`        | Reacts to a message with an emoji, or removes your reaction.                      |
 | ✏️           | `edit_message`         | Edits the text of a message you sent.                                             |
+| 🗑️           | `delete_message`       | Deletes a message you sent, for everyone.                                         |
 | **Delegate** |                        |                                                                                   |
 | 🤖           | `start_mission`        | Hands a direct chat to a server-side agent until an objective is met (optional).  |
 | 🔍           | `get_mission`          | State, timeline, pending questions, collected files and usage of one mission.     |
@@ -197,6 +198,10 @@ Sizing: every message read is kept, so on a busy account `cache.db` grows withou
 
 > [!WARNING]
 > The cache is a copy of your conversations at rest on the server (`DATA_DIR/tenants/<id>/cache.db`, `0600`, message bodies encrypted with the tenant's key). It is wiped when the tenant's WhatsApp account changes: pairing a different number at `<base>/pair` drops the tenant's runtime, so the next tool call re-checks the account and starts from an empty cache. A session re-linked to another number directly in WAHA (outside `/pair`) is only noticed after the next restart, because the account is checked once per runtime. Logout does not clear the cache: delete that `cache.db` (or set `CACHE_ENABLED=false`) to drop it. Edits and deletions older than the refresh window are not picked up, so a deleted message can stay cached.
+
+### Deleting messages
+
+`delete_message` removes one of your own messages for everyone in the chat, and it cannot be undone. Once WhatsApp accepts it, the deleted text is removed from waha-mcp's message cache, its voice-note transcripts and its edit overrides, and later reads show the message as deleted. It does not reach mission logs and schedule history, which keep their own retention, nor WAHA's own storage, which waha-mcp does not control.
 
 ## Voice-note transcription (optional)
 

@@ -176,6 +176,16 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
         notFound: "message",
       });
     },
+    deleteMessage: async (q) => {
+      await request({
+        method: "DELETE",
+        path: `/api/${seg(opts.session)}/chats/${seg(q.chatId)}/messages/${seg(q.messageId)}`,
+        body: null,
+        sessionInBody: false,
+        media: false,
+        notFound: "message",
+      });
+    },
     startTyping: async (chatId) => {
       await post("/api/startTyping", { chatId }, false);
     },

@@ -19,6 +19,10 @@ import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageS
 import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
 import { generateDek, wrapDek } from "../../src/infrastructure/crypto/envelope.js";
 import {
+  DESTRUCTIVE_ANNOTATIONS,
+  SEND_ANNOTATIONS,
+} from "../../src/infrastructure/mcp/defineTool.js";
+import {
   ADMIN_INSTRUCTIONS,
   SERVER_INSTRUCTIONS,
 } from "../../src/infrastructure/mcp/instructions.js";
@@ -170,6 +174,11 @@ afterAll(() => {
   for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
 });
 
+/** Per-tool annotation exceptions; every other write tool uses SEND_ANNOTATIONS. */
+const ANNOTATION_OVERRIDES: Record<string, typeof DESTRUCTIVE_ANNOTATIONS> = {
+  delete_message: DESTRUCTIVE_ANNOTATIONS,
+};
+
 /** Write tools; each later task appends its own. */
 const SEND_TOOLS = [
   "send_text",
@@ -179,6 +188,7 @@ const SEND_TOOLS = [
   "send_contact",
   "react_message",
   "edit_message",
+  "delete_message",
   "schedule_message",
   "cancel_scheduled",
   "start_mission",
@@ -393,13 +403,7 @@ for (const cache of [false, true])
       expect(tools.map((t) => t.name).sort()).toEqual([...read, ...SEND_TOOLS].sort());
       for (const t of tools) {
         if (read.includes(t.name)) expect(t.annotations).toEqual({ readOnlyHint: true });
-        else
-          expect(t.annotations).toEqual({
-            readOnlyHint: false,
-            destructiveHint: false,
-            idempotentHint: false,
-            openWorldHint: true,
-          });
+        else expect(t.annotations).toEqual(ANNOTATION_OVERRIDES[t.name] ?? SEND_ANNOTATIONS);
       }
     });
 

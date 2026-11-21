@@ -55,7 +55,8 @@ interface ToolResult {
 const call = async (c: Client, name: string, args: Record<string, unknown> = {}) =>
   (await c.callTool({ name, arguments: args })) as unknown as ToolResult;
 
-async function world() {
+async function world(opts: { cache?: boolean } = {}) {
+  const sender = new RecordingSender();
   const dataDir = mkdtempSync(join(tmpdir(), "e2e-cache-events-"));
   scratchDirs.push(dataDir);
   const config = loadConfig({
@@ -114,7 +115,7 @@ async function world() {
       db: openCacheDatabase(":memory:"),
       cipher,
       session: b.tenant.wahaSession,
-      cache: { refreshHours: 48, maxAgeDays: 0 },
+      cache: opts.cache === false ? null : { refreshHours: 48, maxAgeDays: 0 },
     });
     return {
       tenantId: b.tenant.id,
@@ -124,7 +125,7 @@ async function world() {
         config: b.config,
         links,
         transcription: DISABLED_TRANSCRIPTION,
-        sender: new RecordingSender(),
+        sender,
         uploads,
         uploadLinks,
         missions: null,
@@ -166,7 +167,7 @@ async function world() {
     store.close();
   });
   const adminId = tenants.getAdmin()?.tenantId as string;
-  return { app, events, processor: theProcessor, adminId, store };
+  return { app, events, processor: theProcessor, adminId, store, sender };
 }
 
 const request = (app: Hono, path: string, init?: RequestInit) =>
@@ -287,5 +288,27 @@ describe("e2e: webhooks keep the message cache in sync", () => {
     });
     const [msg] = await messages(client);
     expect(msg?.reactions).toEqual([{ emoji: "🔥", by: CHAT }]);
+  });
+
+  describe.each([true, false])("delete_message (cache %s)", (cache) => {
+    it("deletes for everyone, then reads show it deleted and search finds nothing", async () => {
+      const w = await world({ cache });
+      const client = await login(w.app);
+      expect((await messages(client))[0]?.text).toBe(SEC_TEXT);
+
+      const r = await call(client, "delete_message", { message_id: `true_${CHAT}_3EB0AAAA` });
+      expect(r.isError).toBeFalsy();
+      expect(r.content[0]?.text).toContain("This cannot be undone.");
+      expect(w.sender.calls).toEqual([
+        {
+          method: "deleteMessage",
+          args: { chatId: CHAT, messageId: `true_${CHAT}_3EB0AAAA` },
+        },
+      ]);
+
+      expect((await messages(client))[0]).toMatchObject({ type: "deleted", text: null });
+      const hit = await call(client, "search_messages", { query: "quiet launch", chat_id: CHAT });
+      expect(JSON.stringify(hit.structuredContent)).not.toContain("3EB0AAAA");
+    });
   });
 });

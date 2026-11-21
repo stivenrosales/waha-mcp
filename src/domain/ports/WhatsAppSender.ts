@@ -42,6 +42,8 @@ export interface WhatsAppSender {
   react(q: { messageId: string; emoji: string }): Promise<void>;
   /** Replaces the text of one of the owner's own messages (full id). */
   editMessage(q: { chatId: string; messageId: string; text: string }): Promise<void>;
+  /** Deletes one of the owner's own messages for everyone (full id). */
+  deleteMessage(q: { chatId: string; messageId: string }): Promise<void>;
   startTyping(chatId: string): Promise<void>;
   stopTyping(chatId: string): Promise<void>;
 }

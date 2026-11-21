@@ -35,6 +35,9 @@ type Json = Record<string, unknown>;
 const asRecord = (v: unknown): Json =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Json) : {};
 
+/** A path segment built from an id (full serialized ids contain `@` and `_`). */
+export const seg = (s: string): string => encodeURIComponent(s);
+
 const defined = (o: Json): Json =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 
@@ -60,7 +63,24 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
   const scrub = (text: string): string =>
     text.split(opts.apiKey).join("***").split(baseUrl).join("WAHA").slice(0, MAX_REASON_CHARS);
 
-  async function post(path: string, body: Json, media: boolean): Promise<SentMessage> {
+  /** One WAHA write. Path segments built from ids must go through `seg`. */
+  async function request(q: {
+    method: "POST" | "PUT" | "DELETE";
+    path: string;
+    body: Json | null;
+    sessionInBody: boolean;
+    media: boolean;
+    notFound: "chat" | "message";
+  }): Promise<SentMessage> {
+    const { media } = q;
+    const headers: Record<string, string> = { "X-Api-Key": opts.apiKey };
+    let payload: string | undefined;
+    if (q.body !== null) {
+      headers["Content-Type"] = "application/json";
+      payload = JSON.stringify(
+        defined(q.sessionInBody ? { session: opts.session, ...q.body } : q.body),
+      );
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     timer.unref?.();
@@ -74,11 +94,11 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
       );
       aborted.catch(() => {});
       res = await Promise.race([
-        doFetch(`${baseUrl}${path}`, {
-          method: "POST",
+        doFetch(`${baseUrl}${q.path}`, {
+          method: q.method,
           redirect: "error",
-          headers: { "X-Api-Key": opts.apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify(defined({ session: opts.session, ...body })),
+          headers,
+          body: payload,
           signal: controller.signal,
         }),
         aborted,
@@ -112,7 +132,7 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
       if (isSessionNotWorking(res.status, parsed)) throw new WhatsAppDisconnectedError();
       if (media && (res.status === 501 || /\bplus\b/i.test(reason)))
         throw new MediaSendUnsupportedError();
-      if (res.status === 404) throw new WahaNotFoundError("chat");
+      if (res.status === 404) throw new WahaNotFoundError(q.notFound);
       if (res.status === 400 || res.status === 422)
         throw new InvalidInputError(
           reason ? `WAHA rejected the message: ${scrub(reason)}` : "WAHA rejected the message.",
@@ -128,6 +148,9 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
       timestamp: typeof ts === "number" && Number.isFinite(ts) ? ts : null,
     };
   }
+
+  const post = (path: string, body: Json, media: boolean): Promise<SentMessage> =>
+    request({ method: "POST", path, body, sessionInBody: true, media, notFound: "chat" });
 
   return {
     sendSeen: async (q) => {

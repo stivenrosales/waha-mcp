@@ -278,3 +278,15 @@ describe("WahaHttpSender", () => {
     }
   });
 });
+
+describe("post regression", () => {
+  it("sends POST with the session in the body and labels a 404 as a chat", async () => {
+    const f = fakeFetch(() => ok());
+    await make(f.fn).sendText({ chatId: "1@c.us", text: "x" });
+    expect(f.calls[0]?.method).toBe("POST");
+    expect(f.calls[0]?.body.session).toBe("default");
+    await expect(
+      make(fakeFetch(() => json({}, 404)).fn).sendText({ chatId: "1@c.us", text: "x" }),
+    ).rejects.toThrow("WAHA chat not found.");
+  });
+});

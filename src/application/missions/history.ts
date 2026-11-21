@@ -1,4 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { shortMessageId } from "../../domain/messageId.js";
 import type { MissionLog, MissionLogEntry } from "../../domain/ports/MissionLog.js";
 
 /**
@@ -51,16 +52,7 @@ export const ownerAnswerNotice = (text: string): string => `The owner answered: 
 
 const specText = (s: MissionSpec): string => `Objective: ${s.objective}\nDone when: ${s.doneWhen}`;
 
-/**
- * The stable part of a WhatsApp message id: `true_<chat>_<ID>[_<participant>]` → `<ID>`. Our
- * sends and their echoes may name the chat differently (`@c.us` vs `@lid`).
- */
-export function shortMessageId(id: string): string {
-  const parts = id.split("_");
-  return (parts[0] === "true" || parts[0] === "false") && parts.length >= 3
-    ? (parts[2] as string)
-    : id;
-}
+export { shortMessageId };
 
 /** What arrived since the last agent turn (the input of the next one). */
 export interface Pending {

@@ -126,6 +126,22 @@ export const SEND_ANNOTATIONS: ToolAnnotations = {
   openWorldHint: true,
 };
 
+/** Irreversible WhatsApp writes (delete): repeating one changes nothing more. */
+export const DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+
+/** Writes to WhatsApp that overwrite a state (edit, react, pin): repeating is harmless. */
+export const IDEMPOTENT_WRITE_ANNOTATIONS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+
 export const MESSAGES = {
   auth: "WAHA rejected the server's API key — check WAHA_API_KEY.",
   unavailable: "WAHA is not reachable right now.",

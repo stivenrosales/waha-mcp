@@ -57,6 +57,8 @@ export interface NormalizedMessage {
   poll: { question: string; options: string[] } | null;
   /** Speech-to-text of a voice note; null when transcription is off or not done. */
   transcript: string | null;
+  /** Present (true) only when the message text was edited after it was sent. */
+  edited?: true;
 }
 
 export interface GroupSummary {
@@ -85,6 +87,10 @@ export interface EngineMapper {
   message(raw: unknown): NormalizedMessage;
   /** Non-null when the raw message is a reaction event (not a message). */
   reaction(raw: unknown): { targetId: string; reaction: Reaction } | null;
+  /** Copy of `raw` whose mapped text (or media caption) is `text`, mapped with `edited: true`. */
+  editedPayload(raw: unknown, text: string): unknown;
+  /** Minimal payload of the same message mapping to type "deleted": id, chat, sender, fromMe, timestamp only. */
+  revokedPayload(raw: unknown): unknown;
   groupSummary(raw: unknown): GroupSummary;
   groupInfo(raw: unknown): GroupInfo;
   chatSummary(raw: unknown): ChatSummary;

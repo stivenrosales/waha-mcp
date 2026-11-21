@@ -72,6 +72,7 @@ export const messageSchema = z.object({
     .string()
     .nullable()
     .describe("Voice-note transcript (only when transcription is configured), else null."),
+  edited: z.literal(true).optional(),
 });
 
 export const chatStatsSchema = z.object({

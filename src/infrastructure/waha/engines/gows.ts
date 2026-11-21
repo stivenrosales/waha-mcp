@@ -94,7 +94,13 @@ function ciGet(o: Obj, name: string): unknown {
 
 /** Descends through container kinds (ephemeral, view-once, edits) up to a bounded depth. */
 function unwrap(message: Obj): Obj {
+  return unwrapEdits(message).message;
+}
+
+/** `edited` is true when the descent went through one of WAHA's own edit containers. */
+function unwrapEdits(message: Obj): { message: Obj; edited: boolean } {
   let current = message;
+  let edited = false;
   for (let i = 0; i < MAX_UNWRAP_DEPTH; i++) {
     const key = contentKey(current);
     if (key === null) break;
@@ -104,9 +110,10 @@ function unwrap(message: Obj): Obj {
     else if (key === "protocolMessage" && content.editedMessage !== undefined)
       inner = obj(content.editedMessage);
     if (inner === null || Object.keys(inner).length === 0) break;
+    if (key.toLowerCase() === "editedmessage" || key === "protocolMessage") edited = true;
     current = inner;
   }
-  return current;
+  return { message: current, edited };
 }
 
 function contentKey(message: Obj): string | null {
@@ -170,10 +177,12 @@ function mapMessage(rawIn: unknown): NormalizedMessage {
   if (typeof obj(raw._data).Message !== "object" || obj(raw._data).Message === null) {
     return unknownMessage(raw, "malformed");
   }
-  const message = unwrap(obj(obj(raw._data).Message));
+  const unwrapped = unwrapEdits(obj(obj(raw._data).Message));
+  const message = unwrapped.message;
   const key = contentKey(message);
   const base = unknownMessage(raw);
   const out: NormalizedMessage = { ...base };
+  if (unwrapped.edited || raw.waMcpEdited === true) out.edited = true;
   const chatId = str(raw.from) ?? str(obj(obj(raw._data).Info).Chat) ?? "";
 
   if (key === null) {
@@ -263,6 +272,36 @@ function mapReaction(rawIn: unknown): { targetId: string; reaction: Reaction } |
   return { targetId, reaction: { emoji: str(content.text) ?? "", by: authorOf(raw).id } };
 }
 
+/** Deep copy of `raw` with the mapped text (or media caption) replaced; flagged as edited. */
+function editedPayload(rawIn: unknown, text: string): unknown {
+  const raw = structuredClone(obj(rawIn)) as Obj;
+  raw.waMcpEdited = true;
+  if (typeof raw.body === "string") raw.body = text;
+  const data = obj(raw._data);
+  const message = unwrap(obj(data.Message));
+  const key = contentKey(message);
+  if (key === "conversation") message.conversation = text;
+  else if (key === "extendedTextMessage") obj(message[key]).text = text;
+  else if (key !== null && Object.hasOwn(MEDIA_KINDS, key)) obj(message[key]).caption = text;
+  return raw;
+}
+
+/** Same message with no content: only id, chat, sender, fromMe and timestamp survive. */
+function revokedPayload(rawIn: unknown): unknown {
+  const raw = obj(rawIn);
+  const data = obj(raw._data);
+  const info = obj(data.Info);
+  const keep = (o: Obj, keys: string[]): Obj =>
+    Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+  return {
+    ...keep(raw, ["id", "timestamp", "from", "fromMe", "participant"]),
+    _data: {
+      Info: keep(info, ["Sender", "SenderAlt", "PushName", "IsFromMe", "Chat"]),
+      Message: { protocolMessage: { type: 0 } },
+    },
+  };
+}
+
 // --- groups & chats ------------------------------------------------------------
 
 function groupSummary(rawIn: unknown): GroupSummary {
@@ -319,6 +358,8 @@ function safe<T>(fn: (raw: unknown) => T, fallback: (raw: unknown) => T): (raw: 
 export const gowsMapper: EngineMapper = {
   message: safe(mapMessage, (raw) => unknownMessage(raw, "malformed")),
   reaction: safe(mapReaction, () => null),
+  editedPayload,
+  revokedPayload,
   groupSummary,
   groupInfo,
   chatSummary,

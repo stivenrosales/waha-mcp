@@ -429,3 +429,57 @@ describe("mediaId and engine selection", () => {
     expect(mapper.message({ _data: { Info: { IsFromMe: true }, Message: {} } }).fromMe).toBe(true);
   });
 });
+
+describe("GOWS mapper - edited and revoked payloads", () => {
+  const text = pick(groupText, "conversation");
+  const image = pick(groupMedia, "imageMessage", (r) => r._data.Message.imageMessage.caption);
+
+  it("editedPayload replaces text", () => {
+    const before = mapper.message(text);
+    const after = mapper.message(mapper.editedPayload(text, "nuevo"));
+    expect(after.text).toBe("nuevo");
+    expect(after.edited).toBe(true);
+    expect(after.id).toBe(before.id);
+    expect(after.timestamp).toBe(before.timestamp);
+    expect(after.author).toEqual(before.author);
+    expect(after.fromMe).toBe(before.fromMe);
+  });
+
+  it("editedPayload replaces a caption", () => {
+    const before = mapper.message(image);
+    const after = mapper.message(mapper.editedPayload(image, "nuevo"));
+    expect(after.attachment?.caption).toBe("nuevo");
+    expect(after.attachment?.mediaId).toBe(before.attachment?.mediaId);
+    expect(after.edited).toBe(true);
+  });
+
+  it("revokedPayload maps to deleted and drops content", () => {
+    const before = mapper.message(image);
+    const payload = mapper.revokedPayload(image);
+    const after = mapper.message(payload);
+    expect(after.type).toBe("deleted");
+    expect(after.text).toBeNull();
+    expect(after.attachment).toBeNull();
+    expect(after.id).toBe(before.id);
+    expect(after.timestamp).toBe(before.timestamp);
+    expect(after.author).toEqual(before.author);
+    const json = JSON.stringify(payload);
+    expect(json).not.toContain(image._data.Message.imageMessage.caption);
+    expect(json).not.toContain(image._data.Message.imageMessage.mediaKey ?? "\u0000none");
+    expect(json).not.toContain("imageMessage");
+  });
+
+  it("flags WAHA's own edit container as edited", () => {
+    const raw = synth({
+      protocolMessage: { type: 14, editedMessage: { conversation: "fixed" } },
+    });
+    const msg = mapper.message(raw);
+    expect(msg.text).toBe("fixed");
+    expect(msg.edited).toBe(true);
+  });
+
+  it("unedited messages have no edited key", () => {
+    expect("edited" in mapper.message(text)).toBe(false);
+    expect("edited" in mapper.message(image)).toBe(false);
+  });
+});

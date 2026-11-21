@@ -10,7 +10,7 @@ edits, deletions, reactions and votes by anyone.
 `message_overrides` / `message_reactions` / `poll_votes` set of tables in the tenant `cache.db`
 (`MessageActionStore`), written by the tools (own actions, right away) and by a new webhook
 **cache event processor** (everyone's actions), independent of the mission engine. A gateway
-decorator (`withMessageActions`) sits directly on the WAHA gateway, *inside* the cache, so every
+decorator (`withMessageActions`) sits directly on the WAHA gateway, _inside_ the cache, so every
 WAHA read (refresh, backfill, cache-off reads, fallbacks) is rewritten by the overrides before it
 is stored or returned. Webhooks turn on with `WAHA_WEBHOOK_SECRET` alone.
 
@@ -133,6 +133,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   export function parseMessageId(id: string): ParsedMessageId;  // InvalidInputError otherwise
   export function shortMessageId(id: string): string;            // moved verbatim from history.ts
   ```
+
   Valid: `parts[0]` is `true|false`, `parts[1]` contains `@`, `parts[2]` non-empty without `@`,
   optional `parts[3]` contains `@`, nothing more. Error text:
   `'"message_id" must be a full message id from get_messages, search_messages or get_thread (e.g. true_51999888777@c.us_3EB0…).'`
@@ -221,13 +222,14 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   // EventStore
   pending(limit: number, kinds?: readonly WebhookEventKind[]): StoredEvent[];   // no kinds = all
   ```
+
   Kind values equal WAHA's event names; `message.any` stays mapped to `"message"`.
 - Route: `WahaWebhookDeps.kinds: ReadonlySet<WebhookEventKind>` (required). An accepted WAHA event
   whose kind is not in `kinds` → `ignored reason=event`. Composition passes `CACHE_EVENT_KINDS`
   plus `MISSION_EVENT_KINDS` only when `config.missions` is set.
 - `WEBHOOK_EVENTS` = `["message.any", "session.status", "message.edited", "message.revoked",
   "message.reaction", "poll.vote", "poll.vote.failed"]`, one fixed list whether missions are on
-  or not (*my call*: toggling missions later never reconfigures sessions).
+  or not (_my call_: toggling missions later never reconfigures sessions).
 - Engine: `events.pending(EVENT_BATCH, MISSION_EVENT_KINDS)`.
 
 - [ ] **Step 1: Write failing tests**:
@@ -277,7 +279,8 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
     votes(pollId: string): { votes: StoredVote[]; failed: number };   // failed = distinct voters with only failed votes after their last good one
   }
   ```
-  `ts`/`at` are unix seconds. Owner as reactor/voter is stored as `"me"` (*my call*, WAHA's own
+
+  `ts`/`at` are unix seconds. Owner as reactor/voter is stored as `"me"` (_my call_, WAHA's own
   convention in event payloads).
 - Tables (in `cache.db` `SCHEMA`): `message_overrides(short_id PK, kind TEXT, sealed TEXT, at INTEGER)`,
   `message_reactions(short_id, reactor, sealed, ts, PK(short_id, reactor))`,
@@ -286,7 +289,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   `vote:<pollId>:<voter>`); a revoked override seals nothing (`sealed = ''`). Reactor/voter ids
   stay plaintext (like chat ids in `messages`).
 - `MessageStore.findByShortId(shortId: string): { chatId: string; id: string; ts: number; raw: unknown }[]`
-  — every chat (*my call*: robust to `@lid`/`@c.us`); SQL prefilter `id = ? OR id LIKE ? ESCAPE '\'`
+  — every chat (_my call_: robust to `@lid`/`@c.us`); SQL prefilter `id = ? OR id LIKE ? ESCAPE '\'`
   (`%\_<ID>` and `%\_<ID>\_%`), then keep rows whose `shortMessageId(id) === shortId`.
   Rewriting uses the existing `upsertRaw` (keeps rowid and `ts`).
 - `TranscriptStore.deleteByShortId(shortId: string): void` — same matching on `message_id`.
@@ -329,6 +332,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   /** Minimal payload of the same message mapping to type "deleted": id, chat, sender, fromMe, timestamp only. */
   revokedPayload(raw: unknown): unknown;
   ```
+
   GOWS: `editedPayload` sets a top-level `waMcpEdited: true` marker that `message()` turns into
   `edited: true`; `message()` also flags `edited: true` when `unwrap` passed through an
   `editedMessage` / `protocolMessage.editedMessage` container (WAHA's own edited copy).
@@ -348,6 +352,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
     transcripts: Pick<TranscriptStore, "deleteByShortId">; mapper: () => Promise<EngineMapper>;
   }): MessageActions;
   ```
+
   `applyEdit` on a row already revoked (override is revoked) leaves it deleted.
 
 - [ ] **Step 1: Write failing mapper tests** (start from an existing GOWS text fixture and an
@@ -396,6 +401,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   // ToolRunContext / TenantToolContext
   messageActions: MessageActions;
   ```
+
   `withMessageActions` rewrites `getMessages` pages and `getMessage` results (revoked →
   `revokedPayload`, edited → `editedPayload`), passes everything else through, and implements
   `storedReactions`. Runtime order: `actionsGw = withMessageActions(wahaGateway, …)`;
@@ -453,6 +459,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   }): CacheEventProcessor;
   export function composeCacheEventProcessor(deps: { config: Config; registry: TenantRegistry; events: EventStore; logger: Logger }): CacheEventProcessor | null;
   ```
+
   Field mapping: edited → `editedMessageId` (bare), `body`, `at = payload.timestamp ?? receivedAt`;
   revoked → `revokedMessageId` (bare); reaction → `shortMessageId(reaction.messageId)`, emoji
   `reaction.text`, reactor `fromMe ? "me" : participant ?? from`, `ts = timestamp`; vote →
@@ -598,7 +605,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   → `POST /api/sendPoll` `{session, chatId, poll:{name, options, multipleAnswers}, reply_to}`;
   id read like `post` already does.
 - Tool: `chat_id` (`chatIdField`), `question` (1–255), `options` (2–12 strings, each 1–100 after
-  trim; duplicates after trim and case-folding → `InvalidInputError('Poll options must be different from each other.')`, *my call*),
+  trim; duplicates after trim and case-folding → `InvalidInputError('Poll options must be different from each other.')`, _my call_),
   `multiple_answers` (default false), `reply_to` (`replyToField`). `noteOwnerSend` after the send.
   Output `sendOutputSchema`; text `Sent poll to <chat> (message <id>). Read votes with get_poll_results.`
   Description includes `SEND_POLICY`. Annotations `SEND_ANNOTATIONS`.
@@ -635,10 +642,11 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
   export async function getPollResults(deps: { gateway: WahaGateway; mapper: EngineMapper; actions: MessageActions; webhooksOn: boolean; now: () => number },
     messageId: string): Promise<PollResults>;
   ```
+
   Not a poll → `InvalidInputError("That message is not a poll.")`. A selected option not in the
   poll is listed under the voter but not counted. Webhooks off (`ctx.config.webhookSecret === null`)
   → question and options with `votes: 0`, empty voters, `webhooks: false`, and the result text
-  says "Votes are not available: this server has no webhooks (WAHA_WEBHOOK_SECRET)." (*my call*:
+  says "Votes are not available: this server has no webhooks (WAHA_WEBHOOK_SECRET)." (_my call_:
   not an error). Read-only annotations. **Wording (spike):** if votes arrive undecrypted (Task 0
   check 4), the description says counts may be incomplete and `failedVotes` explains why.
 
@@ -662,7 +670,7 @@ phone is "the other side"). Scratch dir: `SP=$(mktemp -d)`.
 - Produces: `WhatsAppSender.markRead(chatId: string): Promise<void>` → `POST
   /api/{session}/chats/{seg(chatId)}/messages/read` (no query, WAHA defaults);
   `markUnread(chatId: string): Promise<void>` → `POST /api/{session}/chats/{seg(chatId)}/unread`;
-  both `sessionInBody: false`, `notFound: "chat"`. `sendSeen` is not used (*my call*: the spec
+  both `sessionInBody: false`, `notFound: "chat"`. `sendSeen` is not used (_my call_: the spec
   names the chat endpoints).
 - Tools: `chat_id` (`chatIdField`); result `Marked <chat> as read.` / `as unread.`;
   `IDEMPOTENT_WRITE_ANNOTATIONS`; no mission takeover.

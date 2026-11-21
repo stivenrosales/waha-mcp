@@ -89,24 +89,24 @@ is not hard; single owner by default, invitations optional).
 ### Tools (MCP, per tenant)
 
 All take the full message id as returned by `get_messages`, `search_messages` or `get_thread`
-(`{fromMe}_{chatId}_{ID}[_{participant}]`). *My call:* the chat is parsed from that id instead
+(`{fromMe}_{chatId}_{ID}[_{participant}]`). _My call:_ the chat is parsed from that id instead
 of asking for a separate `chat_id`, so the model cannot pair an id with the wrong chat; an id
 that does not parse is an input error.
 
-| Tool | Input | Behaviour |
-|------|-------|-----------|
-| `react_message` | `message_id`, `emoji` (one emoji, or `""` to remove) | Any message, own or not. |
-| `edit_message` | `message_id`, `text` | Own messages only (`fromMe` prefix `true_`). Text goes through `toWhatsAppText` and the length check like `send_text`. WhatsApp's own time limit is enforced by WhatsApp; its error is mapped to a clear message. |
-| `delete_message` | `message_id` | Own messages only. Deletes for everyone (see spike). Result says it cannot be undone. |
-| `send_poll` | `chat_id`, `question`, `options` (2–12, unique, each ≤100), `multiple_answers` (default false), `reply_to?` | A send: same `SEND_POLICY` and `noteOwnerSend` (mission takeover) as `send_text`. Returns the poll message id. |
-| `get_poll_results` | `message_id` (a poll) | Question, options with vote counts, and who voted what (names via contacts). Notes failed-to-decrypt votes. Needs webhooks; without them it says so. |
-| `mark_read` | `chat_id` | Marks the chat read. |
-| `mark_unread` | `chat_id` | Marks the chat unread. |
+| Tool               | Input                                                                                                       | Behaviour                                                                                                                                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `react_message`    | `message_id`, `emoji` (one emoji, or `""` to remove)                                                        | Any message, own or not.                                                                                                                                                                                          |
+| `edit_message`     | `message_id`, `text`                                                                                        | Own messages only (`fromMe` prefix `true_`). Text goes through `toWhatsAppText` and the length check like `send_text`. WhatsApp's own time limit is enforced by WhatsApp; its error is mapped to a clear message. |
+| `delete_message`   | `message_id`                                                                                                | Own messages only. Deletes for everyone (see spike). Result says it cannot be undone.                                                                                                                             |
+| `send_poll`        | `chat_id`, `question`, `options` (2–12, unique, each ≤100), `multiple_answers` (default false), `reply_to?` | A send: same `SEND_POLICY` and `noteOwnerSend` (mission takeover) as `send_text`. Returns the poll message id.                                                                                                    |
+| `get_poll_results` | `message_id` (a poll)                                                                                       | Question, options with vote counts, and who voted what (names via contacts). Notes failed-to-decrypt votes. Needs webhooks; without them it says so.                                                              |
+| `mark_read`        | `chat_id`                                                                                                   | Marks the chat read.                                                                                                                                                                                              |
+| `mark_unread`      | `chat_id`                                                                                                   | Marks the chat unread.                                                                                                                                                                                            |
 
 Annotations: `delete_message` is destructive; `react_message`, `edit_message`, `send_poll` are
 send-like; `mark_*` are idempotent writes.
 
-*My call (mission interplay):* `send_poll` takes over an active mission in that chat, like any
+_My call (mission interplay):_ `send_poll` takes over an active mission in that chat, like any
 owner send. Reactions, edits, deletes and read marks do not.
 
 ### Server instructions
@@ -142,13 +142,13 @@ Effects:
 - **Poll vote:** stored in a new per-tenant table (poll id, voter, selected options, timestamp;
   latest per voter by `vote.timestamp`). Failed votes are counted separately.
 
-**Edits and deletions survive refresh** (*my call*). The polling refresh writes WAHA's copy over
+**Edits and deletions survive refresh** (_my call_). The polling refresh writes WAHA's copy over
 cached rows, and WAHA may keep serving the original text. So edits and revokes are also recorded
 in a per-tenant, sealed `message_overrides` table (message id → deleted, or new text) that
 refresh and backfill apply on top of what WAHA returns, and that the read path applies even when
 the cache is off. Overrides are kept as long as the cache keeps messages.
 
-**Scope of "the old text is gone"** (*my call*): waha-mcp's message cache, transcripts and
+**Scope of "the old text is gone"** (_my call_): waha-mcp's message cache, transcripts and
 overrides. Pending webhook events are purged once processed, as today. Mission logs and schedule
 history are the owner's own audit records and keep their own retention; WAHA's own storage is
 outside waha-mcp's control, and the README says so.

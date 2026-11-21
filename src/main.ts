@@ -1,15 +1,18 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
+import type { CacheEventProcessor } from "./application/cacheEvents.js";
 import type { MissionEngine } from "./application/missions/engine.js";
 import type { ScheduleRunner } from "./application/schedules/runner.js";
 import {
   composeApp,
+  composeCacheEventProcessor,
   composeMissionEngine,
   composeMissionPurge,
   composeScheduleRunner,
 } from "./composition.js";
 import { loadConfig } from "./config.js";
+import { CACHE_EVENT_KINDS } from "./domain/ports/EventStore.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
 import { createSqliteEventStore } from "./infrastructure/missions/sqliteEventStore.js";
@@ -78,14 +81,18 @@ async function main(): Promise<void> {
   // by the first tick.
   let missionEngine: MissionEngine | null = null;
   let scheduleRunner: ScheduleRunner | null = null;
+  let cacheEvents: CacheEventProcessor | null = null;
   const { app, registry, toolCount, configureWebhooks } = composeApp({
     config,
     store,
     tenants,
     missions,
     events,
-    // Engine-only for now: the wake is a no-op when missions are off.
-    onWebhookEvent: () => missionEngine?.wake(),
+    // Cache kinds wake the cache processor, mission kinds the engine (a no-op when missions are off).
+    onWebhookEvent: ({ kind }) => {
+      if ((CACHE_EVENT_KINDS as readonly string[]).includes(kind)) cacheEvents?.wake();
+      else missionEngine?.wake();
+    },
     missionEngine: () => missionEngine,
     schedules,
     scheduleRunner: () => scheduleRunner,
@@ -112,6 +119,8 @@ async function main(): Promise<void> {
   if (missionEngine) missionEngine.start();
   else purge.start(() => new Date());
   scheduleRunner?.start(SCHEDULE_TICK_MS);
+  cacheEvents = composeCacheEventProcessor({ config, registry, events, logger });
+  cacheEvents?.start(SCHEDULE_TICK_MS);
 
   const server = serve({ fetch: app.fetch, port: config.port });
 
@@ -146,6 +155,7 @@ async function main(): Promise<void> {
     // logging its sent id) gets up to MISSION_DRAIN_MS before the stores close under it.
     missionEngine?.stop();
     scheduleRunner?.stop();
+    cacheEvents?.stop();
     purge.stop();
     let finished = false;
     const finish = (): void => {
@@ -156,7 +166,7 @@ async function main(): Promise<void> {
       process.exit(0);
     };
     const drained = Promise.race([
-      Promise.all([missionEngine?.idle(), scheduleRunner?.idle()]),
+      Promise.all([missionEngine?.idle(), scheduleRunner?.idle(), cacheEvents?.idle()]),
       new Promise<void>((resolve) => setTimeout(resolve, MISSION_DRAIN_MS).unref()),
     ]);
     void drained.then(() => {

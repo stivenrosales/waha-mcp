@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Hono } from "hono";
+import { type CacheEventProcessor, createCacheEventProcessor } from "./application/cacheEvents.js";
 import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
 import { createMissionPurge, type MissionPurge } from "./application/missions/retention.js";
 import { createScheduleRunner, type ScheduleRunner } from "./application/schedules/runner.js";
@@ -34,6 +35,7 @@ import { scheduleTenantPort } from "./infrastructure/schedules/tenantPort.js";
 import { createOnboardingRoutes } from "./infrastructure/tenants/onboardingRoutes.js";
 import { createTenantRegistry, type TenantRegistry } from "./infrastructure/tenants/registry.js";
 import type { buildTenantRuntime, MissionWiring } from "./infrastructure/tenants/runtime.js";
+import { cacheEventPort } from "./infrastructure/webhooks/cacheEventPort.js";
 import {
   configureTenantWebhooks,
   createWahaWebhookRoute,
@@ -259,6 +261,27 @@ export function composeMissionEngine(deps: {
       }),
     logger: deps.logger,
     ...(deps.purge ? { purge: deps.purge } : {}),
+  });
+}
+
+/**
+ * The message-cache event processor over the composed registry (null without webhooks). Not
+ * started: `main.ts` starts its tick and wires `wake()` to the webhook route.
+ */
+export function composeCacheEventProcessor(deps: {
+  config: Config;
+  registry: TenantRegistry;
+  events: EventStore | undefined;
+  logger: Logger;
+}): CacheEventProcessor | null {
+  if (!deps.config.webhookSecret || !deps.events) return null;
+  return createCacheEventProcessor({
+    events: deps.events,
+    acquire: (tenantId) => {
+      const held = deps.registry.acquire(tenantId);
+      return held ? { port: cacheEventPort(held.runtime), release: held.release } : null;
+    },
+    logger: deps.logger,
   });
 }
 

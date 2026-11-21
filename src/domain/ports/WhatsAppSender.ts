@@ -47,6 +47,10 @@ export interface WhatsAppSender {
   editMessage(q: { chatId: string; messageId: string; text: string }): Promise<void>;
   /** Deletes one of the owner's own messages for everyone (full id). */
   deleteMessage(q: { chatId: string; messageId: string }): Promise<void>;
+  /** Marks a whole chat as read (WAHA defaults for which messages). */
+  markRead(chatId: string): Promise<void>;
+  /** Marks a chat as unread. */
+  markUnread(chatId: string): Promise<void>;
   startTyping(chatId: string): Promise<void>;
   stopTyping(chatId: string): Promise<void>;
 }

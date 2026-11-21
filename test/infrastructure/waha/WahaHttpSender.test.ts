@@ -379,4 +379,35 @@ describe("post regression", () => {
     const bad = fakeFetch(() => json({ message: "too old" }, 422));
     await expect(make(bad.fn).deleteMessage(q)).rejects.toBeInstanceOf(InvalidInputError);
   });
+
+  it("markRead POSTs the encoded chat path with no body, no query and no Content-Type", async () => {
+    const { fn, calls } = fakeFetch(() => json({}));
+    await make(fn).markRead("51999@c.us");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      path: "/api/default/chats/51999%40c.us/messages/read",
+      method: "POST",
+      body: {},
+    });
+    expect(calls[0]?.headers).not.toHaveProperty("content-type");
+    expect(calls[0]?.headers["x-api-key"]).toBe(KEY);
+  });
+
+  it("markUnread POSTs the encoded chat path with no body and no Content-Type", async () => {
+    const { fn, calls } = fakeFetch(() => json({}));
+    await make(fn).markUnread("51999@c.us");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      path: "/api/default/chats/51999%40c.us/unread",
+      method: "POST",
+      body: {},
+    });
+    expect(calls[0]?.headers).not.toHaveProperty("content-type");
+  });
+
+  it("markRead / markUnread: 404 becomes WahaNotFoundError(chat)", async () => {
+    const gone = fakeFetch(() => json({}, 404));
+    await expect(make(gone.fn).markRead("1@c.us")).rejects.toEqual(new WahaNotFoundError("chat"));
+    await expect(make(gone.fn).markUnread("1@c.us")).rejects.toEqual(new WahaNotFoundError("chat"));
+  });
 });

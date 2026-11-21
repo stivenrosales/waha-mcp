@@ -122,6 +122,8 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 | 😀           | `react_message`        | Reacts to a message with an emoji, or removes your reaction.                      |
 | ✏️           | `edit_message`         | Edits the text of a message you sent.                                             |
 | 🗑️           | `delete_message`       | Deletes a message you sent, for everyone.                                         |
+| 👁️           | `mark_read`            | Marks a chat as read.                                                             |
+| 🔵           | `mark_unread`          | Marks a chat as unread.                                                           |
 | **Delegate** |                        |                                                                                   |
 | 🤖           | `start_mission`        | Hands a direct chat to a server-side agent until an objective is met (optional).  |
 | 🔍           | `get_mission`          | State, timeline, pending questions, collected files and usage of one mission.     |

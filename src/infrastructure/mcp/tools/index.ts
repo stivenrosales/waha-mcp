@@ -14,6 +14,7 @@ import { listChatsTool } from "./listChats.js";
 import { listGroupsTool } from "./listGroups.js";
 import { listPendingRepliesTool } from "./listPendingReplies.js";
 import { listSharedFilesTool } from "./listSharedFiles.js";
+import { markReadTool, markUnreadTool } from "./markChat.js";
 import {
   answerMissionTool,
   cancelMissionTool,
@@ -60,6 +61,8 @@ export function createTools(): ToolDefinition[] {
     reactMessageTool,
     editMessageTool,
     deleteMessageTool,
+    markReadTool,
+    markUnreadTool,
     scheduleMessageTool,
     cancelScheduledTool,
     startMissionTool,

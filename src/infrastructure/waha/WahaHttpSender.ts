@@ -186,6 +186,26 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
         notFound: "message",
       });
     },
+    markRead: async (chatId) => {
+      await request({
+        method: "POST",
+        path: `/api/${seg(opts.session)}/chats/${seg(chatId)}/messages/read`,
+        body: null,
+        sessionInBody: false,
+        media: false,
+        notFound: "chat",
+      });
+    },
+    markUnread: async (chatId) => {
+      await request({
+        method: "POST",
+        path: `/api/${seg(opts.session)}/chats/${seg(chatId)}/unread`,
+        body: null,
+        sessionInBody: false,
+        media: false,
+        notFound: "chat",
+      });
+    },
     startTyping: async (chatId) => {
       await post("/api/startTyping", { chatId }, false);
     },

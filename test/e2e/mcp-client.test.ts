@@ -20,6 +20,7 @@ import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqli
 import { generateDek, wrapDek } from "../../src/infrastructure/crypto/envelope.js";
 import {
   DESTRUCTIVE_ANNOTATIONS,
+  IDEMPOTENT_WRITE_ANNOTATIONS,
   SEND_ANNOTATIONS,
 } from "../../src/infrastructure/mcp/defineTool.js";
 import {
@@ -177,6 +178,8 @@ afterAll(() => {
 /** Per-tool annotation exceptions; every other write tool uses SEND_ANNOTATIONS. */
 const ANNOTATION_OVERRIDES: Record<string, typeof DESTRUCTIVE_ANNOTATIONS> = {
   delete_message: DESTRUCTIVE_ANNOTATIONS,
+  mark_read: IDEMPOTENT_WRITE_ANNOTATIONS,
+  mark_unread: IDEMPOTENT_WRITE_ANNOTATIONS,
 };
 
 /** Write tools; each later task appends its own. */
@@ -190,6 +193,8 @@ const SEND_TOOLS = [
   "react_message",
   "edit_message",
   "delete_message",
+  "mark_read",
+  "mark_unread",
   "schedule_message",
   "cancel_scheduled",
   "start_mission",

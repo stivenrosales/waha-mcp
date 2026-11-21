@@ -2,7 +2,11 @@ import type { EngineMapper } from "../../domain/message.js";
 import type { MissionLimits } from "../../domain/missions/limits.js";
 import { transition } from "../../domain/missions/mission.js";
 import { nextAllowedInitiatedSend, reminderDue } from "../../domain/missions/pacing.js";
-import type { EventStore, StoredEvent } from "../../domain/ports/EventStore.js";
+import {
+  type EventStore,
+  MISSION_EVENT_KINDS,
+  type StoredEvent,
+} from "../../domain/ports/EventStore.js";
 import type { LlmClient } from "../../domain/ports/LlmClient.js";
 import type { MissionLog } from "../../domain/ports/MissionLog.js";
 import type { MissionRow, MissionStore } from "../../domain/ports/MissionStore.js";
@@ -253,7 +257,7 @@ export function createMissionEngine(deps: MissionEngineDeps): MissionEngine {
   }
 
   async function processEvents(now: Date): Promise<void> {
-    for (const e of events.pending(EVENT_BATCH)) {
+    for (const e of events.pending(EVENT_BATCH, MISSION_EVENT_KINDS)) {
       let held: ReturnType<MissionEngineDeps["acquire"]>;
       try {
         held = deps.acquire(e.tenantId);

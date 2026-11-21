@@ -745,15 +745,15 @@ describe("e2e: WAHA webhooks for missions", () => {
     const body = JSON.stringify({
       id: "evt_e2e_status",
       timestamp: Date.now(),
-      event: "session.status",
+      event: "message.revoked",
       session: "default",
       metadata: { tenant: adminId },
-      payload: { status: "WORKING" },
+      payload: { revokedMessageId: "3EB0AAAA" },
     });
     expect((await request(w.app, "/webhooks/waha", signed(body, "wrong"))).status).toBe(401);
     expect((await request(w.app, "/webhooks/waha", signed(body))).status).toBe(200);
     expect(w.events.pending(10).map((e) => [e.eventId, e.kind])).toEqual([
-      ["evt_e2e_status", "session.status"],
+      ["evt_e2e_status", "message.revoked"],
     ]);
     await w.configureWebhooks();
     expect(w.sessions.calls.filter((c) => c.startsWith("configureWebhook:"))).toEqual([

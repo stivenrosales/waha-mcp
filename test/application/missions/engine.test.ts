@@ -981,6 +981,21 @@ describe("mission engine: closing message", () => {
   });
 });
 
+describe("mission engine: cache events", () => {
+  it("leaves cache events for the cache processor", async () => {
+    const h = harness();
+    h.events.put({
+      tenantId: TENANT,
+      eventId: "evt_cache",
+      kind: "message.reaction",
+      receivedAt: new Date().toISOString(),
+      payloadSealed: "sealed",
+    });
+    await h.tickAt(1 * SEC);
+    expect(h.events.pending(10).map((e) => e.eventId)).toEqual(["evt_cache"]);
+  });
+});
+
 describe("mission engine: restart", () => {
   it("resumes due missions and pending events over the same stores with no duplicate sends", async () => {
     const h = harness();

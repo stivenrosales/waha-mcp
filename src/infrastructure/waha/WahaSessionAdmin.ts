@@ -20,8 +20,19 @@ const KNOWN_STATES: readonly SessionState[] = [
 const asRecord = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
 
-/** Missions only consume these: `message.any` already carries incoming messages (spike §3.8). */
-const WEBHOOK_EVENTS = ["message.any", "session.status"] as const;
+/**
+ * One fixed list whether missions are on or not, so toggling missions never reconfigures sessions.
+ * `message.any` already carries incoming messages (spike §3.8); the rest keep the cache in sync.
+ */
+const WEBHOOK_EVENTS = [
+  "message.any",
+  "session.status",
+  "message.edited",
+  "message.revoked",
+  "message.reaction",
+  "poll.vote",
+  "poll.vote.failed",
+] as const;
 /**
  * Exponential retries: WAHA waits `2^n * delaySeconds` (+0-20% jitter) before retry n
  * (`WebhookPlugin.sender.ts`, `exponentialDelay`), so 9 attempts at 2 s retry after 4 s, 8 s, …,

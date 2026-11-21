@@ -6,7 +6,12 @@ import { createMissionPurge, type MissionPurge } from "./application/missions/re
 import { createScheduleRunner, type ScheduleRunner } from "./application/schedules/runner.js";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
-import type { EventStore } from "./domain/ports/EventStore.js";
+import {
+  CACHE_EVENT_KINDS,
+  type EventStore,
+  MISSION_EVENT_KINDS,
+  type WebhookEventKind,
+} from "./domain/ports/EventStore.js";
 import type { LlmClient } from "./domain/ports/LlmClient.js";
 import type { MissionStore } from "./domain/ports/MissionStore.js";
 import type { ScheduleStore } from "./domain/ports/ScheduleStore.js";
@@ -43,7 +48,7 @@ export interface ComposeDeps {
   tenants: TenantStore;
   /** Mission rows, deleted with their tenant. */
   missions: MissionStore;
-  /** The WAHA webhook inbox; required for the webhook route when missions are on. */
+  /** The WAHA webhook inbox; required whenever `WAHA_WEBHOOK_SECRET` is set. */
   events?: EventStore;
   /** Wakes the mission engine when a webhook event is stored. */
   onWebhookEvent?: WahaWebhookDeps["onEvent"];
@@ -195,6 +200,10 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
             tenants,
             registry,
             events: deps.events,
+            kinds: new Set<WebhookEventKind>([
+              ...CACHE_EVENT_KINDS,
+              ...(config.missions ? MISSION_EVENT_KINDS : []),
+            ]),
             logger,
             ...(deps.onWebhookEvent ? { onEvent: deps.onWebhookEvent } : {}),
           })

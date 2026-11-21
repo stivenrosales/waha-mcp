@@ -1,5 +1,23 @@
-/** What a stored WAHA webhook event is about: `message.any` or `session.status`. */
-export type WebhookEventKind = "message" | "session.status";
+/** Events the mission engine consumes: `message.any` (stored as `message`) and `session.status`. */
+export type MissionEventKind = "message" | "session.status";
+/** Events that keep the message cache in sync; values are WAHA's event names. */
+export type CacheEventKind =
+  | "message.edited"
+  | "message.revoked"
+  | "message.reaction"
+  | "poll.vote"
+  | "poll.vote.failed";
+/** What a stored WAHA webhook event is about. */
+export type WebhookEventKind = MissionEventKind | CacheEventKind;
+
+export const MISSION_EVENT_KINDS: readonly MissionEventKind[] = ["message", "session.status"];
+export const CACHE_EVENT_KINDS: readonly CacheEventKind[] = [
+  "message.edited",
+  "message.revoked",
+  "message.reaction",
+  "poll.vote",
+  "poll.vote.failed",
+];
 
 /** One received webhook event waiting for (or already handled by) the mission engine. */
 export interface StoredEvent {
@@ -19,8 +37,8 @@ export interface StoredEvent {
 export interface EventStore {
   /** "duplicate" (and no change) when this tenant already has an event with this id. */
   put(q: Omit<StoredEvent, "id">): "stored" | "duplicate";
-  /** Events not yet marked done, oldest first. */
-  pending(limit: number): StoredEvent[];
+  /** Events not yet marked done, oldest first; only the given kinds, or every kind when omitted. */
+  pending(limit: number, kinds?: readonly WebhookEventKind[]): StoredEvent[];
   /** Marks the event handled and drops its sealed payload; the id is kept for dedupe. */
   markDone(id: number): void;
   /**

@@ -191,7 +191,15 @@ describe("WahaSessionAdmin", () => {
     const HOOK = { url: "https://mcp.example.com/webhooks/waha", secret: "whsec-123" };
     const OURS = {
       url: HOOK.url,
-      events: ["message.any", "session.status"],
+      events: [
+        "message.any",
+        "session.status",
+        "message.edited",
+        "message.revoked",
+        "message.reaction",
+        "poll.vote",
+        "poll.vote.failed",
+      ],
       hmac: { key: HOOK.secret },
       retries: { policy: "exponential", delaySeconds: 2, attempts: 9 },
       customHeaders: null,
@@ -239,10 +247,18 @@ describe("WahaSessionAdmin", () => {
 
     it("configureWebhook does not PUT (no session restart) when ours is already there", async () => {
       // WAHA may echo extra defaults and another event order; neither is a difference.
-      const echoed = { ...OURS, events: ["session.status", "message.any"], customHeaders: [] };
+      const echoed = { ...OURS, events: [...OURS.events].reverse(), customHeaders: [] };
       const { fn, calls } = wahaWith({ name: "t_abc", config: { webhooks: [OTHER, echoed] } });
       await make(fn).configureWebhook("t_abc", HOOK);
       expect(calls.map((c) => c.method)).toEqual(["GET"]);
+    });
+
+    it("configureWebhook rewrites ours when it has the old two-event list", async () => {
+      const old = { ...OURS, events: ["message.any", "session.status"] };
+      const { fn, calls } = wahaWith({ name: "t_abc", config: { webhooks: [old] } });
+      await make(fn).configureWebhook("t_abc", HOOK);
+      expect(calls.map((c) => c.method)).toEqual(["GET", "PUT"]);
+      expect(JSON.parse(calls[1]?.body ?? "").config.webhooks).toEqual([OURS]);
     });
 
     it("configureWebhook rewrites ours when it still has the old 30-second constant retries", async () => {

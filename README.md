@@ -237,7 +237,7 @@ A mission hands one direct chat to an agent that runs on the server: it writes t
 
 You get a WhatsApp message in your own chat when a mission finishes, times out, is stopped, pauses, or has a question for you, and the next tool result in any of your MCP sessions carries a short notice. The admin tool `get_llm_usage` reports mission spend per tenant (calls, missions, tokens and USD cost); usage rows hold no content and are kept after `delete_tenant`, like transcription usage.
 
-**Setup.** Webhooks are their own feature: set `WAHA_WEBHOOK_SECRET` to keep edits, deletions, reactions and poll votes in sync; missions also need `OPENROUTER_API_KEY` (a key without the secret is a startup error). At startup the server points every active tenant's WAHA session at `POST {PUBLIC_BASE_URL}/webhooks/waha` for `message.any` and `session.status` events, signed with `WAHA_WEBHOOK_SECRET` (HMAC-SHA512); new sessions get it on creation. The route accepts only signed, recent events (up to 45 minutes old) of known sessions and stores them encrypted with the tenant's key until the engine handles them, so a restart loses nothing. WAHA retries a failed delivery with exponential backoff (`retries: {policy: "exponential", delaySeconds: 2, attempts: 9}`: after 4 s, 8 s, … up to about 17 minutes, the last retry about 34 to 41 minutes after the event), so an outage of up to about 30 minutes loses no events; a longer one does. Changing this webhook entry restarts the tenant's WhatsApp session once (WAHA restarts a running session on a config update), so the first boot after upgrading from the old 30-second retries restarts every active tenant's session once.
+**Setup.** Webhooks are their own feature: set `WAHA_WEBHOOK_SECRET` to keep edits, deletions, reactions and poll votes in sync; missions also need `OPENROUTER_API_KEY` (a key without the secret is a startup error). At startup the server points every active tenant's WAHA session at `POST {PUBLIC_BASE_URL}/webhooks/waha` for `message.any`, `session.status`, `message.edited`, `message.revoked`, `message.reaction`, `poll.vote` and `poll.vote.failed` events (one fixed list, so toggling missions never reconfigures sessions; with missions off the route ignores `message.any` and `session.status`), signed with `WAHA_WEBHOOK_SECRET` (HMAC-SHA512); new sessions get it on creation. The route accepts only signed, recent events (up to 45 minutes old) of known sessions and stores them encrypted with the tenant's key until the engine handles them, so a restart loses nothing. WAHA retries a failed delivery with exponential backoff (`retries: {policy: "exponential", delaySeconds: 2, attempts: 9}`: after 4 s, 8 s, … up to about 17 minutes, the last retry about 34 to 41 minutes after the event), so an outage of up to about 30 minutes loses no events; a longer one does. Changing this webhook entry restarts the tenant's WhatsApp session once (WAHA restarts a running session on a config update), so the first boot after upgrading from the old 30-second retries restarts every active tenant's session once.
 
 **Limits** (environment variables in [Configuration](#configuration), defaults in brackets):
 
@@ -299,54 +299,54 @@ Every sending tool is annotated as a write (`readOnlyHint: false`), so clients a
 
 All configuration is through environment variables.
 
-| Variable                             | Required | Default                      | Description                                                                 |
-| ------------------------------------ | -------- | ---------------------------- | --------------------------------------------------------------------------- |
-| `WAHA_API_URL`                       | yes      |                              | Base URL of WAHA (internal URL when deployed next to it).                   |
-| `WAHA_API_KEY`                       | yes      |                              | WAHA API key (never shown to users).                                        |
-| `PUBLIC_BASE_URL`                    | yes      |                              | Public HTTPS origin of this server, no path (`http` only for localhost).    |
-| `MASTER_KEY`                         | yes      |                              | 32 bytes in base64 (`openssl rand -base64 32`); wraps every tenant key.     |
-| `MASTER_KEY_PREVIOUS`                | no       |                              | Old master key, only for the start that rotates `MASTER_KEY`.               |
-| `ADMIN_USERNAME`                     | yes      |                              | Admin username, 3-32 of `A-Z a-z 0-9 . - _`; created on first start.        |
-| `ADMIN_PASSWORD`                     | yes      |                              | Admin password (12+ characters); read only to create the admin or reset it. |
-| `ADMIN_PASSWORD_RESET`               | no       | `false`                      | `1`/`true`: reset admin password and sessions on every start; then unset.   |
-| `WAHA_SESSION`                       | no       | `default`                    | WAHA session of the admin's tenant (tenant #1).                             |
-| `DATA_DIR`                           | no       | `/data`                      | `auth.db` (users, tenants, OAuth), media secret, `tenants/<id>/` data.      |
-| `PORT`                               | no       | `3000`                       | HTTP port.                                                                  |
-| `TIMEZONE`                           | no       | `UTC`                        | IANA time zone for dates and day boundaries (`America/Lima`).               |
-| `STATS_MAX_MESSAGES`                 | no       | `5000`                       | Per-chat message cap; fan-out tools read up to 100 chats each.              |
-| `MEDIA_LINK_TTL_SECONDS`             | no       | `600`                        | Lifetime of signed media links.                                             |
-| `MEDIA_INLINE_MAX_BYTES`             | no       | `5242880`                    | Largest file returned inline (5 MiB); larger ones get a link.               |
-| `MEDIA_MAX_BYTES`                    | no       | `104857600`                  | Largest file served by `/media/:token` (100 MiB).                           |
-| `UPLOAD_MAX_BYTES`                   | no       | `67108864`                   | Largest file accepted by `/upload/:token` (64 MiB).                         |
-| `UPLOAD_TTL_SECONDS`                 | no       | `900`                        | Lifetime of an upload link and of the file it receives.                     |
-| `CACHE_ENABLED`                      | no       | `true`                       | Keep a SQLite copy of read messages in `DATA_DIR/cache.db`.                 |
-| `CACHE_REFRESH_HOURS`                | no       | `48`                         | Each sync re-reads this window before the newest cached message.            |
-| `CACHE_MAX_AGE_DAYS`                 | no       | `0`                          | Prune cached messages older than N days (`0` keeps them forever).           |
-| `TRANSCRIPTION_API_URL`              | no       |                              | OpenAI-compatible speech-to-text base URL (`https://openrouter.ai/api/v1`). |
-| `TRANSCRIPTION_API_KEY`              | no       |                              | API key of that provider.                                                   |
-| `TRANSCRIPTION_MODEL`                | no       |                              | Model id (`openai/whisper-large-v3-turbo`).                                 |
-| `TRANSCRIPTION_LANGUAGE`             | no       |                              | Language hint, lowercase ISO 639-1/639-2 code (e.g. `es`); omit to detect.  |
-| `TRANSCRIPTION_MAX_SECONDS`          | no       | `300`                        | Longer voice notes are not transcribed automatically.                       |
-| `TRANSCRIPTION_MAX_PER_CALL`         | no       | `20`                         | New automatic transcriptions per tool call (`0` = only `transcribe_audio`). |
-| `OPENROUTER_API_KEY`                 | no       |                              | OpenRouter key for missions; needs `WAHA_WEBHOOK_SECRET`.                   |
+| Variable                             | Required | Default                      | Description                                                                               |
+| ------------------------------------ | -------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `WAHA_API_URL`                       | yes      |                              | Base URL of WAHA (internal URL when deployed next to it).                                 |
+| `WAHA_API_KEY`                       | yes      |                              | WAHA API key (never shown to users).                                                      |
+| `PUBLIC_BASE_URL`                    | yes      |                              | Public HTTPS origin of this server, no path (`http` only for localhost).                  |
+| `MASTER_KEY`                         | yes      |                              | 32 bytes in base64 (`openssl rand -base64 32`); wraps every tenant key.                   |
+| `MASTER_KEY_PREVIOUS`                | no       |                              | Old master key, only for the start that rotates `MASTER_KEY`.                             |
+| `ADMIN_USERNAME`                     | yes      |                              | Admin username, 3-32 of `A-Z a-z 0-9 . - _`; created on first start.                      |
+| `ADMIN_PASSWORD`                     | yes      |                              | Admin password (12+ characters); read only to create the admin or reset it.               |
+| `ADMIN_PASSWORD_RESET`               | no       | `false`                      | `1`/`true`: reset admin password and sessions on every start; then unset.                 |
+| `WAHA_SESSION`                       | no       | `default`                    | WAHA session of the admin's tenant (tenant #1).                                           |
+| `DATA_DIR`                           | no       | `/data`                      | `auth.db` (users, tenants, OAuth), media secret, `tenants/<id>/` data.                    |
+| `PORT`                               | no       | `3000`                       | HTTP port.                                                                                |
+| `TIMEZONE`                           | no       | `UTC`                        | IANA time zone for dates and day boundaries (`America/Lima`).                             |
+| `STATS_MAX_MESSAGES`                 | no       | `5000`                       | Per-chat message cap; fan-out tools read up to 100 chats each.                            |
+| `MEDIA_LINK_TTL_SECONDS`             | no       | `600`                        | Lifetime of signed media links.                                                           |
+| `MEDIA_INLINE_MAX_BYTES`             | no       | `5242880`                    | Largest file returned inline (5 MiB); larger ones get a link.                             |
+| `MEDIA_MAX_BYTES`                    | no       | `104857600`                  | Largest file served by `/media/:token` (100 MiB).                                         |
+| `UPLOAD_MAX_BYTES`                   | no       | `67108864`                   | Largest file accepted by `/upload/:token` (64 MiB).                                       |
+| `UPLOAD_TTL_SECONDS`                 | no       | `900`                        | Lifetime of an upload link and of the file it receives.                                   |
+| `CACHE_ENABLED`                      | no       | `true`                       | Keep a SQLite copy of read messages in `DATA_DIR/cache.db`.                               |
+| `CACHE_REFRESH_HOURS`                | no       | `48`                         | Each sync re-reads this window before the newest cached message.                          |
+| `CACHE_MAX_AGE_DAYS`                 | no       | `0`                          | Prune cached messages older than N days (`0` keeps them forever).                         |
+| `TRANSCRIPTION_API_URL`              | no       |                              | OpenAI-compatible speech-to-text base URL (`https://openrouter.ai/api/v1`).               |
+| `TRANSCRIPTION_API_KEY`              | no       |                              | API key of that provider.                                                                 |
+| `TRANSCRIPTION_MODEL`                | no       |                              | Model id (`openai/whisper-large-v3-turbo`).                                               |
+| `TRANSCRIPTION_LANGUAGE`             | no       |                              | Language hint, lowercase ISO 639-1/639-2 code (e.g. `es`); omit to detect.                |
+| `TRANSCRIPTION_MAX_SECONDS`          | no       | `300`                        | Longer voice notes are not transcribed automatically.                                     |
+| `TRANSCRIPTION_MAX_PER_CALL`         | no       | `20`                         | New automatic transcriptions per tool call (`0` = only `transcribe_audio`).               |
+| `OPENROUTER_API_KEY`                 | no       |                              | OpenRouter key for missions; needs `WAHA_WEBHOOK_SECRET`.                                 |
 | `WAHA_WEBHOOK_SECRET`                | no       |                              | Secret WAHA signs webhooks; on its own it turns webhooks on (missions also need the key). |
-| `MISSIONS_MODEL`                     | no       | `anthropic/claude-haiku-5.5` | OpenRouter model id of the mission agent.                                   |
-| `MISSIONS_MONTHLY_BUDGET_USD`        | no       | `1`                          | Monthly mission LLM spend cap per tenant, in USD.                           |
-| `MISSIONS_MAX_MESSAGES_PER_MISSION`  | no       | `40`                         | Messages the agent may send in one mission.                                 |
-| `MISSIONS_MAX_ACTIVE_PER_TENANT`     | no       | `3`                          | Missions running at once per tenant.                                        |
-| `MISSIONS_MAX_NEW_CONTACTS_PER_DAY`  | no       | `5`                          | Missions per day to contacts with no prior chat.                            |
-| `MISSIONS_MAX_REMINDERS`             | no       | `2`                          | Reminders to a known contact who does not answer.                           |
-| `MISSIONS_MAX_REMINDERS_NEW_CONTACT` | no       | `1`                          | Reminders to a new contact who does not answer.                             |
-| `MISSIONS_REMINDER_GAP_MS`           | no       | `1800000`                    | Wait before a reminder (30 min).                                            |
-| `MISSIONS_DEBOUNCE_MS`               | no       | `15000`                      | Wait for more incoming messages before replying.                            |
-| `MISSIONS_MAX_DURATION_MINUTES`      | no       | `120`                        | Longest a mission may run.                                                  |
-| `MISSIONS_MAX_LLM_CALLS_PER_MISSION` | no       | `60`                         | Model calls allowed in one mission.                                         |
-| `MISSIONS_QUIET_START_HOUR`          | no       | `22`                         | Hour (0-23, `TIMEZONE`) when missions stop sending.                         |
-| `MISSIONS_QUIET_END_HOUR`            | no       | `8`                          | Hour (0-23, `TIMEZONE`) when missions resume sending.                       |
-| `SCHEDULES_MAX_ACTIVE_PER_TENANT`    | no       | `20`                         | Active scheduled messages per tenant.                                       |
-| `SCHEDULES_DEFAULT_RUNS`             | no       | `12`                         | Runs of a repeating schedule when `max_runs` is not given.                  |
-| `SCHEDULES_MAX_RUNS`                 | no       | `52`                         | Highest `max_runs` (not below `SCHEDULES_DEFAULT_RUNS`).                    |
-| `SCHEDULES_MISSED_AFTER_MINUTES`     | no       | `60`                         | A scheduled run later than this is logged as missed, not sent.              |
+| `MISSIONS_MODEL`                     | no       | `anthropic/claude-haiku-5.5` | OpenRouter model id of the mission agent.                                                 |
+| `MISSIONS_MONTHLY_BUDGET_USD`        | no       | `1`                          | Monthly mission LLM spend cap per tenant, in USD.                                         |
+| `MISSIONS_MAX_MESSAGES_PER_MISSION`  | no       | `40`                         | Messages the agent may send in one mission.                                               |
+| `MISSIONS_MAX_ACTIVE_PER_TENANT`     | no       | `3`                          | Missions running at once per tenant.                                                      |
+| `MISSIONS_MAX_NEW_CONTACTS_PER_DAY`  | no       | `5`                          | Missions per day to contacts with no prior chat.                                          |
+| `MISSIONS_MAX_REMINDERS`             | no       | `2`                          | Reminders to a known contact who does not answer.                                         |
+| `MISSIONS_MAX_REMINDERS_NEW_CONTACT` | no       | `1`                          | Reminders to a new contact who does not answer.                                           |
+| `MISSIONS_REMINDER_GAP_MS`           | no       | `1800000`                    | Wait before a reminder (30 min).                                                          |
+| `MISSIONS_DEBOUNCE_MS`               | no       | `15000`                      | Wait for more incoming messages before replying.                                          |
+| `MISSIONS_MAX_DURATION_MINUTES`      | no       | `120`                        | Longest a mission may run.                                                                |
+| `MISSIONS_MAX_LLM_CALLS_PER_MISSION` | no       | `60`                         | Model calls allowed in one mission.                                                       |
+| `MISSIONS_QUIET_START_HOUR`          | no       | `22`                         | Hour (0-23, `TIMEZONE`) when missions stop sending.                                       |
+| `MISSIONS_QUIET_END_HOUR`            | no       | `8`                          | Hour (0-23, `TIMEZONE`) when missions resume sending.                                     |
+| `SCHEDULES_MAX_ACTIVE_PER_TENANT`    | no       | `20`                         | Active scheduled messages per tenant.                                                     |
+| `SCHEDULES_DEFAULT_RUNS`             | no       | `12`                         | Runs of a repeating schedule when `max_runs` is not given.                                |
+| `SCHEDULES_MAX_RUNS`                 | no       | `52`                         | Highest `max_runs` (not below `SCHEDULES_DEFAULT_RUNS`).                                  |
+| `SCHEDULES_MISSED_AFTER_MINUTES`     | no       | `60`                         | A scheduled run later than this is logged as missed, not sent.                            |
 
 Transcription is off unless `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL` are all set (setting only some of them is a startup error). The server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions` with OpenAI-style multipart (`file`, `model`, `language`), which OpenRouter, OpenAI and Groq accept. When on, voice notes in `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` get a `transcript` (within the limits above; coverage notes report the skipped ones), `search_messages` also matches stored transcripts, and each transcript is stored in the tenant's `cache.db` so it is never paid twice. One provider key serves every tenant, so all transcription is billed to the admin.
 

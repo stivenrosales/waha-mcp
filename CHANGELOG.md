@@ -5,9 +5,11 @@
 ### Features
 
 - Webhooks no longer depend on missions: with `WAHA_WEBHOOK_SECRET` set, `/webhooks/waha` is mounted and every WAHA session is pointed at it.
+- The webhook route also stores `message.edited`, `message.revoked`, `message.reaction`, `poll.vote` and `poll.vote.failed` events, sealed per tenant, for the message cache.
 
 ### Upgrade
 
+- The first start after upgrading reconfigures each active session's webhook (new events), and WAHA restarts each session once.
 - `WAHA_WEBHOOK_SECRET` alone now turns webhooks on (no missions needed). `OPENROUTER_API_KEY` without `WAHA_WEBHOOK_SECRET` is a startup error: `OPENROUTER_API_KEY needs WAHA_WEBHOOK_SECRET (missions receive messages through webhooks).`
 
 ## 0.4.0

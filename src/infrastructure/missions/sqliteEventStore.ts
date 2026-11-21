@@ -45,13 +45,14 @@ export function createSqliteEventStore(
         .run(q.tenantId, q.eventId, q.kind, q.receivedAt, q.payloadSealed);
       return Number(r.changes) === 1 ? "stored" : "duplicate";
     },
-    pending(limit) {
+    pending(limit, kinds) {
+      const filter = kinds ? ` AND kind IN (${kinds.map(() => "?").join(",") || "NULL"})` : "";
       const rows = db
         .prepare(
           `SELECT id, tenant_id, event_id, kind, received_at, payload_sealed FROM webhook_events
-           WHERE done_at IS NULL ORDER BY id LIMIT ?`,
+           WHERE done_at IS NULL${filter} ORDER BY id LIMIT ?`,
         )
-        .all(Math.max(0, Math.floor(limit))) as unknown as Raw[];
+        .all(...(kinds ?? []), Math.max(0, Math.floor(limit))) as unknown as Raw[];
       return rows.map(
         (r): StoredEvent => ({
           id: Number(r.id),

@@ -1,5 +1,10 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import {
+  CACHE_EVENT_KINDS,
+  MISSION_EVENT_KINDS,
+  type WebhookEventKind,
+} from "../../../src/domain/ports/EventStore.js";
 import type { Tenant, TenantStatus } from "../../../src/domain/ports/TenantStore.js";
 import { openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
 import type { TenantCipher } from "../../../src/infrastructure/crypto/envelope.js";
@@ -50,7 +55,13 @@ function envelope(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 const sign = (body: string, key = SECRET) => createHmac("sha512", key).update(body).digest("hex");
 
-function setup(opts: { maxBodyBytes?: number; onEvent?: () => void | Promise<void> } = {}) {
+function setup(
+  opts: {
+    maxBodyBytes?: number;
+    onEvent?: () => void | Promise<void>;
+    kinds?: ReadonlySet<WebhookEventKind>;
+  } = {},
+) {
   const tenants = [tenant("t1", "t_alice"), tenant("t2", "t_bob", "revoked")];
   const ciphers: Record<string, TenantCipher> = { t1: testCipher("t1"), t2: testCipher("t2") };
   const db = openAuthDatabase(":memory:");
@@ -78,6 +89,7 @@ function setup(opts: { maxBodyBytes?: number; onEvent?: () => void | Promise<voi
       },
     },
     events,
+    kinds: opts.kinds ?? new Set<WebhookEventKind>([...MISSION_EVENT_KINDS, ...CACHE_EVENT_KINDS]),
     logger: { info: (m) => void logs.push(m) },
     onEvent:
       opts.onEvent ??
@@ -111,6 +123,44 @@ function setup(opts: { maxBodyBytes?: number; onEvent?: () => void | Promise<voi
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe("WAHA webhook route", () => {
+  describe("event kinds", () => {
+    const cacheOnly = () => ({ kinds: new Set<WebhookEventKind>(CACHE_EVENT_KINDS) });
+
+    it("stores message.revoked sealed when missions are off", async () => {
+      const ctx = setup(cacheOnly());
+      const res = await ctx.send(
+        envelope({ event: "message.revoked", payload: { revokedMessageId: "3EB0AAAA" } }),
+      );
+      expect(res.status).toBe(200);
+      const [stored] = ctx.stored();
+      expect(stored).toMatchObject({ tenantId: "t1", kind: "message.revoked" });
+      expect(stored?.payloadSealed).not.toContain("3EB0AAAA");
+      expect(ctx.woken).toEqual([{ tenantId: "t1", kind: "message.revoked" }]);
+    });
+
+    it("ignores message.any when missions are off", async () => {
+      const ctx = setup(cacheOnly());
+      const res = await ctx.send(envelope());
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(ctx.logs).toEqual(["webhook ignored reason=event"]);
+      expect(ctx.stored()).toHaveLength(0);
+    });
+
+    it.each([
+      "message.edited",
+      "message.revoked",
+      "message.reaction",
+      "poll.vote",
+      "poll.vote.failed",
+    ])("stores %s", async (event) => {
+      const ctx = setup(cacheOnly());
+      await ctx.send(envelope({ event, payload: { id: "x" } }));
+      expect(ctx.stored().map((e) => e.kind)).toEqual([event]);
+      expect(ctx.logs).toEqual([`webhook stored tenant=t1 kind=${event}`]);
+    });
+  });
+
   it("answers 401 and stores nothing for a missing or bad signature", async () => {
     const ctx = setup();
     const body = JSON.stringify(envelope());
@@ -193,9 +243,9 @@ describe("WAHA webhook route", () => {
     expect(ctx.stored()).toHaveLength(0);
   });
 
-  it("answers 200 and stores nothing for events missions do not use", async () => {
+  it("answers 200 and stores nothing for events the server does not use", async () => {
     const ctx = setup();
-    for (const event of ["message", "message.ack", "message.reaction", "presence.update"]) {
+    for (const event of ["message", "message.ack", "presence.update"]) {
       const res = await ctx.send(envelope({ id: `evt_${event}`, event }));
       expect(res.status).toBe(200);
     }

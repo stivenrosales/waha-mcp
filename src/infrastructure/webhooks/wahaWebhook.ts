@@ -28,6 +28,11 @@ const MAX_EVENT_ID_LENGTH = 128;
 const KINDS: Record<string, WebhookEventKind> = {
   "message.any": "message",
   "session.status": "session.status",
+  "message.edited": "message.edited",
+  "message.revoked": "message.revoked",
+  "message.reaction": "message.reaction",
+  "poll.vote": "poll.vote",
+  "poll.vote.failed": "poll.vote.failed",
 };
 
 /** Every 2xx is the same body: the response never tells a stored event from an ignored one. */
@@ -42,6 +47,8 @@ export interface WahaWebhookDeps {
     acquire(tenantId: string): { runtime: { cipher: TenantCipher }; release(): void } | null;
   };
   events: EventStore;
+  /** The kinds this server uses; any other accepted WAHA event is ignored (`reason=event`). */
+  kinds: ReadonlySet<WebhookEventKind>;
   logger: Logger;
   /** Wakes the mission engine; fire-and-forget, its failures are logged and swallowed. */
   onEvent?: (e: { tenantId: string; kind: WebhookEventKind }) => void | Promise<void>;
@@ -68,10 +75,11 @@ function validSignature(secret: string, body: Uint8Array, header: string | undef
  *   WAHA's retries make it visible; a forger never gets a 2xx).
  * - Body over the limit: 413.
  * - Everything else answers 200 with the same body, stored or not: unknown session, inactive
- *   tenant, `metadata.tenant` naming another tenant, an event missions do not use, a stale or
+ *   tenant, `metadata.tenant` naming another tenant, an event this server does not use, a stale or
  *   future `timestamp`, or a malformed envelope. WAHA retries every non-2xx, so these must not
  *   fail, and a uniform answer leaks nothing about which sessions exist.
- * - `message.any` and `session.status` are sealed with the tenant cipher (AAD
+ * - Events of the configured `kinds` (`message.any`, `session.status`, edits, revokes, reactions
+ *   and poll votes) are sealed with the tenant cipher (AAD
  *   `webhook:<tenantId>:<eventId>`) and stored once per envelope `id`; a first store wakes the
  *   engine without waiting for it.
  *
@@ -93,7 +101,7 @@ export function createWahaWebhookRoute(deps: WahaWebhookDeps): Hono {
     }
   };
 
-  /** Stores the event if it is one missions use; returns the log outcome. */
+  /** Stores the event if it is one of the configured kinds; returns the log outcome. */
   const ingest = (raw: Uint8Array): string => {
     let envelope: unknown;
     try {
@@ -104,7 +112,7 @@ export function createWahaWebhookRoute(deps: WahaWebhookDeps): Hono {
     if (!isRecord(envelope)) return "ignored reason=malformed";
     const { id, event, session, timestamp, metadata } = envelope;
     const kind = typeof event === "string" ? KINDS[event] : undefined;
-    if (!kind) return "ignored reason=event";
+    if (!kind || !deps.kinds.has(kind)) return "ignored reason=event";
     if (
       typeof id !== "string" ||
       id === "" ||

@@ -67,4 +67,12 @@ describe("sqliteEventStore", () => {
     createSqliteEventStore(db).put(event("evt_1"));
     expect(createSqliteEventStore(db).pending(10)).toHaveLength(1);
   });
+
+  it("pending filters by kinds", () => {
+    const store = createSqliteEventStore(openAuthDatabase(":memory:"));
+    store.put(event("evt_m"));
+    store.put({ ...event("evt_r"), kind: "message.reaction" });
+    expect(store.pending(10, ["message"]).map((e) => e.eventId)).toEqual(["evt_m"]);
+    expect(store.pending(10).map((e) => e.eventId)).toEqual(["evt_m", "evt_r"]);
+  });
 });

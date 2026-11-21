@@ -8,6 +8,7 @@ import {
 import type { StoredReaction, StoredVote } from "../domain/ports/MessageActionStore.js";
 import type { MessageActions } from "./messageActions.js";
 import { envelopePayload } from "./missions/inbound.js";
+import { WEBHOOK_EVENT_RETENTION_DAYS } from "./missions/retention.js";
 
 /** What one cache-sync webhook event does to the stored messages. */
 export type CacheEffect =
@@ -110,7 +111,13 @@ export interface CacheEventProcessor {
 }
 
 const EVENT_BATCH = 100;
-const EVENT_ATTEMPTS = 3;
+/** Wait before the next attempt of a failed event: 5 s, 30 s, 2 min, 10 min, then every 30 min. */
+const RETRY_BACKOFF_MS = [5_000, 30_000, 120_000, 600_000, 1_800_000];
+/**
+ * A failing event is retried until this long after it was received (the webhook retention), so a
+ * brief WAHA outage or a session still starting never drops an edit or a deletion.
+ */
+const GIVE_UP_AFTER_MS = WEBHOOK_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 async function apply(actions: MessageActions, effect: CacheEffect): Promise<void> {
   switch (effect.kind) {
@@ -140,13 +147,17 @@ export function createCacheEventProcessor(deps: {
   /** Null when the tenant has no runtime (not active); the caller must `release()`. */
   acquire(tenantId: string): { port: CacheEventPort; release(): void } | null;
   logger: { info(message: string): void };
+  /** Clock in ms (tests). */
+  now?: () => number;
 }): CacheEventProcessor {
   const { events, logger } = deps;
+  const now = deps.now ?? Date.now;
   let chain: Promise<void> = Promise.resolve();
   let stopped = false;
   let waking = false;
   let timer: ReturnType<typeof setInterval> | undefined;
-  const failures = new Map<number, number>();
+  /** Failed events in memory: attempts so far and when the next one may run. */
+  const failures = new Map<number, { attempts: number; nextAt: number }>();
 
   const serial = (fn: () => Promise<void>): Promise<void> => {
     const run = chain.then(fn);
@@ -157,6 +168,8 @@ export function createCacheEventProcessor(deps: {
   async function process(): Promise<void> {
     for (const e of events.pending(EVENT_BATCH, CACHE_EVENT_KINDS)) {
       if (stopped) return;
+      const retry = failures.get(e.id);
+      if (retry && retry.nextAt > now()) continue;
       const tag = `cache-event=${e.id} tenant=${e.tenantId} kind=${e.kind}`;
       let held: ReturnType<typeof deps.acquire>;
       try {
@@ -184,12 +197,16 @@ export function createCacheEventProcessor(deps: {
         failures.delete(e.id);
         logger.info(`${tag} outcome=${effect ? "applied" : "ignored"}`);
       } catch {
-        const n = (failures.get(e.id) ?? 0) + 1;
-        failures.set(e.id, n);
-        logger.info(`${tag} outcome=failed attempt=${n}`);
-        if (n >= EVENT_ATTEMPTS) {
+        const attempts = (retry?.attempts ?? 0) + 1;
+        const at = now();
+        if (at - Date.parse(e.receivedAt) >= GIVE_UP_AFTER_MS) {
           events.markDone(e.id);
           failures.delete(e.id);
+          logger.info(`${tag} outcome=gave-up attempt=${attempts}`);
+        } else {
+          const wait = RETRY_BACKOFF_MS[Math.min(attempts, RETRY_BACKOFF_MS.length) - 1] ?? 0;
+          failures.set(e.id, { attempts, nextAt: at + wait });
+          logger.info(`${tag} outcome=failed attempt=${attempts}`);
         }
       } finally {
         held.release();

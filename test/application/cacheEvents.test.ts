@@ -171,7 +171,7 @@ describe("cacheEffectOf", () => {
   });
 });
 
-function setup(opts: { failApply?: boolean } = {}) {
+function setup(opts: { failApply?: boolean; failTimes?: number; now?: () => number } = {}) {
   const authDb = new DatabaseSync(":memory:");
   const events = createSqliteEventStore(authDb);
   const db = openCacheDatabase(":memory:");
@@ -185,14 +185,20 @@ function setup(opts: { failApply?: boolean } = {}) {
     mapper: async () => m,
     ensureOwner: async () => {},
   });
-  const actions = opts.failApply
-    ? {
-        ...real,
-        applyRevoke: async () => {
-          throw new Error("boom with secret body");
-        },
-      }
-    : real;
+  let failsLeft = opts.failApply ? Number.POSITIVE_INFINITY : (opts.failTimes ?? 0);
+  const actions =
+    failsLeft > 0
+      ? {
+          ...real,
+          applyRevoke: async (shortId: string, at: number) => {
+            if (failsLeft > 0) {
+              failsLeft -= 1;
+              throw new Error("boom with secret body");
+            }
+            return real.applyRevoke(shortId, at);
+          },
+        }
+      : real;
   const lines: string[] = [];
   let held = 0;
   let released = 0;
@@ -214,6 +220,7 @@ function setup(opts: { failApply?: boolean } = {}) {
       };
     },
     logger: { info: (l) => lines.push(l) },
+    ...(opts.now ? { now: opts.now } : {}),
   });
   let n = 0;
   const put = (kind: WebhookEventKind, payload: Record<string, unknown>, tenantId = TENANT) => {
@@ -290,17 +297,48 @@ describe("cache event processor", () => {
     expect(s.lines.join("\n")).toContain("outcome=ignored");
   });
 
-  it("failure retries then gives up after 3", async () => {
-    const s = setup({ failApply: true });
+  it("a failed revoke waits for its backoff: quick wakes do not burn attempts", async () => {
+    let now = RECEIVED * 1000;
+    const s = setup({ failTimes: 3, now: () => now });
+    const raw = rawText("R1", 100, "to delete");
+    s.messages.upsertRaw("100000000000009@g.us", [{ id: raw.id as string, ts: 100, raw }]);
     s.put("message.revoked", { revokedMessageId: "R1" });
-    await s.processor.tick();
+    for (let i = 0; i < 5; i += 1) {
+      s.processor.wake();
+      await s.processor.idle();
+    }
+    expect(s.lines.filter((l) => l.includes("outcome=failed"))).toHaveLength(1);
     expect(s.events.pending(10)).toHaveLength(1);
-    await s.processor.tick();
+    // Two more failures, each after its backoff has passed.
+    for (let i = 0; i < 2; i += 1) {
+      now += 60 * 60 * 1000;
+      await s.processor.tick();
+    }
+    expect(s.lines.filter((l) => l.includes("outcome=failed"))).toHaveLength(3);
     expect(s.events.pending(10)).toHaveLength(1);
+    expect(s.read("100000000000009@g.us")[0]?.type).not.toBe("deleted");
+    // WAHA recovered: the next due attempt applies it.
+    now += 60 * 60 * 1000;
     await s.processor.tick();
     expect(s.events.pending(10)).toHaveLength(0);
-    expect(s.lines.filter((l) => l.includes("outcome=failed"))).toHaveLength(3);
+    expect(s.read("100000000000009@g.us")[0]?.type).toBe("deleted");
     expect(s.counts().held).toBe(s.counts().released);
+  });
+
+  it("a failing event gives up only after the horizon", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    let now = RECEIVED * 1000;
+    const s = setup({ failApply: true, now: () => now });
+    s.put("message.revoked", { revokedMessageId: "R1" });
+    await s.processor.tick();
+    now += 6 * DAY;
+    await s.processor.tick();
+    expect(s.events.pending(10)).toHaveLength(1);
+    now += DAY;
+    await s.processor.tick();
+    expect(s.events.pending(10)).toHaveLength(0);
+    expect(s.lines.at(-1)).toContain("outcome=gave-up");
+    expect(s.lines.join("\n")).not.toContain("secret body");
   });
 
   it("unknown tenant marks done", async () => {

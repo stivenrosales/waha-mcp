@@ -122,10 +122,10 @@ export function createSqliteMessageActionStore(
     },
 
     putFailedVote(q) {
-      // The earlier good vote (if any) stays; only the failed flag and clock move.
+      // The failure is the voter's latest event: it replaces (and erases) the earlier good vote.
       db.prepare(
         `INSERT INTO poll_votes (poll_id, voter, sealed, ts, failed) VALUES (?, ?, '', ?, 1)
-         ON CONFLICT (poll_id, voter) DO UPDATE SET failed = 1, ts = excluded.ts
+         ON CONFLICT (poll_id, voter) DO UPDATE SET failed = 1, sealed = '', ts = excluded.ts
          WHERE excluded.ts >= poll_votes.ts`,
       ).run(q.pollId, q.voter, q.ts);
     },

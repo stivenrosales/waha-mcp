@@ -122,6 +122,15 @@ describe("sqlite message action store: poll votes", () => {
     expect(store.votes("P").failed).toBe(0);
   });
 
+  it("a failed vote after a good one replaces it: counted once, old options gone", () => {
+    const { db, store } = setup();
+    store.putVote({ pollId: "P", voter: "v1", options: ["Old"], ts: 5 });
+    store.putFailedVote({ pollId: "P", voter: "v1", ts: 6 });
+    expect(store.votes("P")).toEqual({ votes: [], failed: 1 });
+    const row = db.prepare("SELECT sealed FROM poll_votes").get() as { sealed: string };
+    expect(row.sealed).toBe("");
+  });
+
   it("another tenant's cipher cannot read", () => {
     const { db, store } = setup();
     store.putVote({ pollId: "P", voter: "v", options: ["A"], ts: 1 });

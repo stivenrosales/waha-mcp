@@ -17,6 +17,7 @@ import { createTools } from "../../../../src/infrastructure/mcp/tools/index.js";
 import { createSealedMissionLog } from "../../../../src/infrastructure/missions/sealedMissionLog.js";
 import { createSqliteEventStore } from "../../../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../../../src/infrastructure/missions/sqliteMissionStore.js";
+import { createSqliteScheduleStore } from "../../../../src/infrastructure/schedules/sqliteScheduleStore.js";
 import { gowsMapper } from "../../../../src/infrastructure/waha/engines/gows.js";
 import { RecordingSender } from "../../../fakes/InMemoryWahaGateway.js";
 import { testCipher } from "../../../fakes/testCipher.js";
@@ -60,6 +61,7 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
   const authDb = new DatabaseSync(":memory:");
   const store = createSqliteMissionStore(authDb, () => now.toISOString());
   const events = createSqliteEventStore(authDb, () => now.toISOString());
+  const schedules = createSqliteScheduleStore(authDb, () => now.toISOString());
   const log = createSealedMissionLog(new DatabaseSync(":memory:"), testCipher(TENANT));
   const sender = new RecordingSender();
   const state = { spend: opts.spend ?? 0 };
@@ -119,6 +121,7 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
       store,
       log,
       tenants,
+      schedules,
       engine: {
         cancel: engine.cancel,
         answer: engine.answer,
@@ -170,6 +173,7 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
   return {
     authDb,
     store,
+    schedules,
     log,
     sender,
     state,
@@ -454,6 +458,29 @@ describe("mission tools", () => {
     for (const m of h.store.list(TENANT)) await h.call("cancel_mission", { mission_id: m.id });
     for (const chat of ["4@c.us", "5@c.us"])
       expect((await h.call("start_mission", h.startInput({ chat_id: chat }))).isError).toBe(false);
+    const r = await h.call("start_mission", h.startInput({ chat_id: "6@c.us" }));
+    expect(r).toMatchObject({
+      isError: true,
+      text: "Missions to 5 new contacts were already started today; try again tomorrow.",
+    });
+  });
+
+  it("counts scheduled messages to new contacts toward the same daily cap", async () => {
+    const h = harness({ withHistory: [] });
+    for (const chat of ["1@c.us", "2@c.us", "3@c.us", "4@c.us"])
+      h.schedules.create({
+        tenantId: TENANT,
+        chatId: chat,
+        kind: "fixed",
+        repeat: "none",
+        firstAt: T0.toISOString(),
+        nextRunAt: T0.toISOString(),
+        maxRuns: 1,
+        newContact: true,
+      });
+    expect((await h.call("start_mission", h.startInput({ chat_id: "5@c.us" }))).isError).toBe(
+      false,
+    );
     const r = await h.call("start_mission", h.startInput({ chat_id: "6@c.us" }));
     expect(r).toMatchObject({
       isError: true,

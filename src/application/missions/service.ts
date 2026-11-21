@@ -4,6 +4,7 @@ import type { MissionState } from "../../domain/missions/mission.js";
 import { dayStart, inQuietHours, monthStart } from "../../domain/missions/pacing.js";
 import type { MissionLog, MissionLogEntry } from "../../domain/ports/MissionLog.js";
 import type { MissionRow, MissionStore } from "../../domain/ports/MissionStore.js";
+import type { ScheduleStore } from "../../domain/ports/ScheduleStore.js";
 import type { TenantStore } from "../../domain/ports/TenantStore.js";
 import type { CollectedItem } from "./agentTools.js";
 import type { MissionEngine } from "./engine.js";
@@ -19,6 +20,8 @@ export interface MissionServiceDeps {
   log: MissionLog;
   tenants: Pick<TenantStore, "llmSpendUsd">;
   engine: MissionEnginePort;
+  /** Scheduled messages to new contacts created today count toward the same daily cap. */
+  schedules?: Pick<ScheduleStore, "countNewContactToday">;
   limits: MissionLimits;
   monthlyBudgetUsd: number;
   /** Server `TIMEZONE`: quiet hours, the daily new-contact window and the monthly budget. */
@@ -204,9 +207,11 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
       let known = false;
       for (const id of ids) if (!known) known = await deps.hasHistory(id);
       const newContact = !known;
+      const since = iso(dayStart(now, deps.timezone));
       if (
         newContact &&
-        store.countNewContactToday(tenantId, iso(dayStart(now, deps.timezone))) >=
+        store.countNewContactToday(tenantId, since) +
+          (deps.schedules?.countNewContactToday(tenantId, since) ?? 0) >=
           limits.maxNewContactsPerDay
       )
         throw new InvalidInputError(MISSION_TEXTS.newContacts(limits.maxNewContactsPerDay));

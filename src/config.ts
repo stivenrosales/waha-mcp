@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DEFAULT_MISSION_LIMITS, type MissionLimits } from "./domain/missions/limits.js";
+import { DEFAULT_SCHEDULE_LIMITS, type ScheduleLimits } from "./domain/schedules/limits.js";
 import { USERNAME_PATTERN, USERNAME_RULE } from "./domain/username.js";
 import { parseMasterKey } from "./infrastructure/crypto/envelope.js";
 
@@ -58,6 +59,8 @@ export interface MissionsConfig {
   /** Monthly LLM spend cap per tenant, in USD. */
   monthlyBudgetUsd: number;
   limits: MissionLimits;
+  /** Scheduled messages (they exist only with missions configured). */
+  schedules: ScheduleLimits;
 }
 
 export interface TranscriptionConfig {
@@ -167,6 +170,7 @@ const optionalTrimmed = () =>
     .transform((v) => v?.trim() || undefined);
 
 const L = DEFAULT_MISSION_LIMITS;
+const S = DEFAULT_SCHEDULE_LIMITS;
 
 const ADMIN_PASSWORD_MIN = 12;
 
@@ -302,8 +306,25 @@ const envSchema = z
     ),
     MISSIONS_QUIET_START_HOUR: hour("MISSIONS_QUIET_START_HOUR", L.quietStartHour),
     MISSIONS_QUIET_END_HOUR: hour("MISSIONS_QUIET_END_HOUR", L.quietEndHour),
+    SCHEDULES_MAX_ACTIVE_PER_TENANT: positiveInt(
+      "SCHEDULES_MAX_ACTIVE_PER_TENANT",
+      S.maxActivePerTenant,
+    ),
+    SCHEDULES_DEFAULT_RUNS: positiveInt("SCHEDULES_DEFAULT_RUNS", S.defaultRuns),
+    SCHEDULES_MAX_RUNS: positiveInt("SCHEDULES_MAX_RUNS", S.maxRuns),
+    SCHEDULES_MISSED_AFTER_MINUTES: positiveInt(
+      "SCHEDULES_MISSED_AFTER_MINUTES",
+      S.missedAfterMinutes,
+    ),
   })
   .superRefine((env, ctx) => {
+    if (env.SCHEDULES_DEFAULT_RUNS > env.SCHEDULES_MAX_RUNS)
+      ctx.addIssue({
+        code: "custom",
+        path: ["SCHEDULES_DEFAULT_RUNS"],
+        message: "SCHEDULES_DEFAULT_RUNS cannot be above SCHEDULES_MAX_RUNS.",
+      });
+
     // Both or neither: missions need the model key and the webhook secret together.
     const missions = MISSIONS_REQUIRED.filter((name) => Boolean(env[name]));
     if (missions.length > 0 && missions.length < MISSIONS_REQUIRED.length)
@@ -389,6 +410,12 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
               maxLlmCallsPerMission: v.MISSIONS_MAX_LLM_CALLS_PER_MISSION,
               quietStartHour: v.MISSIONS_QUIET_START_HOUR,
               quietEndHour: v.MISSIONS_QUIET_END_HOUR,
+            },
+            schedules: {
+              maxActivePerTenant: v.SCHEDULES_MAX_ACTIVE_PER_TENANT,
+              defaultRuns: v.SCHEDULES_DEFAULT_RUNS,
+              maxRuns: v.SCHEDULES_MAX_RUNS,
+              missedAfterMinutes: v.SCHEDULES_MISSED_AFTER_MINUTES,
             },
           }
         : null,

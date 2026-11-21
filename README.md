@@ -123,6 +123,9 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 | 📋           | `list_missions`        | Your missions, optionally filtered by state.                                      |
 | 💡           | `answer_mission`       | Answers a question the mission agent asked you.                                   |
 | ⛔           | `cancel_mission`       | Stops a running mission.                                                          |
+| ⏰           | `schedule_message`     | Schedules a fixed or AI-written message, once or repeating (needs missions).      |
+| 🗒️           | `list_scheduled`       | Your active scheduled messages with their last runs.                              |
+| 🚫           | `cancel_scheduled`     | Cancels a scheduled message.                                                      |
 
 ### Prompts
 
@@ -252,6 +255,23 @@ You get a WhatsApp message in your own chat when a mission finishes, times out, 
 > [!WARNING]
 > With missions on, every mission conversation (your instructions and the chat's messages, including transcribed voice notes, images and documents) is sent to OpenRouter and Anthropic. The `/privacidad` page tells tenants this.
 
+## Scheduled messages (optional)
+
+Available when [missions](#missions-optional) are on (they share its quiet hours, new-contact cap, reach-out pause and budget); otherwise the tools answer that missions are not configured.
+
+| Tool               | What it takes                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule_message` | `chat_id` (person or group), `kind` (`fixed` with `text`, or `ai` with an `instruction` of up to 2000 characters), `at` (`YYYY-MM-DD HH:mm` in `TIMEZONE`, in the future), `repeat` (`none`, `daily`, `weekly`, `monthly`, `yearly`) and, when repeating, optional `max_runs`. Returns the id, the first run and any note (for example quiet hours). |
+| `list_scheduled`   | Active schedules, newest first: text or instruction, repetition, next run, runs left and the last five runs (sent, skipped, failed, missed or unknown, with the reason).                                                                                                                                                                             |
+| `cancel_scheduled` | Cancels by id; a run already in its typing pause sends nothing.                                                                                                                                                                                                                                                                                      |
+
+- A `fixed` schedule sends its text as approved; an `ai` one reads the chat's last 40 messages of the last 14 days at each run and writes the message from the instruction, or skips the run when it is no longer needed. You get a WhatsApp note after every AI-written run and after any failed, missed or finished schedule.
+- At most `SCHEDULES_MAX_ACTIVE_PER_TENANT` [20] active schedules per tenant. A repeating schedule ends after `max_runs` dates (default `SCHEDULES_DEFAULT_RUNS` [12], at most `SCHEDULES_MAX_RUNS` [52]); every date counts, sent or not.
+- A run more than `SCHEDULES_MISSED_AFTER_MINUTES` [60] late (server down, account revoked) is not sent: it is logged as missed and you are told. Quiet hours move a run to their end (not for your own chat); WhatsApp's reach-out lock holds it until the lock ends. A run is skipped while a mission is active in that chat. A failed send is never retried.
+- A schedule to a direct chat with no prior messages counts once, when created, toward `MISSIONS_MAX_NEW_CONTACTS_PER_DAY`, shared with missions.
+- AI-written runs spend from `MISSIONS_MONTHLY_BUDGET_USD`; once it is used up they are skipped. `get_llm_usage` counts them with missions (a schedule counts as one mission in the `missions` column).
+- **Retention.** The text or instruction and the run log are encrypted with the tenant's key in its `cache.db`; the row in `auth.db` holds metadata only (chat id, kind, repetition, times, counters, state). Each run-log entry is deleted 30 days after its run, and an ended schedule (row and content) 30 days after it ends. `delete_tenant` deletes the tenant's schedules; after `restore_tenant`, runs that passed while revoked are logged as missed with one note.
+
 ## Files and PDFs
 
 Only small images and stickers come back inline. Claude does not accept PDFs or other binary files from MCP connectors, and the model cannot open the signed link itself. For documents, PDFs, video and large images, `get_media` returns a short-lived link together with an instruction: the model gives you the link and asks you to download the file and attach it to the chat, so it can read it there. Audio is different: with transcription on, the model uses `transcribe_audio`; with it off, the model gives you the link so you can listen to it (Claude does not read attached audio). The server does not extract text from PDF or Word files.
@@ -323,6 +343,10 @@ All configuration is through environment variables.
 | `MISSIONS_MAX_LLM_CALLS_PER_MISSION` | no       | `60`                         | Model calls allowed in one mission.                                         |
 | `MISSIONS_QUIET_START_HOUR`          | no       | `22`                         | Hour (0-23, `TIMEZONE`) when missions stop sending.                         |
 | `MISSIONS_QUIET_END_HOUR`            | no       | `8`                          | Hour (0-23, `TIMEZONE`) when missions resume sending.                       |
+| `SCHEDULES_MAX_ACTIVE_PER_TENANT`    | no       | `20`                         | Active scheduled messages per tenant.                                       |
+| `SCHEDULES_DEFAULT_RUNS`             | no       | `12`                         | Runs of a repeating schedule when `max_runs` is not given.                  |
+| `SCHEDULES_MAX_RUNS`                 | no       | `52`                         | Highest `max_runs` (not below `SCHEDULES_DEFAULT_RUNS`).                    |
+| `SCHEDULES_MISSED_AFTER_MINUTES`     | no       | `60`                         | A scheduled run later than this is logged as missed, not sent.              |
 
 Transcription is off unless `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL` are all set (setting only some of them is a startup error). The server calls `POST {TRANSCRIPTION_API_URL}/audio/transcriptions` with OpenAI-style multipart (`file`, `model`, `language`), which OpenRouter, OpenAI and Groq accept. When on, voice notes in `get_messages`, `get_thread`, `list_pending_replies` and `get_activity_digest` get a `transcript` (within the limits above; coverage notes report the skipped ones), `search_messages` also matches stored transcripts, and each transcript is stored in the tenant's `cache.db` so it is never paid twice. One provider key serves every tenant, so all transcription is billed to the admin.
 

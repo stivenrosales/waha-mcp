@@ -18,6 +18,7 @@ import {
   listMissionsTool,
   startMissionTool,
 } from "./missions.js";
+import { cancelScheduledTool, listScheduledTool, scheduleMessageTool } from "./schedules.js";
 import { searchMessagesTool } from "./searchMessages.js";
 import { sendContactTool } from "./sendContact.js";
 import { sendLocationTool } from "./sendLocation.js";
@@ -43,11 +44,14 @@ export function createTools(): ToolDefinition[] {
     transcribeAudioTool,
     getMissionTool,
     listMissionsTool,
+    listScheduledTool,
     sendTextTool,
     createUploadLinkTool,
     sendMediaTool,
     sendLocationTool,
     sendContactTool,
+    scheduleMessageTool,
+    cancelScheduledTool,
     startMissionTool,
     answerMissionTool,
     cancelMissionTool,

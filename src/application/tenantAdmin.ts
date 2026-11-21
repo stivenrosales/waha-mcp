@@ -131,6 +131,14 @@ export interface TenantAdminDeps {
    * a restore lifts the tenant's mission reach-out pause.
    */
   missions: { deleteForTenant(tenantId: string): void; resume(tenantId: string): void };
+  /**
+   * Scheduled messages: deleted with the tenant; on restore, occurrences that passed while it
+   * was revoked are caught up (logged as missed, one note). Absent when not wired.
+   */
+  schedules?: {
+    deleteForTenant(tenantId: string): void;
+    catchUp(tenantId: string, now: Date): Promise<void>;
+  };
   /** The tenant's stored webhook events are deleted with it; absent when missions are off. */
   events?: { deleteForTenant(tenantId: string): void };
   /** Wraps a fresh data key for the tenant (keeps crypto out of the application layer). */
@@ -411,6 +419,11 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
         }
         // A pause from before the revoke says nothing about the restored account.
         deps.missions.resume(tenantId);
+        // In the background, queued behind the runner's tick; it never fails the restore.
+        if (status === "active")
+          deps.schedules?.catchUp(tenantId, new Date((deps.now ?? Date.now)())).catch(() => {
+            logger.info(`admin restore_tenant tenant=${tenantId} schedules=catch-up-failed`);
+          });
         outcome = "ok";
         return status;
       } finally {
@@ -473,6 +486,9 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
           const missionsDeleted = await step("missions", () =>
             deps.missions.deleteForTenant(tenant.id),
           );
+          const schedulesDeleted = await step("schedules", () =>
+            deps.schedules?.deleteForTenant(tenant.id),
+          );
           const eventsDeleted = await step("webhook_events", () =>
             deps.events?.deleteForTenant(tenant.id),
           );
@@ -488,7 +504,14 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
               force: true,
             }),
           );
-          const localCleanup = worst(missionsDeleted, eventsDeleted, revoked, evicted, removed);
+          const localCleanup = worst(
+            missionsDeleted,
+            schedulesDeleted,
+            eventsDeleted,
+            revoked,
+            evicted,
+            removed,
+          );
           return whatsappCleanup === "ok" && localCleanup === "ok"
             ? { whatsappCleanup, localCleanup }
             : { whatsappCleanup, localCleanup, wahaSession: tenant.wahaSession };

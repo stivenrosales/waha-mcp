@@ -15,6 +15,7 @@ import {
 import { createSealedMissionLog } from "../../src/infrastructure/missions/sealedMissionLog.js";
 import { createSqliteEventStore } from "../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
+import { createSqliteScheduleStore } from "../../src/infrastructure/schedules/sqliteScheduleStore.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { FakeSessionAdmin } from "../fakes/FakeSessionAdmin.js";
 
@@ -36,11 +37,19 @@ async function setup() {
   const sessions = new FakeSessionAdmin();
   const evicted: string[] = [];
   const logs: string[] = [];
+  const scheduleStore = createSqliteScheduleStore(db);
+  const catchUps: string[] = [];
   const deps = {
     tenants,
     auth,
     missions: createSqliteMissionStore(db),
     events: createSqliteEventStore(db),
+    schedules: {
+      deleteForTenant: (id: string) => scheduleStore.deleteForTenant(id),
+      catchUp: async (id: string, now: Date) => {
+        catchUps.push(`${id}@${now.toISOString()}`);
+      },
+    },
     sessions,
     registry: { evict: (id: string) => void evicted.push(id) },
     newWrappedDek: (id: string) => wrapDek(KEK, generateDek(), id),
@@ -65,6 +74,8 @@ async function setup() {
   tenants.setStatus(adminTenant.id, "active");
   return {
     deps,
+    scheduleStore,
+    catchUps,
     dataDir,
     db,
     tenants,
@@ -212,6 +223,16 @@ describe("revoke / restore", () => {
     expect(missions.pausedUntil(other.tenantId, "2026-11-17T11:00:00.000Z")).not.toBeNull();
   });
 
+  it("restore catches up the scheduled messages of a tenant that is active again", async () => {
+    const s = await setup();
+    const full = await onboard(s, "Full", true);
+    const noWa = await onboard(s, "NoWa", false);
+    for (const id of [full.tenantId, noWa.tenantId]) s.admin.revoke(id);
+    s.admin.restore(full.tenantId);
+    s.admin.restore(noWa.tenantId);
+    expect(s.catchUps).toEqual([`${full.tenantId}@${new Date(T0).toISOString()}`]);
+  });
+
   it("restore goes to active, pairing or invited depending on how far onboarding got", async () => {
     const s = await setup();
     const full = await onboard(s, "Full", true);
@@ -328,6 +349,29 @@ describe("delete_tenant", () => {
 
     expect(store.get(tenantId, m.id)).toBeNull();
     expect(fs.existsSync(path.join(dir, "cache.db"))).toBe(false);
+  });
+
+  it("deletes the tenant's scheduled messages and keeps other tenants'", async () => {
+    const s = await setup();
+    const { tenantId } = await onboard(s);
+    const schedule = (tenant: string) =>
+      s.scheduleStore.create({
+        tenantId: tenant,
+        chatId: "51911111111@c.us",
+        kind: "fixed",
+        repeat: "none",
+        firstAt: "2026-11-18T14:00:00.000Z",
+        nextRunAt: "2026-11-18T14:00:00.000Z",
+        maxRuns: 1,
+        newContact: false,
+      });
+    const mine = schedule(tenantId);
+    const theirs = schedule(s.adminTenant.id);
+
+    await s.admin.delete(tenantId, "Acme");
+
+    expect(s.scheduleStore.get(tenantId, mine.id)).toBeNull();
+    expect(s.scheduleStore.get(s.adminTenant.id, theirs.id)).not.toBeNull();
   });
 
   it("deletes the tenant's webhook events and mission pause, and keeps other tenants'", async () => {

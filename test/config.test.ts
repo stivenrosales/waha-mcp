@@ -373,7 +373,31 @@ describe("loadConfig", () => {
           quietStartHour: 22,
           quietEndHour: 8,
         },
+        schedules: {
+          maxActivePerTenant: 20,
+          defaultRuns: 12,
+          maxRuns: 52,
+          missedAfterMinutes: 60,
+        },
       });
+    });
+
+    it("reads every SCHEDULES_* override and refuses a default above the maximum", () => {
+      expect(
+        loadConfig({
+          ...on,
+          SCHEDULES_MAX_ACTIVE_PER_TENANT: "5",
+          SCHEDULES_DEFAULT_RUNS: "4",
+          SCHEDULES_MAX_RUNS: "10",
+          SCHEDULES_MISSED_AFTER_MINUTES: "30",
+        }).missions?.schedules,
+      ).toEqual({ maxActivePerTenant: 5, defaultRuns: 4, maxRuns: 10, missedAfterMinutes: 30 });
+      expect(() => loadConfig({ ...on, SCHEDULES_MAX_RUNS: "0" })).toThrow(
+        /SCHEDULES_MAX_RUNS must be a positive integer/,
+      );
+      expect(() => loadConfig({ ...on, SCHEDULES_DEFAULT_RUNS: "60" })).toThrow(
+        /SCHEDULES_DEFAULT_RUNS cannot be above SCHEDULES_MAX_RUNS/,
+      );
     });
 
     it("reads every MISSIONS_* override", () => {

@@ -8,6 +8,7 @@ import type {
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import type { MissionService } from "../../application/missions/service.js";
+import type { ScheduleService } from "../../application/schedules/service.js";
 import type { TenantAdmin } from "../../application/tenantAdmin.js";
 import {
   DISABLED_TRANSCRIPTION,
@@ -50,6 +51,8 @@ export interface ToolRunContext {
   admin: TenantAdmin | null;
   /** This tenant's missions; null when the server has no `config.missions`. */
   missions: MissionService | null;
+  /** This tenant's scheduled messages; null when the server has no `config.missions`. */
+  schedules: ScheduleService | null;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
@@ -100,6 +103,8 @@ export interface ToolDeps {
   admin?: TenantAdmin | null;
   /** Default null: mission tools then answer that missions are not configured. */
   missions?: MissionService | null;
+  /** Default null: schedule tools then answer that missions are not configured. */
+  schedules?: ScheduleService | null;
   logger?: Logger;
   /** Told about every call once it ends (usage accounting); a throw is logged, never surfaced. */
   onToolCall?: (call: ToolCallRecord) => void;
@@ -199,6 +204,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         uploadLinks: deps.uploadLinks,
         admin: deps.admin ?? null,
         missions: deps.missions ?? null,
+        schedules: deps.schedules ?? null,
       });
       const ms = Date.now() - start;
       logger.info(`tool=${def.name} ms=${ms} result=ok`);

@@ -1,10 +1,12 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createCachedGateway } from "../../application/cachedMessages.js";
+import { ownerChatId } from "../../application/missions/notify.js";
 import {
   createMissionService,
   type MissionServiceDeps,
 } from "../../application/missions/service.js";
+import { createScheduleService } from "../../application/schedules/service.js";
 import {
   createTranscriptionService,
   DISABLED_TRANSCRIPTION,
@@ -13,7 +15,9 @@ import type { Config } from "../../config.js";
 import { WahaNotFoundError } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
 import type { ScheduleLog } from "../../domain/ports/ScheduleLog.js";
+import type { ScheduleStore } from "../../domain/ports/ScheduleStore.js";
 import type { Tenant } from "../../domain/ports/TenantStore.js";
+import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
 import { createSqliteMessageStore, openCacheDatabase } from "../cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../cache/sqliteTranscriptStore.js";
 import { createTenantCipher, type TenantCipher } from "../crypto/envelope.js";
@@ -34,8 +38,20 @@ import { createEngineResolver } from "../waha/engines/index.js";
 import { createWahaHttpGateway } from "../waha/WahaHttpGateway.js";
 import { createWahaHttpSender } from "../waha/WahaHttpSender.js";
 
-/** What every tenant's mission service shares (the server-wide stores and the engine). */
-export type MissionWiring = Pick<MissionServiceDeps, "store" | "tenants" | "engine" | "now">;
+/** What every tenant's schedule service shares: the schedule store and the runner's cancel. */
+export interface ScheduleWiring {
+  store: ScheduleStore;
+  /** A run already in its typing pause then sends nothing. */
+  cancel(tenantId: string, id: string): boolean;
+}
+
+/**
+ * What every tenant's mission service shares (the server-wide stores and the engine), and the
+ * schedule wiring (scheduled messages exist only with missions).
+ */
+export type MissionWiring = Pick<MissionServiceDeps, "store" | "tenants" | "engine" | "now"> & {
+  schedules?: ScheduleWiring;
+};
 
 /** Expired upload slots are removed when the runtime is built and on this interval. */
 const UPLOAD_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -91,6 +107,65 @@ export function guardUsageRecorder(
     } catch {
       logger.info(`tenant=${tenantId} transcription usage not recorded`);
     }
+  };
+}
+
+/**
+ * The tenant's mission and schedule services over its gateway and sealed logs; both null without
+ * `config.missions` or the wiring. Exported for the end-to-end tests' runtime seam.
+ */
+export function buildTenantServices(deps: {
+  config: Config;
+  tenant: Tenant;
+  gateway: WahaGateway;
+  missionLog: MissionLog;
+  scheduleLog: ScheduleLog;
+  logger: Logger;
+  wiring?: MissionWiring;
+}): Pick<TenantToolContext, "missions" | "schedules"> {
+  const { config, tenant, gateway, wiring } = deps;
+  const missionsConfig = config.missions;
+  if (!missionsConfig || !wiring) return { missions: null, schedules: null };
+  const lookupLid = (lid: string) => gateway.lookupLid(lid);
+  const hasHistory = async (chatId: string): Promise<boolean> => {
+    try {
+      return (await gateway.getMessages(chatId, { limit: 1, offset: 0 })).length > 0;
+    } catch (error) {
+      // WAHA has never seen this chat: a new contact.
+      if (error instanceof WahaNotFoundError) return false;
+      throw error;
+    }
+  };
+  const { schedules: scheduleWiring, ...missionWiring } = wiring;
+  return {
+    missions: createMissionService({
+      ...missionWiring,
+      ...(scheduleWiring ? { schedules: scheduleWiring.store } : {}),
+      tenantId: tenant.id,
+      log: deps.missionLog,
+      limits: missionsConfig.limits,
+      monthlyBudgetUsd: missionsConfig.monthlyBudgetUsd,
+      timezone: config.timezone,
+      lookupLid,
+      logger: deps.logger,
+      hasHistory,
+    }),
+    schedules: scheduleWiring
+      ? createScheduleService({
+          tenantId: tenant.id,
+          store: scheduleWiring.store,
+          log: deps.scheduleLog,
+          missions: wiring.store,
+          cancel: scheduleWiring.cancel,
+          limits: missionsConfig.schedules,
+          missionLimits: missionsConfig.limits,
+          timezone: config.timezone,
+          now: wiring.now,
+          ownerChatId: ownerChatId(tenant.waId),
+          hasHistory,
+          lookupLid,
+        })
+      : null,
   };
 }
 
@@ -180,29 +255,15 @@ export function buildTenantRuntime(deps: {
 
     const missionLog = createSealedMissionLog(cacheDb, cipher);
     const scheduleLog = createSealedScheduleLog(cacheDb, cipher);
-    const missionsConfig = config.missions;
-    const missions =
-      missionsConfig && deps.missions
-        ? createMissionService({
-            ...deps.missions,
-            tenantId: tenant.id,
-            log: missionLog,
-            limits: missionsConfig.limits,
-            monthlyBudgetUsd: missionsConfig.monthlyBudgetUsd,
-            timezone: config.timezone,
-            lookupLid: (lid) => gateway.lookupLid(lid),
-            logger,
-            hasHistory: async (chatId) => {
-              try {
-                return (await gateway.getMessages(chatId, { limit: 1, offset: 0 })).length > 0;
-              } catch (error) {
-                // WAHA has never seen this chat: a new contact.
-                if (error instanceof WahaNotFoundError) return false;
-                throw error;
-              }
-            },
-          })
-        : null;
+    const { missions, schedules } = buildTenantServices({
+      config,
+      tenant,
+      gateway,
+      missionLog,
+      scheduleLog,
+      logger,
+      ...(deps.missions ? { wiring: deps.missions } : {}),
+    });
 
     let closed = false;
     return {
@@ -217,6 +278,7 @@ export function buildTenantRuntime(deps: {
         uploads,
         uploadLinks,
         missions,
+        schedules,
       },
       media,
       upload,

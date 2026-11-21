@@ -3,11 +3,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Hono } from "hono";
 import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
 import { createMissionPurge, type MissionPurge } from "./application/missions/retention.js";
+import { createScheduleRunner, type ScheduleRunner } from "./application/schedules/runner.js";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
 import type { EventStore } from "./domain/ports/EventStore.js";
 import type { LlmClient } from "./domain/ports/LlmClient.js";
 import type { MissionStore } from "./domain/ports/MissionStore.js";
+import type { ScheduleStore } from "./domain/ports/ScheduleStore.js";
 import type { SessionAdmin, WebhookTarget } from "./domain/ports/SessionAdmin.js";
 import type { TenantStore } from "./domain/ports/TenantStore.js";
 import { bearerGuard } from "./infrastructure/auth/bearer.js";
@@ -23,6 +25,7 @@ import { createMcpServer } from "./infrastructure/mcp/server.js";
 import { createAdminTools } from "./infrastructure/mcp/tools/admin/index.js";
 import { createTools } from "./infrastructure/mcp/tools/index.js";
 import { missionTenantPort } from "./infrastructure/missions/tenantPort.js";
+import { scheduleTenantPort } from "./infrastructure/schedules/tenantPort.js";
 import { createOnboardingRoutes } from "./infrastructure/tenants/onboardingRoutes.js";
 import { createTenantRegistry, type TenantRegistry } from "./infrastructure/tenants/registry.js";
 import type { buildTenantRuntime, MissionWiring } from "./infrastructure/tenants/runtime.js";
@@ -49,6 +52,13 @@ export interface ComposeDeps {
    * act through it: cancel, answer and takeover queue behind its ticks.
    */
   missionEngine?: () => MissionEngine | null;
+  /** Scheduled-message rows, deleted with their tenant; schedule tools need missions too. */
+  schedules?: ScheduleStore;
+  /**
+   * The schedule runner, read lazily like the engine: `cancel_scheduled` cancels through it and
+   * `restore_tenant` catches up through it.
+   */
+  scheduleRunner?: () => ScheduleRunner | null;
   sessions: SessionAdmin;
   mediaSecret: Uint8Array;
   logger: Logger;
@@ -86,8 +96,18 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       }
     : null;
   const engine = (): MissionEngine | null => deps.missionEngine?.() ?? null;
+  const runner = (): ScheduleRunner | null => deps.scheduleRunner?.() ?? null;
+  const scheduleStore = deps.schedules;
   const missionWiring: MissionWiring | null = missionsOn
     ? {
+        ...(scheduleStore
+          ? {
+              schedules: {
+                store: scheduleStore,
+                cancel: (t: string, id: string) => runner()?.cancel(t, id) ?? false,
+              },
+            }
+          : {}),
         store: missions,
         tenants,
         engine: {
@@ -114,6 +134,14 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     sessions,
     registry,
     missions,
+    ...(scheduleStore
+      ? {
+          schedules: {
+            deleteForTenant: (t: string) => scheduleStore.deleteForTenant(t),
+            catchUp: async (t: string, now: Date) => runner()?.catchUp(t, now),
+          },
+        }
+      : {}),
     ...(deps.events ? { events: deps.events } : {}),
     newWrappedDek: (tenantId) => wrapDek(config.masterKey, generateDek(), tenantId),
     dataDir: config.dataDir,
@@ -231,17 +259,76 @@ export function composeMissionPurge(deps: {
   registry: Pick<TenantRegistry, "acquire">;
   tenants: Pick<TenantStore, "listTenants">;
   missions: MissionStore;
+  /** Scheduled-message rows: their run log and ended schedules are purged too. */
+  schedules?: ScheduleStore;
   events: EventStore | undefined;
   logger: Logger;
 }): MissionPurge {
   return createMissionPurge({
     missions: deps.missions,
+    ...(deps.schedules ? { schedules: deps.schedules } : {}),
     ...(deps.events ? { events: deps.events } : {}),
     tenants: deps.tenants,
     acquireLog: (tenantId) => {
       const held = deps.registry.acquire(tenantId);
-      return held ? { log: held.runtime.missionLog, release: held.release } : null;
+      return held
+        ? {
+            log: held.runtime.missionLog,
+            scheduleLog: held.runtime.scheduleLog,
+            release: held.release,
+          }
+        : null;
     },
+    logger: deps.logger,
+  });
+}
+
+/**
+ * The scheduled-message runner over the composed registry (null when missions are off). Not
+ * started: `main.ts` starts it next to the mission engine.
+ */
+export function composeScheduleRunner(deps: {
+  config: Config;
+  registry: TenantRegistry;
+  tenants: TenantStore;
+  missions: MissionStore;
+  schedules: ScheduleStore;
+  logger: Logger;
+  /** Test seams, as for the mission engine. */
+  llm?: LlmClient;
+  now?: () => Date;
+  rand?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}): ScheduleRunner | null {
+  const m = deps.config.missions;
+  if (!m) return null;
+  const now = deps.now ?? (() => new Date());
+  const timezone = deps.config.timezone;
+  return createScheduleRunner({
+    store: deps.schedules,
+    missions: deps.missions,
+    tenants: deps.tenants,
+    acquire: (tenantId) => {
+      const held = deps.registry.acquire(tenantId);
+      return held
+        ? { port: scheduleTenantPort(held.runtime, timezone, now), release: held.release }
+        : null;
+    },
+    llm: deps.llm ?? createOpenRouterClaude({ apiKey: m.openRouterApiKey, model: m.model }),
+    model: m.model,
+    monthlyBudgetUsd: m.monthlyBudgetUsd,
+    limits: m.limits,
+    missedAfterMs: m.schedules.missedAfterMinutes * 60_000,
+    timezone,
+    paced: {
+      rand: deps.rand ?? Math.random,
+      sleep:
+        deps.sleep ??
+        (async (ms) => {
+          await delay(ms);
+        }),
+    },
+    now,
     logger: deps.logger,
   });
 }

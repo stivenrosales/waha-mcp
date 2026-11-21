@@ -8,6 +8,8 @@ import { openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
 import { createSealedMissionLog } from "../../../src/infrastructure/missions/sealedMissionLog.js";
 import { createSqliteEventStore } from "../../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../../src/infrastructure/missions/sqliteMissionStore.js";
+import { createSealedScheduleLog } from "../../../src/infrastructure/schedules/sealedScheduleLog.js";
+import { createSqliteScheduleStore } from "../../../src/infrastructure/schedules/sqliteScheduleStore.js";
 import type { TenantRegistry } from "../../../src/infrastructure/tenants/registry.js";
 import type { TenantRuntime } from "../../../src/infrastructure/tenants/runtime.js";
 import { testCipher } from "../../fakes/testCipher.js";
@@ -72,6 +74,59 @@ describe("mission purge", () => {
     expect(s.log.read(edge)).toHaveLength(1);
     expect(s.missions.get(TENANT, past)).toBeNull();
     expect(s.log.read(past)).toEqual([]);
+  });
+
+  it("purges schedule runs 30 days after each run, and ended schedules 30 days after they end", () => {
+    const s = stores();
+    const schedules = createSqliteScheduleStore(s.authDb);
+    const scheduleLog = createSealedScheduleLog(new DatabaseSync(":memory:"), testCipher(TENANT));
+    const schedule = (endedMsAgo: number | null) => {
+      const row = schedules.create({
+        tenantId: TENANT,
+        chatId: "51911111111@c.us",
+        kind: "fixed",
+        repeat: "daily",
+        firstAt: NOW.toISOString(),
+        nextRunAt: NOW.toISOString(),
+        maxRuns: 12,
+        newContact: false,
+      });
+      if (endedMsAgo !== null)
+        schedules.update(row.id, {
+          state: "done",
+          endedAt: new Date(NOW.getTime() - endedMsAgo).toISOString(),
+          nextRunAt: null,
+        });
+      scheduleLog.putContent(row.id, { text: "hola" });
+      for (const daysAgo of [31, 30])
+        scheduleLog.appendRun(row.id, {
+          at: new Date(NOW.getTime() - daysAgo * DAY).toISOString(),
+          outcome: "sent",
+          text: "hola",
+        });
+      return row.id;
+    };
+    const active = schedule(null);
+    const edge = schedule(30 * DAY);
+    const past = schedule(30 * DAY + 1);
+    createMissionPurge({
+      missions: s.missions,
+      schedules,
+      tenants: { listTenants: () => [tenant] },
+      acquireLog: () => ({ log: s.log, scheduleLog, release() {} }),
+      logger: { info() {} },
+    }).purge(NOW);
+    // Active: kept, only the run older than 30 days is gone.
+    expect(schedules.get(TENANT, active)?.state).toBe("active");
+    expect(scheduleLog.content(active)).toEqual({ text: "hola" });
+    expect(scheduleLog.runs(active, 10).map((r) => r.at)).toEqual([
+      new Date(NOW.getTime() - 30 * DAY).toISOString(),
+    ]);
+    expect(schedules.get(TENANT, edge)).not.toBeNull();
+    expect(scheduleLog.content(edge)).toEqual({ text: "hola" });
+    expect(schedules.get(TENANT, past)).toBeNull();
+    expect(scheduleLog.content(past)).toBeNull();
+    expect(scheduleLog.runs(past, 10)).toEqual([]);
   });
 
   it("keeps a webhook event received exactly 7 days ago and prunes one 7 days + 1 ms old", () => {

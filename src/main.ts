@@ -2,18 +2,30 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import type { MissionEngine } from "./application/missions/engine.js";
-import { composeApp, composeMissionEngine, composeMissionPurge } from "./composition.js";
+import type { ScheduleRunner } from "./application/schedules/runner.js";
+import {
+  composeApp,
+  composeMissionEngine,
+  composeMissionPurge,
+  composeScheduleRunner,
+} from "./composition.js";
 import { loadConfig } from "./config.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
 import { createSqliteEventStore } from "./infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "./infrastructure/missions/sqliteMissionStore.js";
+import { createSqliteScheduleStore } from "./infrastructure/schedules/sqliteScheduleStore.js";
 import { migrateToMultiTenant } from "./infrastructure/tenants/migrate.js";
 import { createSqliteTenantStore } from "./infrastructure/tenants/sqliteTenantStore.js";
 import { createWahaSessionAdmin } from "./infrastructure/waha/WahaSessionAdmin.js";
 
-/** Longest wait on SIGTERM for a running mission turn (an LLM call plus a paced send). */
+/**
+ * Longest wait on SIGTERM for a running mission turn or scheduled run (an LLM call plus a paced
+ * send).
+ */
 const MISSION_DRAIN_MS = 20_000;
+/** How often the schedule runner looks for due scheduled messages. */
+const SCHEDULE_TICK_MS = 5_000;
 
 /** The only file that reads `process.env`. */
 async function main(): Promise<void> {
@@ -32,6 +44,8 @@ async function main(): Promise<void> {
   const store = createAuthStore(authDb);
   const tenants = createSqliteTenantStore(authDb);
   const missions = createSqliteMissionStore(authDb);
+  // Like the mission store: always opened, so purge and tenant deletion reach existing rows.
+  const schedules = createSqliteScheduleStore(authDb);
   // Always opened, also with missions off: the purge and tenant deletion still reach rows left
   // from a period when missions were on.
   const events = createSqliteEventStore(authDb);
@@ -63,6 +77,7 @@ async function main(): Promise<void> {
   // Assigned right after composing (it needs the registry); a webhook before then is picked up
   // by the first tick.
   let missionEngine: MissionEngine | null = null;
+  let scheduleRunner: ScheduleRunner | null = null;
   const { app, registry, toolCount, configureWebhooks } = composeApp({
     config,
     store,
@@ -71,11 +86,13 @@ async function main(): Promise<void> {
     events,
     onWebhookEvent: () => missionEngine?.wake(),
     missionEngine: () => missionEngine,
+    schedules,
+    scheduleRunner: () => scheduleRunner,
     sessions,
     mediaSecret,
     logger,
   });
-  const purge = composeMissionPurge({ registry, tenants, missions, events, logger });
+  const purge = composeMissionPurge({ registry, tenants, missions, schedules, events, logger });
   missionEngine = composeMissionEngine({
     config,
     registry,
@@ -87,8 +104,13 @@ async function main(): Promise<void> {
   });
   // Migrations are done: process stored events and due missions every 5 s (the engine also runs
   // the daily retention purge). With missions off, the purge runs on its own.
+  // Scheduled messages need missions (quiet hours, pause state, budget): only with the engine.
+  scheduleRunner = missionEngine
+    ? composeScheduleRunner({ config, registry, tenants, missions, schedules, logger })
+    : null;
   if (missionEngine) missionEngine.start();
   else purge.start(() => new Date());
+  scheduleRunner?.start(SCHEDULE_TICK_MS);
 
   const server = serve({ fetch: app.fetch, port: config.port });
 
@@ -122,6 +144,7 @@ async function main(): Promise<void> {
     // No new turn, LLM call or send starts after stop(); the one in flight (LLM call, paced send,
     // logging its sent id) gets up to MISSION_DRAIN_MS before the stores close under it.
     missionEngine?.stop();
+    scheduleRunner?.stop();
     purge.stop();
     let finished = false;
     const finish = (): void => {
@@ -131,12 +154,10 @@ async function main(): Promise<void> {
       store.close();
       process.exit(0);
     };
-    const drained = missionEngine
-      ? Promise.race([
-          missionEngine.idle(),
-          new Promise<void>((resolve) => setTimeout(resolve, MISSION_DRAIN_MS).unref()),
-        ])
-      : Promise.resolve();
+    const drained = Promise.race([
+      Promise.all([missionEngine?.idle(), scheduleRunner?.idle()]),
+      new Promise<void>((resolve) => setTimeout(resolve, MISSION_DRAIN_MS).unref()),
+    ]);
     void drained.then(() => {
       server.close(finish);
       setTimeout(finish, 5000).unref();

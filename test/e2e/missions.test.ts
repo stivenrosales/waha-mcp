@@ -259,6 +259,7 @@ async function world(): Promise<World> {
       mc && b.missions
         ? createMissionService({
             ...b.missions,
+            schedules: b.missions.schedules?.store,
             tenantId: b.tenant.id,
             log: missionLog,
             limits: mc.limits,
@@ -288,6 +289,7 @@ async function world(): Promise<World> {
         uploads,
         uploadLinks,
         missions: missionService,
+        schedules: null,
       },
       media: createMediaHandler({
         gateway: gw,

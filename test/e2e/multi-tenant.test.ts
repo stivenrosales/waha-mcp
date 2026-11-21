@@ -206,6 +206,7 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
         uploads,
         uploadLinks,
         missions: null,
+        schedules: null,
       },
       media: createMediaHandler({ gateway: f.gateway, links, maxBytes: b.config.mediaMaxBytes }),
       upload: createUploadHandler({

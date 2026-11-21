@@ -28,7 +28,10 @@ import { createSqliteEventStore } from "../../src/infrastructure/missions/sqlite
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import { createSealedScheduleLog } from "../../src/infrastructure/schedules/sealedScheduleLog.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
-import type { buildTenantRuntime } from "../../src/infrastructure/tenants/runtime.js";
+import {
+  type buildTenantRuntime,
+  wireMessageActions,
+} from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
 import { createUploadLinks } from "../../src/infrastructure/uploads/uploadLinks.js";
@@ -290,6 +293,13 @@ async function world(): Promise<World> {
         uploadLinks,
         missions: missionService,
         schedules: null,
+        messageActions: wireMessageActions({
+          wahaGateway: gw,
+          db: cacheDb,
+          cipher,
+          session: b.tenant.wahaSession,
+          cache: null,
+        }).messageActions,
       },
       media: createMediaHandler({
         gateway: gw,

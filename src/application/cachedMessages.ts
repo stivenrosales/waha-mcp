@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ChatSyncState, MessageStore, RawMessageRow } from "../domain/ports/MessageStore.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
+import { createOwnerCheck } from "./ownerCheck.js";
 
 /** WAHA page size used for every sync read. */
 const PAGE = 200;
@@ -23,6 +24,11 @@ export interface CachedGatewayOptions {
   session: string;
   /** Clock in epoch milliseconds (injectable for tests). */
   now?: () => number;
+  /**
+   * The owner check shared with everything else over the same `cache.db` (see
+   * `createOwnerCheck`); default: one of its own over `store` and `session`.
+   */
+  ensureOwner?: () => Promise<void>;
 }
 
 type Query = { limit: number; offset: number; from?: number; to?: number };
@@ -80,9 +86,6 @@ export function createCachedGateway(
   const locks = new Map<string, Promise<unknown>>();
   /** Coverage note of each page answered from the cache, keyed by the returned array. */
   const notes = new WeakMap<unknown[], string>();
-  /** True once the cache is known to belong to the current account (wiped otherwise). */
-  let ownerChecked = false;
-  let ownerCheck: Promise<boolean> | null = null;
   let lastPrune = Number.NEGATIVE_INFINITY;
 
   const prune = (): void => {
@@ -99,22 +102,12 @@ export function createCachedGateway(
    * Resolves the account (session + `getMe().id`) before anything is served from the cache.
    * A different or unrecorded owner wipes the cache. While `getMe` fails, the cache is not used.
    */
-  const ensureOwner = (): Promise<boolean> => {
-    if (ownerChecked) return Promise.resolve(true);
-    ownerCheck ??= gw
-      .getMe()
-      .then((me) => {
-        const owner = `${opts.session}|${me.id}`;
-        if (store.getOwner() !== owner) store.resetForOwner(owner);
-        ownerChecked = true;
-        return true;
-      })
-      .catch(() => false)
-      .finally(() => {
-        ownerCheck = null;
-      });
-    return ownerCheck;
-  };
+  const checkOwner = opts.ensureOwner ?? createOwnerCheck(gw, store, opts.session);
+  const ensureOwner = (): Promise<boolean> =>
+    checkOwner().then(
+      () => true,
+      () => false,
+    );
 
   /** Runs `fn` after every earlier call on the same chat settled (success or failure). */
   const withLock = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
@@ -228,6 +221,7 @@ export function createCachedGateway(
     listContacts: (q) => gw.listContacts(q),
     getMessage: (chatId, messageId) => gw.getMessage(chatId, messageId),
     openMedia: (url) => gw.openMedia(url),
+    ...(gw.storedReactions ? { storedReactions: gw.storedReactions.bind(gw) } : {}),
 
     getMessages(chatId, q) {
       return withLock(chatId, async () => {

@@ -5,11 +5,17 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../../../src/config.js";
 import type { Tenant } from "../../../src/domain/ports/TenantStore.js";
+import { createSqliteMessageActionStore } from "../../../src/infrastructure/cache/sqliteMessageActionStore.js";
+import { openCacheDatabase } from "../../../src/infrastructure/cache/sqliteMessageStore.js";
 import { generateDek } from "../../../src/infrastructure/crypto/envelope.js";
 import {
   buildTenantRuntime,
   guardUsageRecorder,
+  wireMessageActions,
 } from "../../../src/infrastructure/tenants/runtime.js";
+import { getEngineMapper } from "../../../src/infrastructure/waha/engines/index.js";
+import { InMemoryWahaGateway, rawText } from "../../fakes/InMemoryWahaGateway.js";
+import { testCipher } from "../../fakes/testCipher.js";
 
 /** Every cache database the runtime opens, so tests can check it was closed. */
 const opened = vi.hoisted(() => [] as DatabaseSync[]);
@@ -37,12 +43,14 @@ const scratch = () => {
   return dir;
 };
 afterEach(() => {
+  vi.unstubAllGlobals();
   opened.splice(0);
   for (const dir of scratchDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const configFor = (dataDir: string) =>
+const configFor = (dataDir: string, env: Record<string, string> = {}) =>
   loadConfig({
+    ...env,
     WAHA_API_URL: "http://waha:3000",
     WAHA_API_KEY: "k-secret",
     PUBLIC_BASE_URL: "https://mcp.example.com",
@@ -146,5 +154,106 @@ describe("guardUsageRecorder", () => {
     expect(() =>
       guardUsageRecorder(undefined, { info: () => {} }, "abc")({ seconds: null, costUsd: null }),
     ).not.toThrow();
+  });
+});
+
+const CHAT = "100000000000009@g.us";
+const SESSION = "t_abcdefghij";
+
+/** WAHA over HTTP for one GOWS session that keeps serving the original text of every message. */
+function fakeWahaFetch(messages: unknown[]): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    const url = new URL(typeof input === "string" ? input : input.toString());
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    if (url.pathname === `/api/sessions/${SESSION}`)
+      return json({ engine: { engine: "GOWS" }, status: "WORKING" });
+    if (url.pathname === `/api/sessions/${SESSION}/me`) return json({ id: "51000000002@c.us" });
+    if (url.pathname === `/api/${SESSION}/chats/${encodeURIComponent(CHAT)}/messages`)
+      return json(messages);
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+}
+
+describe("message actions wiring", () => {
+  it.each([
+    ["on", "true"],
+    ["off", "false"],
+  ])(
+    "a revoke via context.messageActions is reflected by context.gateway.getMessages (cache %s)",
+    async (_, cache) => {
+      vi.stubGlobal("fetch", fakeWahaFetch([rawText("R1", 1_000, "secret words")]));
+      const runtime = buildTenantRuntime({
+        config: configFor(scratch(), { CACHE_ENABLED: cache }),
+        tenant: tenant("tid1"),
+        dek: generateDek(),
+        mediaSecret: SECRET,
+        logger: { info: () => {} },
+      });
+      try {
+        const { gateway, messageActions } = runtime.context;
+        expect(JSON.stringify(await gateway.getMessages(CHAT, { limit: 10, offset: 0 }))).toContain(
+          "secret words",
+        );
+        await messageActions.applyRevoke("R1", 2_000);
+        const page = await gateway.getMessages(CHAT, { limit: 10, offset: 0 });
+        expect(getEngineMapper("GOWS").message(page[0]).type).toBe("deleted");
+        expect(JSON.stringify(page)).not.toContain("secret");
+      } finally {
+        runtime.close();
+      }
+    },
+  );
+
+  it("with the cache and transcription off, a new owner wipes old reactions, votes and overrides", async () => {
+    const db = openCacheDatabase(":memory:");
+    const cipher = testCipher();
+    const store = createSqliteMessageActionStore(db, cipher);
+    db.prepare("INSERT INTO meta (key, value) VALUES ('owner', ?)").run(`${SESSION}|old@c.us`);
+    store.putOverride("R1", { kind: "revoked", at: 1 });
+    store.putReaction({ messageId: "R1", reactor: "a@lid", emoji: "👍", ts: 1 });
+    store.putVote({ pollId: "P", voter: "a@lid", options: ["x"], ts: 1 });
+    const waha = new InMemoryWahaGateway({
+      messages: { [CHAT]: [rawText("R1", 1_000, "visible")] },
+      me: { id: "new@c.us", lid: null },
+    });
+    const wired = wireMessageActions({
+      wahaGateway: waha,
+      db,
+      cipher,
+      session: SESSION,
+      cache: null,
+    });
+    const page = await wired.gateway.getMessages(CHAT, { limit: 10, offset: 0 });
+    expect(getEngineMapper("GOWS").message(page[0]).text).toBe("visible");
+    expect(store.overrides(["R1"]).size).toBe(0);
+    expect(store.reactions(["R1"]).size).toBe(0);
+    expect(store.votes("P").votes).toEqual([]);
+    expect(await wired.messageActions.pollVotes("P")).toEqual({ votes: [], failed: 0 });
+  });
+
+  it("a new owner also wipes the old store before the first write", async () => {
+    const db = openCacheDatabase(":memory:");
+    const cipher = testCipher();
+    const store = createSqliteMessageActionStore(db, cipher);
+    db.prepare("INSERT INTO meta (key, value) VALUES ('owner', ?)").run(`${SESSION}|old@c.us`);
+    store.putReaction({ messageId: "OLD", reactor: "a@lid", emoji: "👍", ts: 1 });
+    const waha = new InMemoryWahaGateway({ me: { id: "new@c.us", lid: null } });
+    const wired = wireMessageActions({
+      wahaGateway: waha,
+      db,
+      cipher,
+      session: SESSION,
+      cache: null,
+    });
+    await wired.messageActions.applyReaction({
+      messageId: "NEW",
+      reactor: "b@lid",
+      emoji: "🔥",
+      ts: 2,
+    });
+    expect(store.reactions(["OLD", "NEW"])).toEqual(
+      new Map([["NEW", [{ emoji: "🔥", by: "b@lid" }]]]),
+    );
   });
 });

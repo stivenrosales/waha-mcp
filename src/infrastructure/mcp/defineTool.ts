@@ -7,6 +7,7 @@ import type {
   ToolCallback,
 } from "@modelcontextprotocol/server";
 import type { z } from "zod";
+import type { MessageActions } from "../../application/messageActions.js";
 import type { MissionService } from "../../application/missions/service.js";
 import type { ScheduleService } from "../../application/schedules/service.js";
 import type { TenantAdmin } from "../../application/tenantAdmin.js";
@@ -53,6 +54,8 @@ export interface ToolRunContext {
   missions: MissionService | null;
   /** This tenant's scheduled messages; null when the server has no `config.missions`. */
   schedules: ScheduleService | null;
+  /** This tenant's stored edits, revokes, reactions and poll votes. */
+  messageActions: MessageActions;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
@@ -105,6 +108,7 @@ export interface ToolDeps {
   missions?: MissionService | null;
   /** Default null: schedule tools then answer that missions are not configured. */
   schedules?: ScheduleService | null;
+  messageActions: MessageActions;
   logger?: Logger;
   /** Told about every call once it ends (usage accounting); a throw is logged, never surfaced. */
   onToolCall?: (call: ToolCallRecord) => void;
@@ -221,6 +225,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         admin: deps.admin ?? null,
         missions: deps.missions ?? null,
         schedules: deps.schedules ?? null,
+        messageActions: deps.messageActions,
       });
       const ms = Date.now() - start;
       logger.info(`tool=${def.name} ms=${ms} result=ok`);

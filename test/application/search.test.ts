@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { withMessageActions } from "../../src/application/actionsGateway.js";
+import { createCachedGateway } from "../../src/application/cachedMessages.js";
+import { createOwnerCheck } from "../../src/application/ownerCheck.js";
 import { searchMessages } from "../../src/application/search.js";
 import { InvalidInputError } from "../../src/domain/errors.js";
+import { createSqliteMessageActionStore } from "../../src/infrastructure/cache/sqliteMessageActionStore.js";
+import {
+  createSqliteMessageStore,
+  openCacheDatabase,
+} from "../../src/infrastructure/cache/sqliteMessageStore.js";
+import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
 import { gowsMapper } from "../../src/infrastructure/waha/engines/gows.js";
 import type { InMemoryWahaGateway } from "../fakes/InMemoryWahaGateway.js";
+import { testCipher } from "../fakes/testCipher.js";
 import { ANA, BOB, chat, GROUP_A, gateway, msg } from "./helpers.js";
 
 const NOW = Date.parse("2026-10-30T15:00:00Z");
@@ -181,5 +191,43 @@ describe("searchMessages", () => {
     await expect(run(gw, { limit: 201 })).rejects.toBeInstanceOf(InvalidInputError);
     await expect(run(gw, { from: "ayer" })).rejects.toBeInstanceOf(InvalidInputError);
     await expect(run(gw, { to: "mañana" })).rejects.toBeInstanceOf(InvalidInputError);
+  });
+});
+
+describe("searchMessages over message actions", () => {
+  it.each([true, false])("a revoked message is not found (cache %s)", async (cacheOn) => {
+    // WAHA keeps serving the original text: only the stored revoke can hide it.
+    const waha = gateway({
+      chats: [chat(ANA, nowSec - 100, "Ana")],
+      messages: {
+        [ANA]: [
+          msg("a2", nowSec - 100, "la factura secreta", { chat: ANA }),
+          msg("a1", nowSec - 200, "hola", { chat: ANA }),
+        ],
+      },
+    });
+    const db = openCacheDatabase(":memory:");
+    const cipher = testCipher();
+    const store = createSqliteMessageActionStore(db, cipher);
+    const ensureOwner = createOwnerCheck(waha, createSqliteTranscriptStore(db, cipher), "default");
+    const actionsGw = withMessageActions(waha, {
+      store,
+      mapper: async () => gowsMapper,
+      ensureOwner,
+    });
+    const gw = cacheOn
+      ? createCachedGateway(actionsGw, createSqliteMessageStore(db, cipher), {
+          refreshHours: 48,
+          maxAgeDays: 0,
+          session: "default",
+          now: () => NOW,
+          ensureOwner,
+        })
+      : actionsGw;
+    await ensureOwner(); // as the webhook writes do: a first check would wipe an unowned store
+    store.putOverride("a2", { kind: "revoked", at: nowSec });
+    const r = await searchMessages(gw, gowsMapper, { query: "factura", scope: "direct" }, deps);
+    expect(r.hits).toHaveLength(0);
+    expect(r.totalMatches).toBe(0);
   });
 });

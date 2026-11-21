@@ -25,6 +25,7 @@ import { createSqliteScheduleStore } from "../../src/infrastructure/schedules/sq
 import {
   type buildTenantRuntime,
   buildTenantServices,
+  wireMessageActions,
 } from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
@@ -153,6 +154,13 @@ async function world() {
         sender,
         uploads,
         uploadLinks,
+        messageActions: wireMessageActions({
+          wahaGateway: gateway,
+          db: cacheDb,
+          cipher,
+          session: b.tenant.wahaSession,
+          cache: null,
+        }).messageActions,
         ...buildTenantServices({
           config: b.config,
           tenant: b.tenant,

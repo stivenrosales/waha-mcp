@@ -1,11 +1,15 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
+import { withMessageActions } from "../../application/actionsGateway.js";
 import { createCachedGateway } from "../../application/cachedMessages.js";
+import { createMessageActions, type MessageActions } from "../../application/messageActions.js";
 import { ownerChatId } from "../../application/missions/notify.js";
 import {
   createMissionService,
   type MissionServiceDeps,
 } from "../../application/missions/service.js";
+import { createOwnerCheck } from "../../application/ownerCheck.js";
 import { createScheduleService } from "../../application/schedules/service.js";
 import {
   createTranscriptionService,
@@ -17,7 +21,9 @@ import type { EngineMapper } from "../../domain/message.js";
 import type { ScheduleLog } from "../../domain/ports/ScheduleLog.js";
 import type { ScheduleStore } from "../../domain/ports/ScheduleStore.js";
 import type { Tenant } from "../../domain/ports/TenantStore.js";
+import type { TranscriptStore } from "../../domain/ports/TranscriptStore.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
+import { createSqliteMessageActionStore } from "../cache/sqliteMessageActionStore.js";
 import { createSqliteMessageStore, openCacheDatabase } from "../cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../cache/sqliteTranscriptStore.js";
 import { createTenantCipher, type TenantCipher } from "../crypto/envelope.js";
@@ -169,6 +175,52 @@ export function buildTenantServices(deps: {
   };
 }
 
+/**
+ * The read path and the message actions of one tenant over its `cache.db`: WAHA → message-actions
+ * decorator → message cache (when `cache` is set). Edits and revokes are applied below the cache,
+ * so every refresh, backfill and fallback stores and returns the rewritten payload. The action
+ * store and the transcript store are always built (cache on or off), and one owner check is shared
+ * by the decorator, the cache and the actions. The engine resolver is built once over WAHA.
+ * Exported for the end-to-end tests' runtime seam.
+ */
+export function wireMessageActions(deps: {
+  wahaGateway: WahaGateway;
+  db: DatabaseSync;
+  cipher: TenantCipher;
+  session: string;
+  cache: { refreshHours: number; maxAgeDays: number; now?: () => number } | null;
+}): {
+  gateway: WahaGateway;
+  mapper: () => Promise<EngineMapper>;
+  messageActions: MessageActions;
+  transcripts: TranscriptStore;
+} {
+  const { wahaGateway, db, cipher, session, cache } = deps;
+  const mapper = createEngineResolver(wahaGateway);
+  const transcripts = createSqliteTranscriptStore(db, cipher);
+  const store = createSqliteMessageActionStore(db, cipher);
+  const ensureOwner = createOwnerCheck(wahaGateway, transcripts, session);
+  const actionsGateway = withMessageActions(wahaGateway, { store, mapper, ensureOwner });
+  const messageStore = cache ? createSqliteMessageStore(db, cipher) : null;
+  const gateway = messageStore
+    ? createCachedGateway(actionsGateway, messageStore, {
+        refreshHours: cache?.refreshHours ?? 0,
+        maxAgeDays: cache?.maxAgeDays ?? 0,
+        session,
+        ensureOwner,
+        ...(cache?.now ? { now: cache.now } : {}),
+      })
+    : actionsGateway;
+  const messageActions = createMessageActions({
+    store,
+    messages: messageStore,
+    transcripts,
+    mapper,
+    ensureOwner,
+  });
+  return { gateway, mapper, messageActions, transcripts };
+}
+
 export function buildTenantRuntime(deps: {
   config: Config;
   tenant: Tenant;
@@ -201,19 +253,20 @@ export function buildTenantRuntime(deps: {
   // timer): the registry would rebuild, and leak again, on every later acquire.
   let sweeper: ReturnType<typeof setInterval> | undefined;
   try {
-    const messageStore = config.cacheEnabled ? createSqliteMessageStore(cacheDb, cipher) : null;
-    const gateway = messageStore
-      ? createCachedGateway(wahaGateway, messageStore, {
-          refreshHours: config.cacheRefreshHours,
-          maxAgeDays: config.cacheMaxAgeDays,
-          session,
-        })
-      : wahaGateway;
+    const { gateway, mapper, messageActions, transcripts } = wireMessageActions({
+      wahaGateway,
+      db: cacheDb,
+      cipher,
+      session,
+      cache: config.cacheEnabled
+        ? { refreshHours: config.cacheRefreshHours, maxAgeDays: config.cacheMaxAgeDays }
+        : null,
+    });
     const transcription = config.transcription
       ? createTranscriptionService({
           gateway,
           audio: createWahaAudioSource(gateway, { maxBytes: config.mediaMaxBytes }),
-          store: createSqliteTranscriptStore(cacheDb, cipher),
+          store: transcripts,
           transcriber: createOpenAiCompatibleTranscriber({
             ...config.transcription,
             onUsage: guardUsageRecorder(deps.recordUsage, logger, tenant.id),
@@ -270,7 +323,7 @@ export function buildTenantRuntime(deps: {
       tenantId: tenant.id,
       context: {
         gateway,
-        mapper: createEngineResolver(gateway),
+        mapper,
         config,
         links,
         transcription,
@@ -279,6 +332,7 @@ export function buildTenantRuntime(deps: {
         uploadLinks,
         missions,
         schedules,
+        messageActions,
       },
       media,
       upload,

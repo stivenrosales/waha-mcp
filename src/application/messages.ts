@@ -1,5 +1,6 @@
 import { InvalidInputError } from "../domain/errors.js";
-import type { EngineMapper, NormalizedMessage } from "../domain/message.js";
+import type { EngineMapper, NormalizedMessage, Reaction } from "../domain/message.js";
+import { shortMessageId } from "../domain/messageId.js";
 import type { WahaGateway } from "../domain/ports/WahaGateway.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { parseRange } from "./dates.js";
@@ -28,12 +29,56 @@ export function messageKeys(id: string): string[] {
   return keys;
 }
 
+/** Reactions received by webhook, per short id, with the owner's `"me"` already resolved. */
+interface StoredReactions {
+  byShortId: Map<string, Reaction[]>;
+  /** Every id the engine may use for the owner: its reactions are replaced by the stored one. */
+  ownerIds: string[];
+}
+
+/**
+ * Loads the stored reactions of the messages in `raws` (reaction events excluded), naming the
+ * owner (`"me"`) by `getMe().id` so it matches how the engine reports reactions. When `getMe`
+ * fails the owner stays `"me"`. `null` when the gateway stores none for these messages.
+ */
+async function loadStoredReactions(
+  gw: WahaGateway,
+  m: EngineMapper,
+  raws: unknown[],
+): Promise<StoredReactions | null> {
+  if (!gw.storedReactions) return null;
+  const ids: string[] = [];
+  for (const raw of raws) {
+    const id = (raw as { id?: unknown } | null)?.id;
+    if (typeof id === "string" && !m.reaction(raw)) ids.push(shortMessageId(id));
+  }
+  if (ids.length === 0) return null;
+  const byShortId = gw.storedReactions(ids);
+  if (byShortId.size === 0) return null;
+  const hasOwner = [...byShortId.values()].some((list) => list.some((r) => r.by === "me"));
+  if (!hasOwner) return { byShortId, ownerIds: [] };
+  const me = await gw.getMe().catch(() => null);
+  if (!me) return { byShortId, ownerIds: [] };
+  const resolved = new Map<string, Reaction[]>();
+  for (const [id, list] of byShortId)
+    resolved.set(
+      id,
+      list.map((r) => (r.by === "me" ? { emoji: r.emoji, by: me.id } : r)),
+    );
+  return { byShortId: resolved, ownerIds: [me.id, ...(me.lid ? [me.lid] : [])] };
+}
+
 /**
  * Maps raw WAHA messages, preserving their order, and folds reaction events into the
  * message they target. A reaction whose target is not in `raws` is dropped. Reaction
- * events are never returned as messages.
+ * events are never returned as messages. A stored reaction replaces the engine's reaction by
+ * the same author; engine-only reactions come first, then the stored ones.
  */
-function mapAndAttach(m: EngineMapper, raws: unknown[]): NormalizedMessage[] {
+function mapAndAttach(
+  m: EngineMapper,
+  raws: unknown[],
+  stored: StoredReactions | null,
+): NormalizedMessage[] {
   const messages: NormalizedMessage[] = [];
   const reactions: NonNullable<ReturnType<EngineMapper["reaction"]>>[] = [];
   for (const raw of raws) {
@@ -46,6 +91,15 @@ function mapAndAttach(m: EngineMapper, raws: unknown[]): NormalizedMessage[] {
     for (const msg of messages) for (const key of messageKeys(msg.id)) index.set(key, msg);
     for (const r of reactions) index.get(r.targetId)?.reactions.push(r.reaction);
   }
+  if (stored)
+    for (const msg of messages) {
+      const list = stored.byShortId.get(shortMessageId(msg.id));
+      if (!list) continue;
+      const replaced = new Set(list.map((r) => r.by));
+      if (list.some((r) => stored.ownerIds.includes(r.by)))
+        for (const id of stored.ownerIds) replaced.add(id);
+      msg.reactions = [...msg.reactions.filter((r) => !replaced.has(r.by)), ...list];
+    }
   return messages;
 }
 
@@ -100,7 +154,12 @@ export async function getMessages(
           to: q.to ?? null,
         });
   const cacheNote = gw.cacheNote?.(raws) ?? null;
-  return { messages: mapAndAttach(m, raws), nextCursor, ...(cacheNote ? { cacheNote } : {}) };
+  const stored = await loadStoredReactions(gw, m, raws);
+  return {
+    messages: mapAndAttach(m, raws, stored),
+    nextCursor,
+    ...(cacheNote ? { cacheNote } : {}),
+  };
 }
 
 /**
@@ -141,7 +200,7 @@ export async function fetchRange(
     }
     if (page.length < RANGE_PAGE) break;
   }
-  const all = mapAndAttach(m, raws);
+  const all = mapAndAttach(m, raws, await loadStoredReactions(gw, m, raws));
   const truncated = all.length > q.cap;
   return {
     messages: truncated ? all.slice(0, q.cap) : all,

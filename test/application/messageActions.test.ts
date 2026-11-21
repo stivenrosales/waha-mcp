@@ -25,6 +25,7 @@ function setup(cacheOn = true) {
     messages: cacheOn ? messages : null,
     transcripts,
     mapper: async () => m,
+    ensureOwner: async () => {},
   });
   return { db, messages, transcripts, store, actions };
 }
@@ -96,6 +97,7 @@ describe("message actions on cached payloads", () => {
         mapper: async () => {
           throw new Error("waha down");
         },
+        ensureOwner: async () => {},
       });
       const raw = rawText("F1", 100, "keep me");
       messages.upsertRaw(CHAT, [{ id: raw.id as string, ts: 100, raw }]);
@@ -117,12 +119,46 @@ describe("message actions on cached payloads", () => {
     expect(store.overrides(["N1"]).get("N1")?.kind).toBe("revoked");
   });
 
-  it("delegates reactions and votes to the store", () => {
+  it("delegates reactions and votes to the store", async () => {
     const { actions } = setup(false);
-    actions.applyVote({ pollId: "P", voter: "a@lid", options: ["x"], ts: 1 });
-    actions.applyFailedVote({ pollId: "P", voter: "b@lid", ts: 2 });
-    const { votes, failed } = actions.pollVotes("P");
+    await actions.applyVote({ pollId: "P", voter: "a@lid", options: ["x"], ts: 1 });
+    await actions.applyFailedVote({ pollId: "P", voter: "b@lid", ts: 2 });
+    const { votes, failed } = await actions.pollVotes("P");
     expect(votes.map((v) => v.voter)).toEqual(["a@lid"]);
     expect(failed).toBe(1);
+  });
+
+  it("checks the owner before every write and read, writing nothing when it fails", async () => {
+    const db = openCacheDatabase(":memory:");
+    const cipher = testCipher();
+    const store = createSqliteMessageActionStore(db, cipher);
+    const calls: string[] = [];
+    let fail = true;
+    const actions = createMessageActions({
+      store,
+      messages: createSqliteMessageStore(db, cipher),
+      transcripts: createSqliteTranscriptStore(db, cipher),
+      mapper: async () => m,
+      ensureOwner: async () => {
+        calls.push("owner");
+        if (fail) throw new Error("getMe down");
+      },
+    });
+    const writes = [
+      () => actions.applyEdit("O1", "x", 1),
+      () => actions.applyRevoke("O2", 1),
+      () => actions.applyReaction({ messageId: "O3", reactor: "a@lid", emoji: "👍", ts: 1 }),
+      () => actions.applyVote({ pollId: "P", voter: "a@lid", options: ["x"], ts: 1 }),
+      () => actions.applyFailedVote({ pollId: "P", voter: "b@lid", ts: 1 }),
+      () => actions.pollVotes("P"),
+    ];
+    for (const w of writes) await expect(w()).rejects.toThrow("getMe down");
+    expect(calls).toHaveLength(writes.length);
+    expect(store.overrides(["O1", "O2"]).size).toBe(0);
+    expect(store.reactions(["O3"]).size).toBe(0);
+    expect(store.votes("P")).toEqual({ votes: [], failed: 0 });
+    fail = false;
+    await actions.applyReaction({ messageId: "O3", reactor: "a@lid", emoji: "👍", ts: 1 });
+    expect(store.reactions(["O3"]).size).toBe(1);
   });
 });

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createCachedGateway } from "../../src/application/cachedMessages.js";
 import {
   createTranscriptionService,
   DISABLED_TRANSCRIPTION,
@@ -14,11 +13,9 @@ import { composeApp } from "../../src/composition.js";
 import { loadConfig } from "../../src/config.js";
 import { SendOutcomeUnknownError, WahaAuthError } from "../../src/domain/errors.js";
 import type { UploadStore } from "../../src/domain/ports/UploadStore.js";
+import type { WahaGateway } from "../../src/domain/ports/WahaGateway.js";
 import { createAuthStore, openAuthDatabase } from "../../src/infrastructure/auth/store.js";
-import {
-  createSqliteMessageStore,
-  openCacheDatabase,
-} from "../../src/infrastructure/cache/sqliteMessageStore.js";
+import { openCacheDatabase } from "../../src/infrastructure/cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
 import { generateDek, wrapDek } from "../../src/infrastructure/crypto/envelope.js";
 import {
@@ -28,9 +25,10 @@ import {
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { createSignedLinks, type SignedLinks } from "../../src/infrastructure/media/signedLink.js";
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
-import type {
-  buildTenantRuntime,
-  TenantRuntime,
+import {
+  type buildTenantRuntime,
+  type TenantRuntime,
+  wireMessageActions,
 } from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createOpenAiCompatibleTranscriber } from "../../src/infrastructure/transcription/openaiCompatible.js";
@@ -38,7 +36,6 @@ import { createWahaAudioSource } from "../../src/infrastructure/transcription/wa
 import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
 import { createUploadLinks } from "../../src/infrastructure/uploads/uploadLinks.js";
 import { createUploadHandler } from "../../src/infrastructure/uploads/uploadRoute.js";
-import { createEngineResolver } from "../../src/infrastructure/waha/engines/index.js";
 import { FakeSessionAdmin } from "../fakes/FakeSessionAdmin.js";
 import {
   type InMemoryData,
@@ -193,22 +190,21 @@ let cacheOn = false;
 function setup(
   data: InMemoryData = baseData(),
   gateway = new InMemoryWahaGateway(data),
-  transcription?: (
-    served: InMemoryWahaGateway | ReturnType<typeof createCachedGateway>,
-  ) => TranscriptionService,
+  transcription?: (served: WahaGateway) => TranscriptionService,
   sender = new RecordingSender(),
 ): Setup {
-  const served = cacheOn
-    ? createCachedGateway(
-        gateway,
-        createSqliteMessageStore(openCacheDatabase(":memory:"), testCipher()),
-        {
-          refreshHours: 48,
-          maxAgeDays: 0,
-          session: "default",
-        },
-      )
-    : gateway;
+  // The real read path (WAHA → message actions → cache when on) over an in-memory cache.db.
+  const {
+    gateway: served,
+    mapper,
+    messageActions,
+  } = wireMessageActions({
+    wahaGateway: gateway,
+    db: openCacheDatabase(":memory:"),
+    cipher: testCipher(),
+    session: "default",
+    cache: cacheOn ? { refreshHours: 48, maxAgeDays: 0 } : null,
+  });
   const config = loadConfig({
     WAHA_API_URL: WAHA_URL,
     WAHA_API_KEY: KEY,
@@ -254,7 +250,7 @@ function setup(
     tenantId: b.tenant.id,
     context: {
       gateway: served,
-      mapper: createEngineResolver(served),
+      mapper,
       config: b.config,
       links,
       transcription: transcription ? transcription(served) : DISABLED_TRANSCRIPTION,
@@ -263,6 +259,7 @@ function setup(
       uploadLinks,
       missions: null,
       schedules: null,
+      messageActions,
     },
     media: createMediaHandler({
       gateway: served,

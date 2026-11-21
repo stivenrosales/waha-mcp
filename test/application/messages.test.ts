@@ -2,10 +2,26 @@ import { describe, expect, it } from "vitest";
 import { decodeCursor, encodeCursor } from "../../src/application/cursor.js";
 import { fetchRange, getMessages } from "../../src/application/messages.js";
 import { InvalidInputError } from "../../src/domain/errors.js";
+import type { Reaction } from "../../src/domain/message.js";
 import { getEngineMapper } from "../../src/infrastructure/waha/engines/index.js";
 import { InMemoryWahaGateway, rawReaction, rawText } from "../fakes/InMemoryWahaGateway.js";
 
 const m = getEngineMapper("GOWS");
+
+/** A gateway that also serves stored reactions (as the message-actions decorator does). */
+class StoredReactionsGateway extends InMemoryWahaGateway {
+  readonly asked: string[][] = [];
+  constructor(
+    data: ConstructorParameters<typeof InMemoryWahaGateway>[0],
+    private readonly stored: Map<string, Reaction[]>,
+  ) {
+    super(data);
+  }
+  storedReactions(shortIds: string[]): Map<string, Reaction[]> {
+    this.asked.push(shortIds);
+    return new Map([...this.stored].filter(([id]) => shortIds.includes(id)));
+  }
+}
 const CHAT = "100000000000009@g.us";
 
 /** `n` messages, newest first (timestamps descending), ids M{n}..M1. */
@@ -107,6 +123,48 @@ describe("getMessages", () => {
     expect(messages.map((x) => x.text)).toEqual(["target", "other"]);
     expect(messages[0]?.reactions).toEqual([{ emoji: "👍", by: "200@lid" }]);
     expect(messages[1]?.reactions).toEqual([]);
+  });
+
+  it("get_messages fills reactions from the store", async () => {
+    const gw = new StoredReactionsGateway(
+      { messages: { [CHAT]: [rawText("M2", 1_000_300, "a"), rawText("M1", 1_000_100, "b")] } },
+      new Map([["M1", [{ emoji: "❤️", by: "300@lid" }]]]),
+    );
+    const { messages } = await getMessages(gw, m, { chatId: CHAT, limit: 50 });
+    expect(messages[0]?.reactions).toEqual([]);
+    expect(messages[1]?.reactions).toEqual([{ emoji: "❤️", by: "300@lid" }]);
+    expect(gw.asked).toEqual([["M2", "M1"]]);
+  });
+
+  it("a stored reaction by the same author replaces the engine one", async () => {
+    const raws = [
+      rawReaction("R1", 1_000_400, "M2", "👍", { sender: "200@lid" }),
+      rawReaction("R2", 1_000_350, "M2", "😮", { sender: "400@lid" }),
+      rawText("M2", 1_000_300, "target"),
+    ];
+    const gw = new StoredReactionsGateway(
+      { messages: { [CHAT]: raws } },
+      new Map([["M2", [{ emoji: "🎉", by: "200@lid" }]]]),
+    );
+    const out = await fetchRange(gw, m, { chatId: CHAT, cap: 10 });
+    expect(out.messages[0]?.reactions).toEqual([
+      { emoji: "😮", by: "400@lid" },
+      { emoji: "🎉", by: "200@lid" },
+    ]);
+  });
+
+  it("the owner's stored reaction is named by the owner's JID and dedupes the engine one", async () => {
+    const me = { id: "51000000002@c.us", lid: null };
+    const raws = [
+      rawReaction("R1", 1_000_400, "M2", "👍", { sender: me.id }),
+      rawText("M2", 1_000_300, "target"),
+    ];
+    const gw = new StoredReactionsGateway(
+      { messages: { [CHAT]: raws }, me },
+      new Map([["M2", [{ emoji: "🙏", by: "me" }]]]),
+    );
+    const { messages } = await getMessages(gw, m, { chatId: CHAT, limit: 50 });
+    expect(messages[0]?.reactions).toEqual([{ emoji: "🙏", by: me.id }]);
   });
 
   it("works for direct chats too", async () => {

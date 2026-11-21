@@ -1,3 +1,5 @@
+import type { Reaction } from "../message.js";
+
 export interface OpenedFile {
   body: ReadableStream<Uint8Array>;
   mimetype: string;
@@ -35,4 +37,9 @@ export interface WahaGateway {
    * (pass the returned array), or `null` when that page came straight from WAHA.
    */
   cacheNote?(page: unknown[]): string | null;
+  /**
+   * Only on a gateway with message actions: reactions received by webhook, per short message id
+   * (ids without any are absent). The owner is named `"me"`.
+   */
+  storedReactions?(shortIds: string[]): Map<string, Reaction[]>;
 }

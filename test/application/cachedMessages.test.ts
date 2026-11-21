@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { withMessageActions } from "../../src/application/actionsGateway.js";
 import { createCachedGateway } from "../../src/application/cachedMessages.js";
+import { createMessageActions } from "../../src/application/messageActions.js";
 import { fetchRange, getMessages } from "../../src/application/messages.js";
+import { createOwnerCheck } from "../../src/application/ownerCheck.js";
 import type { WahaGateway } from "../../src/domain/ports/WahaGateway.js";
+import { createSqliteMessageActionStore } from "../../src/infrastructure/cache/sqliteMessageActionStore.js";
 import {
   createSqliteMessageStore,
   openCacheDatabase,
 } from "../../src/infrastructure/cache/sqliteMessageStore.js";
+import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
 import { getEngineMapper } from "../../src/infrastructure/waha/engines/index.js";
 import { InMemoryWahaGateway, rawReaction, rawText } from "../fakes/InMemoryWahaGateway.js";
 import { testCipher } from "../fakes/testCipher.js";
@@ -351,5 +356,90 @@ describe("cached gateway", () => {
     const s = setup(history(1));
     expect(await s.gw.getSession()).toEqual({ engine: "GOWS", status: "WORKING" });
     expect(s.waha.count("getSession")).toBe(1);
+  });
+});
+
+describe("cached gateway over message actions", () => {
+  /** The real runtime order: WAHA → actions decorator → cache (or no cache). */
+  function wired(cacheOn: boolean) {
+    const data = { messages: { [CHAT]: history(5) } };
+    const waha = new InMemoryWahaGateway(data);
+    const db = openCacheDatabase(":memory:");
+    const cipher = testCipher();
+    const messages = createSqliteMessageStore(db, cipher);
+    const transcripts = createSqliteTranscriptStore(db, cipher);
+    const store = createSqliteMessageActionStore(db, cipher);
+    const ensureOwner = createOwnerCheck(waha, transcripts, "default");
+    const mapper = async () => m;
+    const actionsGw = withMessageActions(waha, { store, mapper, ensureOwner });
+    let t = (NEWEST + 60) * 1000;
+    const gw = cacheOn
+      ? createCachedGateway(actionsGw, messages, {
+          refreshHours: 48,
+          maxAgeDays: 0,
+          session: "default",
+          now: () => t,
+          ensureOwner,
+        })
+      : actionsGw;
+    const actions = createMessageActions({
+      store,
+      messages: cacheOn ? messages : null,
+      transcripts,
+      mapper,
+      ensureOwner,
+    });
+    return {
+      gw,
+      messages,
+      actions,
+      store,
+      advance: (s: number) => {
+        t += s * 1000;
+      },
+    };
+  }
+
+  it("refresh after revoke stores the deleted payload", async () => {
+    const s = wired(true);
+    await fetchRange(s.gw, m, { chatId: CHAT, cap: 100 });
+    await s.actions.applyRevoke("M3", NEWEST + 100);
+    s.advance(61); // past FRESH_MS: the head is re-read from WAHA, which still serves "msg 3"
+    const r = await fetchRange(s.gw, m, { chatId: CHAT, cap: 100 });
+    expect(r.messages.find((x) => x.id.includes("_M3_"))?.type).toBe("deleted");
+    const rows = s.messages.findByShortId("M3"); // opened with the cipher
+    expect(rows).toHaveLength(1);
+    expect(m.message(rows[0]?.raw).type).toBe("deleted");
+    expect(JSON.stringify(rows)).not.toContain("msg 3");
+  });
+
+  it("refresh after edit stores the edited payload", async () => {
+    const s = wired(true);
+    await fetchRange(s.gw, m, { chatId: CHAT, cap: 100 });
+    await s.actions.applyEdit("M3", "fixed", NEWEST + 100);
+    s.advance(61);
+    await fetchRange(s.gw, m, { chatId: CHAT, cap: 100 });
+    const rows = s.messages.findByShortId("M3");
+    expect(m.message(rows[0]?.raw)).toMatchObject({ text: "fixed", edited: true });
+    expect(JSON.stringify(rows)).not.toContain("msg 3");
+  });
+
+  it.each([true, false])(
+    "a revoke before the first read never shows the text (cache %s)",
+    async (on) => {
+      const s = wired(on);
+      await s.actions.applyRevoke("M2", NEWEST + 100);
+      const r = await fetchRange(s.gw, m, { chatId: CHAT, cap: 100 });
+      expect(r.messages.find((x) => x.id.includes("_M2_"))?.type).toBe("deleted");
+      expect(JSON.stringify(r)).not.toContain("msg 2");
+    },
+  );
+
+  it("storedReactions passes through the cache", async () => {
+    const s = wired(true);
+    await s.actions.applyReaction({ messageId: "M1", reactor: "a@lid", emoji: "🔥", ts: 1 });
+    expect(s.gw.storedReactions?.(["M1"])).toEqual(
+      new Map([["M1", [{ emoji: "🔥", by: "a@lid" }]]]),
+    );
   });
 });

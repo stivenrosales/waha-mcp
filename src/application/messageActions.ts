@@ -13,27 +13,28 @@ export interface MessageActions {
   applyEdit(shortId: string, text: string, at: number): Promise<void>;
   /** Stores the revoke, replaces every cached copy by a deleted payload and drops its transcript. */
   applyRevoke(shortId: string, at: number): Promise<void>;
-  applyReaction(r: StoredReaction): void;
-  applyVote(v: StoredVote): void;
-  applyFailedVote(q: { pollId: string; voter: string; ts: number }): void;
-  pollVotes(pollId: string): { votes: StoredVote[]; failed: number };
+  applyReaction(r: StoredReaction): Promise<void>;
+  applyVote(v: StoredVote): Promise<void>;
+  applyFailedVote(q: { pollId: string; voter: string; ts: number }): Promise<void>;
+  pollVotes(pollId: string): Promise<{ votes: StoredVote[]; failed: number }>;
 }
 
 /**
  * Applies edits, revokes, reactions and poll votes to the action store and to cached payloads.
  * Never logs or returns message text.
  *
- * Owner seam: these write paths do not check which account the store belongs to; the caller (the
- * webhook handler) must have verified it before calling. The full owner check lands with the
- * webhook wiring.
+ * Every call first runs `ensureOwner` (shared with the gateways over the same `cache.db`), so a
+ * store left by another account is wiped before anything is written or read. When the owner
+ * cannot be resolved the call throws with nothing written and the caller can retry.
  */
 export function createMessageActions(deps: {
   store: MessageActionStore;
   messages: MessageStore | null;
   transcripts: Pick<TranscriptStore, "deleteByShortId">;
   mapper: () => Promise<EngineMapper>;
+  ensureOwner: () => Promise<void>;
 }): MessageActions {
-  const { store, messages, transcripts } = deps;
+  const { store, messages, transcripts, ensureOwner } = deps;
 
   /**
    * Resolves everything that can fail (cached rows, mapper lookup) BEFORE any write, so a failure
@@ -57,6 +58,7 @@ export function createMessageActions(deps: {
 
   return {
     async applyEdit(shortId, text, at) {
+      await ensureOwner();
       const rewrite = await prepareRewrite(shortId);
       store.putOverride(shortId, { kind: "edited", text, at });
       // The stored override wins: a revoke (final) or a newer edit may already be there.
@@ -64,14 +66,27 @@ export function createMessageActions(deps: {
       if (current) rewrite(current);
     },
     async applyRevoke(shortId, at) {
+      await ensureOwner();
       const rewrite = await prepareRewrite(shortId);
       store.putOverride(shortId, { kind: "revoked", at });
       transcripts.deleteByShortId(shortId);
       rewrite({ kind: "revoked", at });
     },
-    applyReaction: (r) => store.putReaction(r),
-    applyVote: (v) => store.putVote(v),
-    applyFailedVote: (q) => store.putFailedVote(q),
-    pollVotes: (pollId) => store.votes(pollId),
+    async applyReaction(r) {
+      await ensureOwner();
+      store.putReaction(r);
+    },
+    async applyVote(v) {
+      await ensureOwner();
+      store.putVote(v);
+    },
+    async applyFailedVote(q) {
+      await ensureOwner();
+      store.putFailedVote(q);
+    },
+    async pollVotes(pollId) {
+      await ensureOwner();
+      return store.votes(pollId);
+    },
   };
 }

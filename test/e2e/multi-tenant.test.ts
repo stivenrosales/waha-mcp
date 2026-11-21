@@ -21,9 +21,10 @@ import { createSqliteEventStore } from "../../src/infrastructure/missions/sqlite
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
 import { migrateToMultiTenant } from "../../src/infrastructure/tenants/migrate.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
-import type {
-  buildTenantRuntime,
-  TenantRuntime,
+import {
+  type buildTenantRuntime,
+  type TenantRuntime,
+  wireMessageActions,
 } from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { createFsUploadStore } from "../../src/infrastructure/uploads/fsUploadStore.js";
@@ -207,6 +208,13 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
         uploadLinks,
         missions: null,
         schedules: null,
+        messageActions: wireMessageActions({
+          wahaGateway: f.gateway,
+          db: openCacheDatabase(":memory:"),
+          cipher: createTenantCipher(b.dek, b.tenant.id),
+          session: b.tenant.wahaSession,
+          cache: null,
+        }).messageActions,
       },
       media: createMediaHandler({ gateway: f.gateway, links, maxBytes: b.config.mediaMaxBytes }),
       upload: createUploadHandler({

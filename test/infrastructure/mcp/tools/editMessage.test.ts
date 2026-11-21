@@ -26,18 +26,20 @@ function harness() {
   const sender = new RecordingSender();
   const applyEdit = vi.fn(async (..._a: unknown[]) => {});
   const ownerSent = vi.fn(async () => {});
+  const logs: string[] = [];
   const deps = {
     mapper: async () => gowsMapper,
     config,
     sender,
     messageActions: { applyEdit } as unknown as MessageActions,
     missions: { ownerSent },
+    logger: { info: (m: string) => logs.push(m) },
   } as unknown as ToolDeps;
   const call = async (input: Record<string, unknown>) => {
     const r = await createToolHandler(tool, deps)(tool.inputSchema.parse(input));
     return { isError: r.isError === true, text: (r.content[0] as { text: string }).text };
   };
-  return { sender, applyEdit, ownerSent, call };
+  return { sender, applyEdit, ownerSent, logs, call };
 }
 
 describe("edit_message", () => {
@@ -46,6 +48,12 @@ describe("edit_message", () => {
     const r = await h.call({ message_id: ID, text: "**hola**" });
     expect(r.isError).toBe(false);
     expect(r.text).toContain("*hola*");
+    expect(tool.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
     expect(h.sender.calls).toEqual([
       {
         method: "editMessage",
@@ -76,6 +84,8 @@ describe("edit_message", () => {
     const r = await h.call({ message_id: ID, text: "nuevo" });
     expect(r.isError).toBe(false);
     expect(r.text).toContain("The local copy will update on the next sync.");
+    expect(h.logs).toContain("message-action kind=edit outcome=local-apply-failed error=Error");
+    expect(h.logs.join()).not.toContain("nuevo");
   });
 
   it("explains a too-late edit", async () => {

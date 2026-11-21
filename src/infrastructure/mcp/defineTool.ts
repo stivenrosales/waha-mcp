@@ -56,6 +56,8 @@ export interface ToolRunContext {
   schedules: ScheduleService | null;
   /** This tenant's stored edits, revokes, reactions and poll votes. */
   messageActions: MessageActions;
+  /** The call's logger (tool, kind and outcome only). */
+  logger: Logger;
 }
 
 /** A tool returns text plus structured data, or (only `get_media`) raw content blocks. */
@@ -226,6 +228,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         missions: deps.missions ?? null,
         schedules: deps.schedules ?? null,
         messageActions: deps.messageActions,
+        logger,
       });
       const ms = Date.now() - start;
       logger.info(`tool=${def.name} ms=${ms} result=ok`);

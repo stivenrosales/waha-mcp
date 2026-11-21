@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { InvalidInputError } from "../../../domain/errors.js";
 import type { SentMessage } from "../../../domain/ports/WhatsAppSender.js";
-import type { ToolRunContext } from "../defineTool.js";
+import type { Logger, ToolRunContext } from "../defineTool.js";
 
 /** WhatsApp's formatting syntax, repeated wherever the model writes text that will be sent. */
 export const WHATSAPP_FORMAT_RULES = `Write in WhatsApp formatting, not Markdown:
@@ -72,6 +72,9 @@ export async function actThenApply(q: {
   call: () => Promise<unknown>;
   apply: () => Promise<unknown>;
   tooLate: string;
+  /** Where a swallowed local-apply failure is noted (kind and outcome only, never text). */
+  logger: Logger;
+  kind: string;
 }): Promise<{ localStale: boolean }> {
   try {
     await q.call();
@@ -83,7 +86,10 @@ export async function actThenApply(q: {
   try {
     await q.apply();
     return { localStale: false };
-  } catch {
+  } catch (err) {
+    q.logger.info(
+      `message-action kind=${q.kind} outcome=local-apply-failed error=${err instanceof Error ? err.name : "unknown"}`,
+    );
     return { localStale: true };
   }
 }

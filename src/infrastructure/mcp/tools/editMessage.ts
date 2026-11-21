@@ -2,7 +2,7 @@ import { z } from "zod";
 import { assertTextLength } from "../../../application/send.js";
 import { toWhatsAppText } from "../../../application/whatsappFormat.js";
 import { assertOwnMessage, parseMessageId } from "../../../domain/messageId.js";
-import { IDEMPOTENT_WRITE_ANNOTATIONS, type ToolDefinition } from "../defineTool.js";
+import { SEND_ANNOTATIONS, type ToolDefinition } from "../defineTool.js";
 import { actThenApply, LOCAL_STALE_NOTE, WHATSAPP_FORMAT_RULES } from "./sendShared.js";
 
 const inputSchema = z.object({
@@ -21,7 +21,7 @@ export const editMessageTool: ToolDefinition<typeof inputSchema, typeof outputSc
   description: `Replaces the text of a message the owner sent. Only the owner's own messages (ids that start with true_); WhatsApp only allows editing recent messages. Edit only when the owner explicitly asked in this conversation; show them the message (text and chat) and the new text first. Never retry on your own.\n\n${WHATSAPP_FORMAT_RULES}`,
   inputSchema,
   outputSchema,
-  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
+  annotations: SEND_ANNOTATIONS,
   async run(input, ctx) {
     const parsed = parseMessageId(input.message_id);
     assertOwnMessage(parsed, "edit");
@@ -32,6 +32,8 @@ export const editMessageTool: ToolDefinition<typeof inputSchema, typeof outputSc
         ctx.sender.editMessage({ chatId: parsed.chatId, messageId: input.message_id, text }),
       apply: () =>
         ctx.messageActions.applyEdit(parsed.shortId, text, Math.floor(Date.now() / 1000)),
+      logger: ctx.logger,
+      kind: "edit",
       tooLate: "WhatsApp only allows editing recent messages.",
     });
     return {

@@ -391,25 +391,15 @@ for (const cache of [false, true])
         "transcribe_audio",
       ];
       expect(tools.map((t) => t.name).sort()).toEqual([...read, ...SEND_TOOLS].sort());
-      const annotationsOf: Record<string, unknown> = {
-        edit_message: {
-          readOnlyHint: false,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: true,
-        },
-      };
       for (const t of tools) {
         if (read.includes(t.name)) expect(t.annotations).toEqual({ readOnlyHint: true });
         else
-          expect(t.annotations).toEqual(
-            annotationsOf[t.name] ?? {
-              readOnlyHint: false,
-              destructiveHint: false,
-              idempotentHint: false,
-              openWorldHint: true,
-            },
-          );
+          expect(t.annotations).toEqual({
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+          });
       }
     });
 

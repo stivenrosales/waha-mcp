@@ -69,7 +69,10 @@ const TENANT_ID = /^[A-Za-z0-9_-]+$/;
  * What tools of one tenant run against. `mapper` is the lazy engine lookup
  * (`createEngineResolver`), resolved per tool call by `createToolHandler`.
  */
-export type TenantToolContext = Omit<ToolRunContext, "mediaIdleTimeoutMs" | "mapper" | "admin"> & {
+export type TenantToolContext = Omit<
+  ToolRunContext,
+  "mediaIdleTimeoutMs" | "mapper" | "admin" | "logger"
+> & {
   mapper: () => Promise<EngineMapper>;
 };
 

@@ -1,0 +1,100 @@
+# waha-mcp + WAHA (GOWS) on one machine. Setup: docs/self-hosting.md (humans), AGENTS.md (agents).
+#
+#   sh scripts/init-env.sh --domain mcp.example.com   # VPS: writes .env with generated secrets
+#   sh scripts/init-env.sh                            # laptop (http://localhost:3000)
+#   docker compose up -d --build                      # laptop, or VPS behind your own proxy
+#   docker compose --profile https up -d --build      # VPS with the bundled Caddy (HTTPS)
+#
+# State lives in named volumes: waha-sessions and waha-media (WAHA), waha-mcp-data (SQLite:
+# logins, tenants, encrypted message cache). Back them up together with MASTER_KEY.
+
+name: waha-mcp
+
+services:
+  waha:
+    image: ${WAHA_IMAGE:-devlikeapro/waha:latest}
+    restart: unless-stopped
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WAHA_API_KEY: ${WAHA_API_KEY:?WAHA_API_KEY is required (run scripts/init-env.sh)}
+      WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME:-admin}
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:?WAHA_DASHBOARD_PASSWORD is required (run scripts/init-env.sh)}
+      WHATSAPP_SWAGGER_USERNAME: ${WAHA_DASHBOARD_USERNAME:-admin}
+      WHATSAPP_SWAGGER_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
+      # The owner's session exists and starts on every boot; its QR is printed to the logs.
+      WHATSAPP_START_SESSION: ${WAHA_SESSION:-default}
+      WHATSAPP_RESTART_ALL_SESSIONS: "True"
+      WAHA_PRINT_QR: "True"
+      TZ: ${TIMEZONE:-UTC}
+    volumes:
+      - waha-sessions:/app/.sessions
+      - waha-media:/app/.media
+    # Never public: only this machine reaches WAHA (dashboard over an SSH tunnel from a VPS).
+    ports:
+      - "127.0.0.1:${WAHA_HOST_PORT:-3001}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/ping').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  waha-mcp:
+    build: .
+    image: waha-mcp:local
+    restart: unless-stopped
+    depends_on:
+      waha:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Fixed for this stack: WAHA over the compose network, state in the named volume.
+      WAHA_API_URL: http://waha:3000
+      DATA_DIR: /data
+      PORT: "3000"
+    volumes:
+      - waha-mcp-data:/data
+    ports:
+      - "${WAHA_MCP_BIND:-127.0.0.1}:${WAHA_MCP_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    # On SIGTERM the server waits up to 20 s for a running mission turn.
+    stop_grace_period: 30s
+
+  # HTTPS for a VPS: `docker compose --profile https up -d`. Needs DOMAIN, its DNS record and
+  # ports 80/443. Certificates come from Let's Encrypt and are kept in caddy-data.
+  caddy:
+    image: caddy:2.10
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      waha-mcp:
+        condition: service_healthy
+    command: ["caddy", "reverse-proxy", "--from", "${DOMAIN:-}", "--to", "waha-mcp:3000"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      default:
+        # WAHA posts webhooks to PUBLIC_BASE_URL; this alias keeps that traffic inside the stack.
+        aliases:
+          - ${DOMAIN:-caddy.invalid}
+
+volumes:
+  waha-sessions:
+  waha-media:
+  waha-mcp-data:
+  caddy-data:
+  caddy-config:

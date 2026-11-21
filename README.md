@@ -144,6 +144,8 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 
 ## Multi-tenant
 
+A fresh install is **single-owner**: it serves only the admin's own WhatsApp account. Set `MULTI_TENANT=true` to turn invites on. With `MULTI_TENANT` unset, the server decides at startup: multi-tenant when any tenant besides the admin's exists (an existing deployment with members keeps working as before), single-owner otherwise. In single-owner mode the admin keeps the usage tools (`get_tool_usage`, `get_transcription_usage`, `get_llm_usage`), the tenant tools below are not listed, and `/invite/:token` answers 404. `MULTI_TENANT=false` forces single-owner even with members: they can still log in and use their tools, but nobody can invite, revoke or delete them until it is turned back on. The startup log line says which mode is on (`mode: single-owner` or `mode: multi-tenant`).
+
 Each tenant is one WhatsApp account with one user. Tenant #1 is the admin's: it uses `WAHA_SESSION` and is created on first start from `ADMIN_USERNAME` and `ADMIN_PASSWORD`. It cannot be revoked, restored or deleted.
 
 1. The admin asks the model to `create_invite` for a friend and sends them the link (single use, valid 72 hours).
@@ -152,7 +154,7 @@ Each tenant is one WhatsApp account with one user. Tenant #1 is the admin's: it 
 
 If WhatsApp disconnects later, tools say so and point to `<base>/pair` to scan again. A forgotten password is reset with `reset_password` (a single-use link); the admin's own password can also be reset by starting with `ADMIN_PASSWORD_RESET=1` and the new `ADMIN_PASSWORD`, which also signs the admin out of every client. It applies on every start while it is set, so remove `ADMIN_PASSWORD_RESET` once you have logged in again.
 
-Admin tools, listed only for the admin (members never see them):
+Admin tools, listed only for the admin (members never see them; in single-owner mode only the three usage tools):
 
 | Tool                      | What it does                                                                                                                                                                 |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -323,6 +325,7 @@ All configuration is through environment variables.
 | `ADMIN_PASSWORD`                     | yes      |                              | Admin password (12+ characters); read only to create the admin or reset it.               |
 | `ADMIN_PASSWORD_RESET`               | no       | `false`                      | `1`/`true`: reset admin password and sessions on every start; then unset.                 |
 | `WAHA_SESSION`                       | no       | `default`                    | WAHA session of the admin's tenant (tenant #1).                                           |
+| `MULTI_TENANT`                       | no       | auto                         | `true`: invites and tenant tools on; `false`: owner only; unset: on if members exist.     |
 | `DATA_DIR`                           | no       | `/data`                      | `auth.db` (users, tenants, OAuth), media secret, `tenants/<id>/` data.                    |
 | `PORT`                               | no       | `3000`                       | HTTP port.                                                                                |
 | `TIMEZONE`                           | no       | `UTC`                        | IANA time zone for dates and day boundaries (`America/Lima`).                             |

@@ -307,6 +307,19 @@ describe("loadConfig", () => {
       );
     });
 
+    it("MULTI_TENANT is auto (null) when unset or empty and accepts 1/true/0/false", () => {
+      expect(loadConfig(minimal).multiTenant).toBeNull();
+      expect(loadConfig({ ...minimal, MULTI_TENANT: "" }).multiTenant).toBeNull();
+      expect(loadConfig({ ...minimal, MULTI_TENANT: " " }).multiTenant).toBeNull();
+      expect(loadConfig({ ...minimal, MULTI_TENANT: "1" }).multiTenant).toBe(true);
+      expect(loadConfig({ ...minimal, MULTI_TENANT: "TRUE" }).multiTenant).toBe(true);
+      expect(loadConfig({ ...minimal, MULTI_TENANT: "0" }).multiTenant).toBe(false);
+      expect(loadConfig({ ...minimal, MULTI_TENANT: "false" }).multiTenant).toBe(false);
+      expect(() => loadConfig({ ...minimal, MULTI_TENANT: "yes" })).toThrow(
+        'Invalid configuration:\n- MULTI_TENANT must be "1", "true", "0" or "false".',
+      );
+    });
+
     it("MASTER_KEY_PREVIOUS is optional and validated like MASTER_KEY", () => {
       const prev = Buffer.alloc(32, 9).toString("base64");
       const c = loadConfig({ ...minimal, MASTER_KEY_PREVIOUS: prev });

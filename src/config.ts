@@ -49,6 +49,11 @@ export interface Config {
   missions: MissionsConfig | null;
   /** Shared secret WAHA signs webhook deliveries with; null turns webhooks off. Never logged. */
   webhookSecret: string | null;
+  /**
+   * `MULTI_TENANT`: true turns invites and tenant management on, false keeps the server to its
+   * owner; null (unset) decides at startup from the stored tenants (see `composeApp`).
+   */
+  multiTenant: boolean | null;
 }
 
 export interface MissionsConfig {
@@ -204,6 +209,18 @@ const flag = (name: string) =>
         .transform((v) => v === "1" || v === "true"),
     );
 
+/** Like `flag`, but unset or empty is null ("auto") instead of false. */
+const optionalFlag = (name: string) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "").trim().toLowerCase())
+    .pipe(
+      z
+        .enum(["", "0", "false", "1", "true"], `${name} must be "1", "true", "0" or "false".`)
+        .transform((v) => (v === "" ? null : v === "1" || v === "true")),
+    );
+
 const envSchema = z
   .object({
     WAHA_API_URL: required("WAHA_API_URL")
@@ -229,6 +246,7 @@ const envSchema = z
       `ADMIN_PASSWORD must be at least ${ADMIN_PASSWORD_MIN} characters.`,
     ),
     ADMIN_PASSWORD_RESET: flag("ADMIN_PASSWORD_RESET"),
+    MULTI_TENANT: optionalFlag("MULTI_TENANT"),
     WAHA_SESSION: z.string().min(1, "WAHA_SESSION must not be empty.").default("default"),
     DATA_DIR: z.string().min(1, "DATA_DIR must not be empty.").default("/data"),
     PORT: positiveInt("PORT", 3000),
@@ -392,6 +410,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
           }
         : null,
     webhookSecret: v.WAHA_WEBHOOK_SECRET ?? null,
+    multiTenant: v.MULTI_TENANT,
     missions:
       v.OPENROUTER_API_KEY && v.WAHA_WEBHOOK_SECRET
         ? {

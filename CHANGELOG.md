@@ -13,6 +13,9 @@
 - New tool `delete_message`: deletes a message you sent, for everyone; it cannot be undone. The text is removed from the message cache, transcripts and overrides; mission logs, schedule history and WAHA's own storage keep their own retention.
 - New tools `mark_read` and `mark_unread`: mark a whole chat as read or unread. They do not take over a mission.
 
+- Single-owner by default: a new `MULTI_TENANT` variable. A fresh install serves only the admin's account (usage tools only; `list_tenants`, `create_invite`, `reset_password`, `revoke_tenant`, `restore_tenant` and `delete_tenant` are not listed and `/invite/:token` answers 404). `MULTI_TENANT=true` turns invites on; unset, a server that already has members stays multi-tenant. The startup log shows `mode: single-owner` or `mode: multi-tenant`.
+- Self-hosting with Docker Compose: `docker-compose.yml` runs WAHA (GOWS) and waha-mcp together, with an optional Caddy HTTPS proxy; `scripts/init-env.sh` generates every secret into `.env`. See `docs/self-hosting.md` and `AGENTS.md`.
+
 ### Upgrade
 
 - The first start after upgrading reconfigures each active session's webhook (new events), and WAHA restarts each session once.

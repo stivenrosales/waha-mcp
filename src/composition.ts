@@ -26,9 +26,13 @@ import { generateDek, wrapDek } from "./infrastructure/crypto/envelope.js";
 import { createApp } from "./infrastructure/http/app.js";
 import { createOpenRouterClaude } from "./infrastructure/llm/openRouterClaude.js";
 import type { Logger } from "./infrastructure/mcp/defineTool.js";
-import { SERVER_INSTRUCTIONS } from "./infrastructure/mcp/instructions.js";
+import {
+  ADMIN_INSTRUCTIONS,
+  OWNER_INSTRUCTIONS,
+  SERVER_INSTRUCTIONS,
+} from "./infrastructure/mcp/instructions.js";
 import { createMcpServer } from "./infrastructure/mcp/server.js";
-import { createAdminTools } from "./infrastructure/mcp/tools/admin/index.js";
+import { createAdminTools, createUsageTools } from "./infrastructure/mcp/tools/admin/index.js";
 import { createTools } from "./infrastructure/mcp/tools/index.js";
 import { missionTenantPort } from "./infrastructure/missions/tenantPort.js";
 import { scheduleTenantPort } from "./infrastructure/schedules/tenantPort.js";
@@ -79,6 +83,11 @@ export interface ComposedApp {
   registry: TenantRegistry;
   /** Tools every tenant gets (admin tools excluded). */
   toolCount: number;
+  /**
+   * Invites and tenant management on (`MULTI_TENANT`, or, when unset, whether any tenant besides
+   * the admin's exists at startup). Off: the admin gets the usage tools only and `/invite` 404s.
+   */
+  multiTenant: boolean;
   /**
    * Points every active tenant's WAHA session at `/webhooks/waha` (webhooks on), one by one;
    * never throws. A no-op when webhooks are off.
@@ -160,10 +169,13 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     ...(webhook ? { webhook } : {}),
   });
   const tools = createTools();
+  // Decided once, at startup: a fresh install (only the admin's tenant) is single-owner.
+  const multiTenant = config.multiTenant ?? tenants.listTenants().length > 1;
   const mcp = createMcpServer({
     tools,
-    adminTools: createAdminTools(),
+    adminTools: multiTenant ? createAdminTools() : createUsageTools(),
     instructions: SERVER_INSTRUCTIONS,
+    adminInstructions: multiTenant ? ADMIN_INSTRUCTIONS : OWNER_INSTRUCTIONS,
     config,
     registry,
     admin,
@@ -190,6 +202,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       publicBaseUrl: config.publicBaseUrl,
       limiter,
       logger,
+      invites: multiTenant,
       ...(webhook ? { webhook } : {}),
     }),
     guard: bearerGuard({ store, tenants, publicBaseUrl: config.publicBaseUrl }),
@@ -214,7 +227,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   const configureWebhooks = async (): Promise<void> => {
     if (webhook) await configureTenantWebhooks({ tenants, sessions, target: webhook, logger });
   };
-  return { app, registry, toolCount: tools.length, configureWebhooks };
+  return { app, registry, toolCount: tools.length, multiTenant, configureWebhooks };
 }
 
 /**

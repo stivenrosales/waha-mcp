@@ -234,6 +234,8 @@ function setup(
     MEDIA_INLINE_MAX_BYTES: String(INLINE_MAX),
     MEDIA_MAX_BYTES: String(MAX_BYTES),
     DATA_DIR: scratch(),
+    // A member tenant is added after composing: this suite runs a multi-tenant server.
+    MULTI_TENANT: "true",
   });
   const db = openAuthDatabase(":memory:");
   const store = createAuthStore(db);

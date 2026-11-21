@@ -58,6 +58,8 @@ export function createOnboardingRoutes(deps: {
   cookieSecret: Uint8Array;
   publicBaseUrl: string;
   limiter: LoginLimiter;
+  /** False on a single-owner server: every `/invite/:token` answers 404 (default true). */
+  invites?: boolean;
   now?: () => number;
   /** The missions webhook a session gets before it is (re)started; absent when missions are off. */
   webhook?: WebhookTarget;
@@ -170,14 +172,20 @@ export function createOnboardingRoutes(deps: {
 
   // --- Invite: choose username and password ---
 
+  const invitesOn = deps.invites ?? true;
+  const invitesOff = (html: Html): Response =>
+    html(messagePage("Enlace no válido", LINK_INVALID), 404);
+
   app.get("/invite/:token", (c) => {
     const html = page(c);
+    if (!invitesOn) return invitesOff(html);
     const link = linkProblem(html, c.req.param("token"), "invite");
     return "response" in link ? link.response : html(invitePage());
   });
 
   app.post("/invite/:token", limitBody, async (c) => {
     const html = page(c);
+    if (!invitesOn) return invitesOff(html);
     if (!sameOrigin(c)) return crossSite(html);
     const token = c.req.param("token");
     const link = linkProblem(html, token, "invite");

@@ -9,13 +9,23 @@ import { resetPasswordTool } from "./resetPassword.js";
 import { restoreTenantTool } from "./restoreTenant.js";
 import { revokeTenantTool } from "./revokeTenant.js";
 
-/** The tenant-management tools. Registered for the admin role only (see server wiring). */
-export function createAdminTools(): ToolDefinition[] {
+/**
+ * The usage tools: what the owner of a single-owner server keeps (`MULTI_TENANT` off). Registered
+ * for the admin role only (see server wiring).
+ */
+export function createUsageTools(): ToolDefinition[] {
   return [
-    listTenantsTool,
     getTranscriptionUsageTool,
     getToolUsageTool,
     getLlmUsageTool,
+  ] as unknown as ToolDefinition[];
+}
+
+/** The tenant-management tools plus the usage tools. Registered for the admin role only. */
+export function createAdminTools(): ToolDefinition[] {
+  return [
+    listTenantsTool,
+    ...createUsageTools(),
     createInviteTool,
     resetPasswordTool,
     revokeTenantTool,

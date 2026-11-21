@@ -174,7 +174,7 @@ Writing system_prompt (suggestions; write it however fits the task):
 
 ${WHATSAPP_FORMAT_RULES}
 
-The server paces messages, avoids quiet hours for messages it starts and enforces caps (active missions, new contacts per day, monthly budget).`,
+The server paces messages, avoids quiet hours for messages it starts and enforces caps (active missions, new contacts per day, monthly budget). It also appends to system_prompt a description of the owner's writing style in that chat (length, emojis, tone, language), derived from the owner's own recent messages there, so the agent writes like the owner.`,
   inputSchema: startInput,
   outputSchema: startOutput,
   annotations: SEND_ANNOTATIONS,

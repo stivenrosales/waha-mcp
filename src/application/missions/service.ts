@@ -31,6 +31,11 @@ export interface MissionServiceDeps {
   hasHistory(chatId: string): Promise<boolean>;
   /** Phone JID behind a `@lid` (chat ids are matched in both forms). */
   lookupLid(lid: string): Promise<string | null>;
+  /**
+   * The owner's writing style in this chat (`ownerStyleHint` over the owner's recent messages
+   * there); null when there is too little to imitate. Absent: no style is added.
+   */
+  ownerStyle?(chatId: string): Promise<string | null>;
   /** Mission ids and outcomes only; never content. */
   logger: { info(message: string): void };
 }
@@ -227,10 +232,21 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
         // The agent writes the closing line itself; the column only says whether to send one.
         closingMessage: q.closingMessage ? "yes" : null,
       });
+      // Appended once to the stored prompt, so every turn sends the same system prompt (cache).
+      let style: string | null = null;
+      try {
+        style = (await deps.ownerStyle?.(chatId)) ?? null;
+      } catch (error) {
+        deps.logger.info(`mission style=unavailable error=${errorName(error)}`);
+      }
       startMissionContent(
         log,
         mission.id,
-        { systemPrompt: q.systemPrompt, objective: q.objective, doneWhen: q.doneWhen },
+        {
+          systemPrompt: style ? `${q.systemPrompt}\n\n${style}` : q.systemPrompt,
+          objective: q.objective,
+          doneWhen: q.doneWhen,
+        },
         iso(now),
       );
       engine.wake();

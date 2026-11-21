@@ -56,7 +56,13 @@ const noLlm: LlmClient = {
   },
 };
 
-function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
+function harness(
+  opts: {
+    spend?: number;
+    withHistory?: string[];
+    ownerStyle?: (chatId: string) => Promise<string | null>;
+  } = {},
+) {
   let now = T0;
   const authDb = new DatabaseSync(":memory:");
   const store = createSqliteMissionStore(authDb, () => now.toISOString());
@@ -140,6 +146,7 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
       hasHistory: async (chatId) => history.has(chatId),
       lookupLid: async (lid) => (lid === CHAT_LID ? CHAT : null),
       logger: { info: (m: string) => lines.push(m) },
+      ...(opts.ownerStyle ? { ownerStyle: opts.ownerStyle } : {}),
     });
   const service = serviceFor(TENANT);
   const deps = (missions: MissionService | null): ToolDeps =>
@@ -350,6 +357,49 @@ describe("mission tools", () => {
     const r = await h.call("start_mission", h.startInput({ chat_id: "120363000000@g.us" }));
     expect(r).toMatchObject({ isError: true, text: "Group missions are not available yet." });
     expect(h.store.list(TENANT)).toEqual([]);
+  });
+
+  it("appends the owner's writing style in that chat to the stored system prompt", async () => {
+    const asked: string[] = [];
+    const h = harness({
+      ownerStyle: async (chatId) => {
+        asked.push(chatId);
+        return "Owner's writing style in this chat: very short messages.";
+      },
+    });
+    const r = await h.call("start_mission", h.startInput({ chat_id: CHAT_LID }));
+    expect(r.isError).toBe(false);
+    const [m] = h.store.list(TENANT);
+    // Read under the chat id the mission is stored with.
+    expect(asked).toEqual([m?.chatId]);
+    expect(h.log.read(m?.id as string)[0]).toMatchObject({
+      kind: "prompt",
+      body: {
+        text: "You are Stiven's assistant.\n\nOwner's writing style in this chat: very short messages.",
+      },
+    });
+  });
+
+  it("starts without a style when there is none or it cannot be read (logged without content)", async () => {
+    const none = harness({ ownerStyle: async () => null });
+    await none.call("start_mission", none.startInput());
+    const [a] = none.store.list(TENANT);
+    expect(none.log.read(a?.id as string)[0]?.body).toEqual({
+      text: "You are Stiven's assistant.",
+    });
+    const failing = harness({
+      ownerStyle: async () => {
+        throw new Error("WAHA down with secret details");
+      },
+    });
+    const r = await failing.call("start_mission", failing.startInput());
+    expect(r.isError).toBe(false);
+    const [b] = failing.store.list(TENANT);
+    expect(failing.log.read(b?.id as string)[0]?.body).toEqual({
+      text: "You are Stiven's assistant.",
+    });
+    expect(failing.lines).toContain("mission style=unavailable error=Error");
+    expect(failing.lines.join("\n")).not.toContain("secret details");
   });
 
   it("starts a mission: stores the prompt and spec, wakes the engine, reports id and deadline", async () => {

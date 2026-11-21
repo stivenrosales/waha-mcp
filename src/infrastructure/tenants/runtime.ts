@@ -34,6 +34,7 @@ import { createMediaHandler } from "../media/mediaRoute.js";
 import { createSignedLinks } from "../media/signedLink.js";
 import { createSealedMissionLog, type MissionLog } from "../missions/sealedMissionLog.js";
 import { createSealedScheduleLog } from "../schedules/sealedScheduleLog.js";
+import { readOwnerStyle } from "../schedules/tenantPort.js";
 import {
   createOpenAiCompatibleTranscriber,
   type TranscriptionUsage,
@@ -135,6 +136,8 @@ export function buildTenantServices(deps: {
   scheduleLog: ScheduleLog;
   logger: Logger;
   wiring?: MissionWiring;
+  /** The owner's writing style in a chat, appended to a new mission's prompt; absent: none. */
+  ownerStyle?: (chatId: string) => Promise<string | null>;
 }): Pick<TenantToolContext, "missions" | "schedules"> {
   const { config, tenant, gateway, wiring } = deps;
   const missionsConfig = config.missions;
@@ -162,6 +165,7 @@ export function buildTenantServices(deps: {
       lookupLid,
       logger: deps.logger,
       hasHistory,
+      ...(deps.ownerStyle ? { ownerStyle: deps.ownerStyle } : {}),
     }),
     schedules: scheduleWiring
       ? createScheduleService({
@@ -323,6 +327,8 @@ export function buildTenantRuntime(deps: {
       scheduleLog,
       logger,
       ...(deps.missions ? { wiring: deps.missions } : {}),
+      ownerStyle: (chatId) =>
+        readOwnerStyle({ gateway, mapper, transcription }, chatId, new Date()),
     });
 
     let closed = false;

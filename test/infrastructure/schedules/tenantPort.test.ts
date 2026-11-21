@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { DISABLED_TRANSCRIPTION } from "../../../src/application/transcripts.js";
-import { readScheduleContext } from "../../../src/infrastructure/schedules/tenantPort.js";
+import {
+  readOwnerStyle,
+  readScheduleContext,
+} from "../../../src/infrastructure/schedules/tenantPort.js";
 import { gowsMapper } from "../../../src/infrastructure/waha/engines/gows.js";
 import { ANA, gateway, msg, systemMsg } from "../../application/helpers.js";
 
@@ -57,5 +60,35 @@ describe("readScheduleContext", () => {
       NOW,
     );
     expect(older).toEqual([]);
+  });
+});
+
+describe("readOwnerStyle", () => {
+  it("describes the owner's style from the owner's own messages in the chat, ignoring the contact's", async () => {
+    const t = sec(NOW);
+    const style = await readOwnerStyle(
+      ctx([
+        msg("c2", t - 10, "Estimado, le saludo cordialmente.", { chat: ANA }),
+        msg("o4", t - 20, "va, te aviso", { chat: ANA, mine: true }),
+        msg("o3", t - 30, "ok bro 😂", { chat: ANA, mine: true }),
+        // Older than the schedule context window (14 days), still the owner's style.
+        msg("o2", t - 20 * DAY, "nos vemos mañana 👍", { chat: ANA, mine: true }),
+        msg("o1", t - 30 * DAY, "jaja dale 😂", { chat: ANA, mine: true }),
+        msg("c1", t - 31 * DAY, "Buenos días, estimado.", { chat: ANA }),
+      ]),
+      ANA,
+      NOW,
+    );
+    expect(style).toBe(
+      'Owner\'s writing style in this chat, from their last 4 messages (imitate it in every message you write; never mention it): very short messages (about 3 words); uses emojis often (😂 👍); informal, casual tone; laughs with "jaja"; usually starts in lowercase; rarely ends with a period; writes in Spanish.',
+    );
+  });
+
+  it("is null for a chat WAHA has never seen or where the owner wrote too little", async () => {
+    const t = sec(NOW);
+    expect(await readOwnerStyle(ctx([]), "51900000000@c.us", NOW)).toBeNull();
+    expect(
+      await readOwnerStyle(ctx([msg("o1", t - 10, "hola", { chat: ANA, mine: true })]), ANA, NOW),
+    ).toBeNull();
   });
 });

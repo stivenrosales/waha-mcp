@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { MISSION_TEXTS } from "../../../../src/application/missions/service.js";
 import {
   createScheduleService,
+  SCHEDULE_TEXTS,
   type ScheduleService,
 } from "../../../../src/application/schedules/service.js";
 import { loadConfig } from "../../../../src/config.js";
@@ -206,6 +207,107 @@ describe("schedule tools", () => {
   it("list_scheduled says when there is nothing scheduled", async () => {
     const h = harness();
     expect((await h.call("list_scheduled", {})).text).toBe("No scheduled messages.");
+  });
+
+  describe("follow-ups (if_no_reply_within)", () => {
+    const followUpInput = (q: Record<string, unknown> = {}) => ({
+      chat_id: CHAT,
+      kind: "ai",
+      instruction: "Recuérdale con buen tono lo de la cotización",
+      if_no_reply_within: "3d",
+      ...q,
+    });
+
+    it("schedule_message describes the option and tells Claude when to use it", () => {
+      const d = tool("schedule_message").description;
+      expect(d).toContain("if_no_reply_within");
+      expect(d).toContain("has not replied");
+      const schema = tool("schedule_message").inputSchema as unknown as {
+        shape: Record<string, { description?: string }>;
+      };
+      expect(schema.shape.if_no_reply_within?.description).toContain('"3d"');
+    });
+
+    it("schedule_message schedules the follow-up the window after now, without at", async () => {
+      const h = harness();
+      const r = await h.call("schedule_message", followUpInput());
+      expect(r.isError).toBe(false);
+      const id = r.data?.schedule_id as string;
+      expect(h.store.get(TENANT, id)).toMatchObject({
+        state: "active",
+        followUpSince: T0.toISOString(),
+      });
+      expect(r.text).toBe(
+        `Follow-up ${id} to ${CHAT}: runs 2026-11-20 10:00 (America/Lima) only if the contact has not replied since 2026-11-17 10:00.`,
+      );
+      expect(r.data).toEqual({
+        schedule_id: id,
+        chat_id: CHAT,
+        kind: "ai",
+        repeat: "none",
+        next_run_at: "2026-11-20T15:00:00.000Z",
+        max_runs: 1,
+        new_contact: false,
+        note: null,
+        if_no_reply_since: T0.toISOString(),
+        if_no_reply_within: "3d",
+      });
+    });
+
+    it("schedule_message reports null follow-up fields for a regular schedule", async () => {
+      const h = harness();
+      const r = await h.call("schedule_message", fixedInput());
+      expect(r.data).toMatchObject({ if_no_reply_since: null, if_no_reply_within: null });
+      expect(r.text).toMatch(/^Scheduled message /);
+    });
+
+    it("schedule_message passes follow-up refusals through", async () => {
+      const h = harness();
+      expect(
+        await h.call("schedule_message", followUpInput({ chat_id: "120363000000000000@g.us" })),
+      ).toMatchObject({
+        isError: true,
+        text: "Follow-ups (if_no_reply_within) are for direct chats only (…@c.us or …@lid), not groups.",
+      });
+      expect(
+        await h.call("schedule_message", followUpInput({ at: "2026-11-18 09:00" })),
+      ).toMatchObject({ isError: true, text: SCHEDULE_TEXTS.followUpAt });
+      expect(
+        await h.call("schedule_message", followUpInput({ if_no_reply_within: "2w" })),
+      ).toMatchObject({ isError: true, text: SCHEDULE_TEXTS.replyWindow });
+      expect(await h.call("schedule_message", fixedInput({ at: undefined }))).toMatchObject({
+        isError: true,
+        text: SCHEDULE_TEXTS.needAt,
+      });
+    });
+
+    it("list_scheduled shows the follow-up condition; regular schedules have none", async () => {
+      const h = harness();
+      const f = await h.call("schedule_message", followUpInput({ if_no_reply_within: "36h" }));
+      const a = await h.call("schedule_message", fixedInput());
+      const r = await h.call("list_scheduled", {});
+      expect(r.text).toContain("only if no reply within 36h of 2026-11-17 10:00 (America/Lima)");
+      const list = r.data?.schedules as Record<string, unknown>[];
+      expect(list.map((s) => s.id)).toEqual([a.data?.schedule_id, f.data?.schedule_id]);
+      expect(list[1]).toMatchObject({
+        kind: "ai",
+        next_run_at: "2026-11-19T03:00:00.000Z",
+        if_no_reply_since: T0.toISOString(),
+        if_no_reply_within: "36h",
+      });
+      expect(list[0]).toMatchObject({ if_no_reply_since: null, if_no_reply_within: null });
+    });
+
+    it("cancel_scheduled cancels a follow-up", async () => {
+      const h = harness();
+      const id = (await h.call("schedule_message", followUpInput())).data?.schedule_id as string;
+      expect(await h.call("cancel_scheduled", { schedule_id: id })).toMatchObject({
+        isError: false,
+        data: { schedule_id: id, state: "cancelled" },
+      });
+      expect(h.store.get(TENANT, id)?.state).toBe("cancelled");
+      expect((await h.call("list_scheduled", {})).text).toBe("No scheduled messages.");
+    });
   });
 
   it("cancel_scheduled cancels by id and refuses an unknown id", async () => {

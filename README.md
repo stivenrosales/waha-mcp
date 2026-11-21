@@ -11,6 +11,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#tools">Tools</a> ·
+  <a href="docs/self-hosting.md">Self-host</a> ·
   <a href="#deploy-on-easypanel">Deploy</a> ·
   <a href="#security-notes">Security</a>
 </p>
@@ -64,6 +65,8 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 - To send media (images, documents, voice notes, video): WAHA 2026.6.1 or later, where the former Plus features ship in the free Core image (or an older WAHA Plus). Text, locations and contacts work on any version.
 
 ## Quick start
+
+**Self-hosting on a VPS or a laptop with Docker Compose** (WAHA and waha-mcp together, secrets generated for you, optional HTTPS): follow [docs/self-hosting.md](docs/self-hosting.md). AI agents such as Claude Code can do the whole install from [AGENTS.md](AGENTS.md). The steps below are for an existing WAHA.
 
 1. **Have WAHA running** with the GOWS engine and a working session (WAHA Plus, or WAHA 2026.6.1+, to create one session per tenant).
 2. **Generate a master key** and keep an offline copy of it (losing it loses every tenant's cached data):

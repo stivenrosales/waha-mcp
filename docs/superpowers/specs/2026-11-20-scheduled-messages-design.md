@@ -73,8 +73,12 @@ Two kinds of scheduled message, both wanted by the owner:
   the scheduled runs either way.
 - Only one timezone exists: the server `TIMEZONE`. All schedule times are in that timezone.
 - An unknown send outcome is never retried (existing rule for all sends).
-- AI-composed messages need missions configured (`OPENROUTER_API_KEY`). Without it, fixed text
-  still works and AI-composed scheduling is refused with a clear message.
+- **Amended 2026-11-20 (planning):** scheduled messages, both kinds, need missions configured
+  (`OPENROUTER_API_KEY` and `WAHA_WEBHOOK_SECRET`). Restriction detection, quiet hours, the
+  new-contact cap and the budget all live in the missions setup and its webhook; making them
+  work without it would mean decoupling the webhook from missions, which is a separate change.
+  Production has missions configured. Without them, the schedule tools refuse with the same
+  "not configured" message the mission tools use.
 
 ## Approaches considered
 
@@ -168,7 +172,9 @@ The owner chose A.
   window counted from the pause end; otherwise logged as `missed`. Detection and the pause
   state must work for fixed-text schedules even when missions are not configured, so the
   builder moves restriction detection and the pause store out of the mission engine into a
-  shared piece that both use.
+  shared piece that both use. *(Amended: since schedules need missions configured, the
+  mission engine keeps detecting the timelock and the schedule runner reads the same pause
+  state.)*
 - **New contacts.** A schedule to a direct chat with no prior messages counts once, at
   scheduling time, toward the same daily new-contact cap missions use
   (`MISSIONS_MAX_NEW_CONTACTS_PER_DAY`), and is refused when the cap is reached. Later runs do

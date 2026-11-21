@@ -53,7 +53,7 @@ exists only when `config.missions` is set (spec, amended Constraints).
 4. **AI composer returns no tool call or malformed input**: treat as `skipped` with reason
    "no decision", never send free text from a plain text block. Test in Task 3.
 5. **Owner sends a message to the same chat a moment before**: not handled specially (spec
-   does not ask); only an *active mission* on the chat skips the run. Test that the mission
+   does not ask); only an _active mission_ on the chat skips the run. Test that the mission
    case skips and matches `@c.us`/`@lid` forms via `chatIdForms`. Test in Task 4.
 
 ---
@@ -100,6 +100,7 @@ exists only when `config.missions` is set (spec, amended Constraints).
 
 **Interfaces:**
 - Produces (`ScheduleStore.ts`):
+
   ```ts
   export type ScheduleKind = "fixed" | "ai";
   export type ScheduleState = "active" | "done" | "cancelled";
@@ -121,8 +122,10 @@ exists only when `config.missions` is set (spec, amended Constraints).
     deleteForTenant(tenantId: string): void;
   }
   ```
+
   `firstAt` is the original first occurrence (input to `occurrenceAt`). Ids: `randomBytes(9).toString("base64url")`, like missions.
 - Produces (`ScheduleLog.ts`):
+
   ```ts
   export type RunOutcome = "sent" | "skipped" | "failed" | "missed" | "unknown";
   export interface ScheduleContent { text?: string; instruction?: string }
@@ -136,6 +139,7 @@ exists only when `config.missions` is set (spec, amended Constraints).
     deleteSchedules(ids: string[]): void;
   }
   ```
+
   Tables: `schedule_content(schedule_id PK, sealed)` and `schedule_runs(schedule_id, seq, at TEXT NOT NULL, sealed, PRIMARY KEY(schedule_id, seq))` — `at` in plaintext for purging (only a timestamp). AAD `schedule:<id>:content` and `schedule:<id>:<seq>`, mirroring `sealedMissionLog.ts`.
 
 - [ ] **Step 1: Write failing store tests** (`new DatabaseSync(":memory:")`, injected clock like `engine.test.ts:99-106`): create/get round trip; `due` returns only active rows with `next_run_at <= now` ordered oldest first and honours `limit`; `listActive` excludes `done`/`cancelled`; `countNewContactToday` counts `new_contact=1 AND created_at >= dayStart` for that tenant only; `endedBefore` + `deleteSchedules`; `deleteForTenant` leaves other tenants.
@@ -154,12 +158,14 @@ exists only when `config.missions` is set (spec, amended Constraints).
 **Interfaces:**
 - Consumes: `LlmClient` (`src/domain/ports/LlmClient.ts`), `getMessages(gw, mapper, q)` (`src/application/messages.ts:57`), `toWhatsAppText`, `assertTextLength`.
 - Produces:
+
   ```ts
   export type Decision = { action: "send"; text: string; reason: string } | { action: "skip"; reason: string };
   export async function composeScheduled(deps: { llm: LlmClient; readContext: (chatId: string) => Promise<ContextLine[]> },
     q: { chatId: string; instruction: string; now: Date; timezone: string }): Promise<{ decision: Decision; usage: LlmUsage }>;
   export interface ContextLine { at: string; fromOwner: boolean; text: string }
   ```
+
   `readContext` is built in Task 5 from the tenant gateway: last 40 messages within 14 days, newest last, text or transcript only (my call, left to builder by the spec).
 
 - [ ] **Step 1: Write failing tests** with a `FakeLlm` returning scripted content blocks:
@@ -183,6 +189,7 @@ exists only when `config.missions` is set (spec, amended Constraints).
 **Interfaces:**
 - Consumes: Tasks 1–3; `sendPaced` + `PacedDeps`; `notifyOwner`, `ownerChatId`, `contactLabel`; `MissionStore.pausedUntil`, `MissionStore.list(tenantId, "active")`; `chatIdForms` (`inbound.ts:70`); `inQuietHours`, `nextAllowedInitiatedSend`, `monthStart`; `TenantStore.getTenant`, `llmSpendUsd`, `recordLlmUsage`.
 - Produces:
+
   ```ts
   export interface ScheduleTenantPort {     // per tenant, from the registry (Task 5)
     sender: WhatsAppSender; log: ScheduleLog; readContext(chatId: string): Promise<ContextLine[]>;
@@ -202,6 +209,7 @@ exists only when `config.missions` is set (spec, amended Constraints).
   }
   export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner;
   ```
+
   `texts.ts` exports `scheduleTexts` (Spanish owner notes): `sent(contact, text)` `📤 Enviado a ${contact}: «${text}»`, `skipped(contact, reason)` `⏭️ No envié a ${contact}: ${reason}`, `failed(contact)` `⚠️ No se pudo enviar el programado a ${contact}`, `unknown(contact)`, `missed(contact, n)` `⏱️ ${n} envío(s) programado(s) a ${contact} no salieron a tiempo`, `ended(contact)` `🏁 Terminó el programado a ${contact}`, `restoredMissed(n)`.
 
 Run of one due schedule (serial, same pattern as `engine.ts` `serial`):
@@ -240,6 +248,7 @@ Run of one due schedule (serial, same pattern as `engine.ts` `serial`):
 
 **Interfaces:**
 - Produces:
+
   ```ts
   export interface ScheduleService {   // bound to one tenant
     schedule(q: { chatId: string; kind: ScheduleKind; text?: string; instruction?: string;

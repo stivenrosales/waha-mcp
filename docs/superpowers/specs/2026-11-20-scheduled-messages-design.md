@@ -172,9 +172,9 @@ The owner chose A.
   window counted from the pause end; otherwise logged as `missed`. Detection and the pause
   state must work for fixed-text schedules even when missions are not configured, so the
   builder moves restriction detection and the pause store out of the mission engine into a
-  shared piece that both use. *(Amended: since schedules need missions configured, the
+  shared piece that both use. _(Amended: since schedules need missions configured, the
   mission engine keeps detecting the timelock and the schedule runner reads the same pause
-  state.)*
+  state.)_
 - **New contacts.** A schedule to a direct chat with no prior messages counts once, at
   scheduling time, toward the same daily new-contact cap missions use
   (`MISSIONS_MAX_NEW_CONTACTS_PER_DAY`), and is refused when the cap is reached. Later runs do

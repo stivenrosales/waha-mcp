@@ -569,7 +569,11 @@ describe("mission engine: inbound messages", () => {
     });
     // delete_message echo: protocolMessage REVOKE (numeric 0 and named form).
     h.message({ fromMe: true, source: "api", message: { protocolMessage: { type: 0, key } } });
-    h.message({ fromMe: true, source: "api", message: { protocolMessage: { type: "REVOKE", key } } });
+    h.message({
+      fromMe: true,
+      source: "api",
+      message: { protocolMessage: { type: "REVOKE", key } },
+    });
     // A top-level editedMessage container.
     h.message({
       fromMe: true,

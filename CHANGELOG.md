@@ -6,6 +6,7 @@
 
 - Webhooks no longer depend on missions: with `WAHA_WEBHOOK_SECRET` set, `/webhooks/waha` is mounted and every WAHA session is pointed at it.
 - The webhook route also stores `message.edited`, `message.revoked`, `message.reaction`, `poll.vote` and `poll.vote.failed` events, sealed per tenant, for the message cache.
+- New tool `react_message`: reacts to any message with one emoji, or removes your reaction with `""`. The reaction shows up in later reads right away and does not take over a mission.
 
 ### Upgrade
 

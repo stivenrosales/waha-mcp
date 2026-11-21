@@ -38,6 +38,8 @@ export interface WhatsAppSender {
   ): Promise<SentMessage>;
   /** Marks messages as read; without ids WAHA marks the whole chat. */
   sendSeen(q: { chatId: string; messageIds?: string[] }): Promise<void>;
+  /** Reacts to a message by its full id; an empty emoji removes the owner's reaction. */
+  react(q: { messageId: string; emoji: string }): Promise<void>;
   startTyping(chatId: string): Promise<void>;
   stopTyping(chatId: string): Promise<void>;
 }

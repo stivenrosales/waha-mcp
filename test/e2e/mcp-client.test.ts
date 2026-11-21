@@ -177,6 +177,7 @@ const SEND_TOOLS = [
   "send_media",
   "send_location",
   "send_contact",
+  "react_message",
   "schedule_message",
   "cancel_scheduled",
   "start_mission",

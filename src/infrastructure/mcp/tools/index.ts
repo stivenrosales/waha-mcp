@@ -18,6 +18,7 @@ import {
   listMissionsTool,
   startMissionTool,
 } from "./missions.js";
+import { reactMessageTool } from "./reactMessage.js";
 import { cancelScheduledTool, listScheduledTool, scheduleMessageTool } from "./schedules.js";
 import { searchMessagesTool } from "./searchMessages.js";
 import { sendContactTool } from "./sendContact.js";
@@ -50,6 +51,7 @@ export function createTools(): ToolDefinition[] {
     sendMediaTool,
     sendLocationTool,
     sendContactTool,
+    reactMessageTool,
     scheduleMessageTool,
     cancelScheduledTool,
     startMissionTool,

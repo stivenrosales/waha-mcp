@@ -289,4 +289,28 @@ describe("post regression", () => {
       make(fakeFetch(() => json({}, 404)).fn).sendText({ chatId: "1@c.us", text: "x" }),
     ).rejects.toThrow("WAHA chat not found.");
   });
+
+  it("react PUTs /api/reaction with session in the body", async () => {
+    const { fn, calls } = fakeFetch(() => json({}));
+    await make(fn).react({ messageId: "true_1@c.us_A", emoji: "👍" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      path: "/api/reaction",
+      method: "PUT",
+      body: { session: "default", messageId: "true_1@c.us_A", reaction: "👍" },
+    });
+  });
+
+  it('react with "" removes the reaction', async () => {
+    const { fn, calls } = fakeFetch(() => json({}));
+    await make(fn).react({ messageId: "true_1@c.us_A", emoji: "" });
+    expect(calls[0]?.body.reaction).toBe("");
+  });
+
+  it("react: 404 becomes WahaNotFoundError(message)", async () => {
+    const { fn } = fakeFetch(() => json({ message: "nope" }, 404));
+    await expect(make(fn).react({ messageId: "true_1@c.us_A", emoji: "👍" })).rejects.toEqual(
+      new WahaNotFoundError("message"),
+    );
+  });
 });

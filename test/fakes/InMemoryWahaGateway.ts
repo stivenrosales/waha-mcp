@@ -265,6 +265,9 @@ export class RecordingSender implements WhatsAppSender {
   async sendSeen(q: Parameters<WhatsAppSender["sendSeen"]>[0]) {
     await this.record("sendSeen", q);
   }
+  async react(q: Parameters<WhatsAppSender["react"]>[0]) {
+    await this.record("react", q);
+  }
   async startTyping(chatId: string) {
     await this.record("startTyping", chatId);
   }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createSqliteMessageActionStore } from "../../../src/infrastructure/cache/sqliteMessageActionStore.js";
 import {
   createSqliteMessageStore,
   openCacheDatabase,
@@ -209,5 +210,47 @@ describe("sqlite message store", () => {
     store.upsertRaw("a:b", [row("c", 1)]);
     db.prepare("UPDATE messages SET chat_id = 'a', id = 'b:c'").run();
     expect(() => store.readRange("a", { limit: 10, offset: 0 })).toThrow(DecryptionError);
+  });
+
+  describe("message actions", () => {
+    it("findByShortId finds the row under any chat and never a longer id", () => {
+      const store = memory();
+      store.upsertRaw("1@lid", [row("true_1@lid_ABC", 1)]);
+      store.upsertRaw("2@g.us", [row("false_2@c.us_ABC_3@c.us", 2), row("false_2@c.us_ABCD", 3)]);
+      store.upsertRaw("4@c.us", [row("true_4@c.us_XABC", 4), row("true_4@c.us_A_BC", 5)]);
+      const found = store.findByShortId("ABC");
+      expect(found.map((f) => f.id).sort()).toEqual(["false_2@c.us_ABC_3@c.us", "true_1@lid_ABC"]);
+      expect(found.find((f) => f.chatId === "1@lid")).toMatchObject({
+        ts: 1,
+        raw: { id: "true_1@lid_ABC" },
+      });
+      expect(store.findByShortId("A%")).toEqual([]);
+    });
+
+    it("resetForOwner wipes overrides, reactions and votes", () => {
+      const db = openCacheDatabase(":memory:");
+      const actions = createSqliteMessageActionStore(db, testCipher());
+      actions.putOverride("A", { kind: "revoked", at: 1 });
+      actions.putReaction({ messageId: "A", reactor: "r", emoji: "👍", ts: 1 });
+      actions.putVote({ pollId: "P", voter: "v", options: ["x"], ts: 1 });
+      createSqliteMessageStore(db, testCipher()).resetForOwner("s|me");
+      for (const t of ["message_overrides", "message_reactions", "poll_votes"])
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get()).toEqual({ n: 0 });
+    });
+
+    it("prune removes old overrides, reactions and votes", () => {
+      const db = openCacheDatabase(":memory:");
+      const actions = createSqliteMessageActionStore(db, testCipher());
+      actions.putOverride("OLD", { kind: "revoked", at: 5 });
+      actions.putOverride("NEW", { kind: "revoked", at: 50 });
+      actions.putReaction({ messageId: "OLD", reactor: "r", emoji: "👍", ts: 5 });
+      actions.putReaction({ messageId: "NEW", reactor: "r", emoji: "👍", ts: 50 });
+      actions.putVote({ pollId: "P", voter: "v1", options: ["x"], ts: 5 });
+      actions.putVote({ pollId: "P", voter: "v2", options: ["x"], ts: 50 });
+      createSqliteMessageStore(db, testCipher()).prune(10);
+      expect([...actions.overrides(["OLD", "NEW"]).keys()]).toEqual(["NEW"]);
+      expect([...actions.reactions(["OLD", "NEW"]).keys()]).toEqual(["NEW"]);
+      expect(actions.votes("P").votes.map((v) => v.voter)).toEqual(["v2"]);
+    });
   });
 });

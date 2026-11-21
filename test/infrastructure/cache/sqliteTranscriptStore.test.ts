@@ -48,3 +48,16 @@ describe("sqlite transcript store encryption", () => {
     expect(() => store.get("a", "b:c")).toThrow(DecryptionError);
   });
 });
+
+describe("transcript deleteByShortId", () => {
+  it("deletes only that message's transcript, under any chat naming", () => {
+    const store = createSqliteTranscriptStore(openCacheDatabase(":memory:"), testCipher());
+    store.put("1@lid", "true_1@lid_ABC", "one");
+    store.put("2@c.us", "false_2@c.us_ABC_3@c.us", "two");
+    store.put("2@c.us", "false_2@c.us_ABCD", "keep");
+    store.deleteByShortId("ABC");
+    expect(store.get("1@lid", "true_1@lid_ABC")).toBeNull();
+    expect(store.get("2@c.us", "false_2@c.us_ABC_3@c.us")).toBeNull();
+    expect(store.get("2@c.us", "false_2@c.us_ABCD")).toBe("keep");
+  });
+});

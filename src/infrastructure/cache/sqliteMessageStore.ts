@@ -1,5 +1,6 @@
 import { chmodSync, closeSync, existsSync, openSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { shortMessageId } from "../../domain/messageId.js";
 import type {
   ChatSyncState,
   MessageStore,
@@ -37,6 +38,27 @@ CREATE TABLE IF NOT EXISTS transcripts (
   text TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (chat_id, message_id)
+);
+CREATE TABLE IF NOT EXISTS message_overrides (
+  short_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  sealed TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS message_reactions (
+  short_id TEXT NOT NULL,
+  reactor TEXT NOT NULL,
+  sealed TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  PRIMARY KEY (short_id, reactor)
+);
+CREATE TABLE IF NOT EXISTS poll_votes (
+  poll_id TEXT NOT NULL,
+  voter TEXT NOT NULL,
+  sealed TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  failed INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (poll_id, voter)
 );
 `;
 
@@ -90,8 +112,24 @@ export function resetCacheForOwner(db: DatabaseSync, owner: string): void {
     db.exec("DELETE FROM messages");
     db.exec("DELETE FROM chat_sync");
     db.exec("DELETE FROM transcripts");
+    db.exec("DELETE FROM message_overrides");
+    db.exec("DELETE FROM message_reactions");
+    db.exec("DELETE FROM poll_votes");
     db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('owner', ?)").run(owner);
   });
+}
+
+/**
+ * SQL prefilter for "this column names the message with short id `shortId`": the id is the third
+ * `_`-part of `true|false_<chat>_<ID>[_<participant>]`. Callers still confirm with
+ * `shortMessageId`, since LIKE alone cannot tell the parts apart.
+ */
+export function shortIdPrefilter(column: string, shortId: string): { sql: string; args: string[] } {
+  const esc = shortId.replace(/[\\%_]/g, (c) => `\\${c}`);
+  return {
+    sql: `(${column} = ? OR ${column} LIKE ? ESCAPE '\\' OR ${column} LIKE ? ESCAPE '\\')`,
+    args: [shortId, `%\\_${esc}`, `%\\_${esc}\\_%`],
+  };
 }
 
 /** Builds the WHERE clause shared by reads and counts. */
@@ -172,6 +210,23 @@ export function createSqliteMessageStore(db: DatabaseSync, cipher: TenantCipher)
       return Number(result.changes);
     },
 
+    findByShortId(shortId) {
+      const { sql, args } = shortIdPrefilter("id", shortId);
+      const rows = db
+        .prepare(`SELECT chat_id, id, ts, raw FROM messages WHERE ${sql} ORDER BY ts, rowid`)
+        .all(...args) as { chat_id: string; id: string; ts: number; raw: string }[];
+      return rows
+        .filter((r) => shortMessageId(r.id) === shortId)
+        .map((r) => ({
+          chatId: r.chat_id,
+          id: r.id,
+          ts: Number(r.ts),
+          raw: JSON.parse(
+            isSealedText(r.raw) ? cipher.openText(r.raw, aad(r.chat_id, r.id)) : r.raw,
+          ) as unknown,
+        }));
+    },
+
     getSyncState(chatId) {
       const row = db
         .prepare("SELECT newest_ts, oldest_ts, last_sync_at FROM chat_sync WHERE chat_id = ?")
@@ -205,6 +260,9 @@ export function createSqliteMessageStore(db: DatabaseSync, cipher: TenantCipher)
           "UPDATE chat_sync SET oldest_ts = ? WHERE oldest_ts IS NULL OR oldest_ts < ?",
         ).run(olderThanTs, olderThanTs);
         const result = db.prepare("DELETE FROM messages WHERE ts < ?").run(olderThanTs);
+        db.prepare("DELETE FROM message_overrides WHERE at < ?").run(olderThanTs);
+        db.prepare("DELETE FROM message_reactions WHERE ts < ?").run(olderThanTs);
+        db.prepare("DELETE FROM poll_votes WHERE ts < ?").run(olderThanTs);
         return Number(result.changes);
       });
     },

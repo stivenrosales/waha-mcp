@@ -30,6 +30,8 @@ export interface MessageStore {
   countRange(chatId: string, q: { fromTs?: number; toTs?: number }): number;
   /** Deletes the chat's messages with `ts >= fromTs` whose id is not in `keepIds`. */
   deleteMissing(chatId: string, fromTs: number | undefined, keepIds: string[]): number;
+  /** Every cached row, in any chat, whose message id has this short id (`@lid`/`@c.us` safe). */
+  findByShortId(shortId: string): { chatId: string; id: string; ts: number; raw: unknown }[];
   getSyncState(chatId: string): ChatSyncState | null;
   setSyncState(chatId: string, state: ChatSyncState): void;
   /** The account the cached rows belong to (`<session>|<me.id>`); null when never recorded. */

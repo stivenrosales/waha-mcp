@@ -1,7 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
+import { shortMessageId } from "../../domain/messageId.js";
 import type { TranscriptStore } from "../../domain/ports/TranscriptStore.js";
 import { isSealedText, type TenantCipher } from "../crypto/envelope.js";
-import { readCacheOwner, resetCacheForOwner, transcriptAad } from "./sqliteMessageStore.js";
+import {
+  readCacheOwner,
+  resetCacheForOwner,
+  shortIdPrefilter,
+  transcriptAad,
+} from "./sqliteMessageStore.js";
 
 /**
  * Transcripts in the `transcripts` table of `cache.db` (open it with `openCacheDatabase`). Used
@@ -27,6 +33,15 @@ export function createSqliteTranscriptStore(
     },
     put(chatId, messageId, text) {
       upsert.run(chatId, messageId, cipher.sealText(text, aad(chatId, messageId)), now());
+    },
+    deleteByShortId(shortId) {
+      const { sql, args } = shortIdPrefilter("message_id", shortId);
+      const rows = db
+        .prepare(`SELECT chat_id, message_id FROM transcripts WHERE ${sql}`)
+        .all(...args) as { chat_id: string; message_id: string }[];
+      const del = db.prepare("DELETE FROM transcripts WHERE chat_id = ? AND message_id = ?");
+      for (const r of rows)
+        if (shortMessageId(r.message_id) === shortId) del.run(r.chat_id, r.message_id);
     },
     getOwner: () => readCacheOwner(db),
     resetForOwner: (owner) => resetCacheForOwner(db, owner),

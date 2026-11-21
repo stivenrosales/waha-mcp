@@ -8,8 +8,9 @@ export const scheduleTexts = {
   missed: (contact: string, n: number) =>
     `⏱️ ${n} envío(s) programado(s) a ${contact} no salieron a tiempo`,
   ended: (contact: string) => `🏁 Terminó el programado a ${contact}`,
-  restoredMissed: (n: number) =>
-    `⏱️ ${n} envío(s) programado(s) no salieron mientras tu cuenta estuvo desactivada`,
+  restoredMissed: (n: number, ended: number) =>
+    `⏱️ ${n} envío(s) programado(s) no salieron mientras tu cuenta estuvo desactivada` +
+    (ended > 0 ? `; ${ended} programado(s) terminaron` : ""),
 };
 
 /** Reasons a run is skipped without asking the model. */

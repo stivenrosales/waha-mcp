@@ -72,7 +72,9 @@ const decide = (input: Record<string, unknown>): LlmTurnResult => ({
   usage,
 });
 
-function harness(opts: { spend?: number; revoked?: boolean; failAdvance?: boolean } = {}) {
+function harness(
+  opts: { spend?: number; revoked?: boolean; failAdvance?: boolean; failContent?: boolean } = {},
+) {
   let now = T0;
   const authDb = new DatabaseSync(":memory:");
   const cacheDb = new DatabaseSync(":memory:");
@@ -117,7 +119,14 @@ function harness(opts: { spend?: number; revoked?: boolean; failAdvance?: boolea
         ? {
             port: {
               sender,
-              log,
+              log: opts.failContent
+                ? {
+                    ...log,
+                    content() {
+                      throw new Error("cannot open");
+                    },
+                  }
+                : log,
               readContext: async () => [],
               lookupLid: async (lid) => (lid === LID ? CHAT : null),
             },
@@ -272,6 +281,53 @@ describe("schedule runner", () => {
     h.schedule({ text: "Nota", chatId: OWNER });
     await h.tickAt(T0);
     expect(h.sender.texts(OWNER)).toEqual(["Nota"]);
+  });
+
+  it("a held run sent after the next occurrence passed is sent once", async () => {
+    const h = harness();
+    const until = at(T0, DAY + 30 * MIN);
+    h.missions.pause(TENANT, at(T0, -HOUR).toISOString(), until.toISOString());
+    const s = h.schedule({ text: "Hola", repeat: "daily" });
+    await h.tickAt(T0);
+    await h.tickAt(until);
+    await h.tickAt(at(until, MIN));
+    await h.tickAt(at(until, 2 * HOUR));
+    expect(h.sender.texts(CHAT)).toEqual(["Hola"]);
+    expect(h.log.runs(s.id, 10).map((r) => r.outcome)).toEqual(["missed", "sent"]);
+    expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.missed("+51911111111", 1)]);
+    const row = h.row(s.id);
+    expect(row.runsDone).toBe(2);
+    expect(row.nextRunAt).toBe(at(T0, 2 * DAY).toISOString());
+  });
+
+  it("quiet hours postpone each occurrence of a recurring schedule once", async () => {
+    const h = harness();
+    // Daily at 23:00 Lima: each run waits for 08:00 the next morning.
+    const first = new Date("2026-11-18T04:00:00.000Z");
+    const s = h.schedule({ text: "Hola", repeat: "daily", first });
+    await h.tickAt(first);
+    await h.tickAt(new Date("2026-11-18T13:00:00.000Z"));
+    expect(h.sender.texts(CHAT)).toEqual(["Hola"]);
+    expect(h.row(s.id).nextRunAt).toBe("2026-11-19T04:00:00.000Z");
+    await h.tickAt(new Date("2026-11-19T04:00:00.000Z"));
+    expect(h.row(s.id).nextRunAt).toBe("2026-11-19T13:00:00.000Z");
+    await h.tickAt(new Date("2026-11-19T13:00:00.000Z"));
+    await h.tickAt(new Date("2026-11-19T13:05:00.000Z"));
+    expect(h.sender.texts(CHAT)).toEqual(["Hola", "Hola"]);
+    expect(h.row(s.id).runsDone).toBe(2);
+    expect(h.sender.texts(OWNER)).toEqual([]);
+  });
+
+  it("an error before sending logs failed, notifies and moves on", async () => {
+    const h = harness({ failContent: true });
+    const s = h.schedule({ text: "Hola", repeat: "daily" });
+    await h.tickAt(T0);
+    await h.tickAt(at(T0, MIN));
+    expect(h.sender.texts(CHAT)).toEqual([]);
+    expect(h.log.runs(s.id, 10)).toEqual([{ at: T0.toISOString(), outcome: "failed" }]);
+    expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.failed("+51911111111")]);
+    expect(h.row(s.id).runsDone).toBe(1);
+    expect(h.row(s.id).nextRunAt).toBe(at(T0, DAY).toISOString());
   });
 
   it("server down three days logs three missed and no sends", async () => {
@@ -522,11 +578,13 @@ describe("schedule runner", () => {
     const a = h.schedule({ text: "A", repeat: "daily" });
     const b = h.schedule({ text: "B" });
     const c = h.schedule({ text: "C", first: at(T0, 10 * DAY) });
+    const d = h.schedule({ text: "D", repeat: "weekly", maxRuns: 2, first: at(T0, -7 * DAY) });
     const now = at(T0, 2 * DAY + 2 * HOUR);
     h.setNow(now);
     await h.runner.catchUp(TENANT, now);
     expect(h.sender.texts(CHAT)).toEqual([]);
-    expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.restoredMissed(4)]);
+    expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.restoredMissed(6, 1)]);
+    expect(h.row(d.id).state).toBe("done");
     expect(h.log.runs(a.id, 10).map((r) => r.outcome)).toEqual(["missed", "missed", "missed"]);
     expect(h.row(a.id).nextRunAt).toBe(at(T0, 3 * DAY).toISOString());
     expect(h.row(a.id).runsDone).toBe(3);

@@ -264,13 +264,26 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
       }
       // Claimed: from here on this occurrence is never attempted again.
       store.update(s.id, { nextRunAt: null });
-      const run = await attempt(c);
+      // A throw from `attempt` happens before any send (send errors are outcomes): a failed run.
+      const run = await attempt(c).catch((): ScheduleRun => {
+        logger.info(`schedule=${s.id} attempt=error`);
+        return { at: iso(now), outcome: "failed" };
+      });
       if (run === null) {
         logger.info(`schedule=${s.id} run=cancelled`);
         return;
       }
-      const ended = advance(c, s.runsDone + 1);
+      // Occurrences that came due while this one was held (quiet hours, pause) are not sent late.
+      const cap = s.repeat === "none" ? 1 : s.maxRuns;
+      const passed: string[] = [];
+      let index = s.runsDone + 1;
+      while (index < cap && occurrence(s, index).getTime() <= now.getTime()) {
+        passed.push(iso(occurrence(s, index)));
+        index += 1;
+      }
+      const ended = advance(c, index);
       appendRun(c, run);
+      for (const missedAt of passed) appendRun(c, { at: missedAt, outcome: "missed" });
       logger.info(`schedule=${s.id} run=${run.outcome}`);
       if (run.outcome === "failed") await notify(c, scheduleTexts.failed(label(s)));
       else if (run.outcome === "unknown") await notify(c, scheduleTexts.unknown(label(s)));
@@ -278,6 +291,7 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
         await notify(c, scheduleTexts.sent(label(s), run.text ?? ""));
       else if (s.kind === "ai" && run.outcome === "skipped")
         await notify(c, scheduleTexts.skipped(label(s), run.reason ?? ""));
+      if (passed.length > 0) await notify(c, scheduleTexts.missed(label(s), passed.length));
       if (ended && s.repeat !== "none") await notify(c, scheduleTexts.ended(label(s)));
     });
   }
@@ -317,9 +331,12 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
       serial(() =>
         withTenant(tenantId, async (port, owner) => {
           let total = 0;
+          let endedCount = 0;
           for (const s of store.listActive(tenantId)) {
             if (!late(s, now)) continue;
-            total += markMissed({ s, port, owner, now }).n;
+            const { n, ended } = markMissed({ s, port, owner, now });
+            total += n;
+            if (ended && s.repeat !== "none") endedCount += 1;
           }
           if (total > 0)
             await notifyOwner(
@@ -327,7 +344,7 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
               {
                 ownerChatId: owner,
                 missionId: `tenant:${tenantId}`,
-                text: scheduleTexts.restoredMissed(total),
+                text: scheduleTexts.restoredMissed(total, endedCount),
               },
             );
         }),

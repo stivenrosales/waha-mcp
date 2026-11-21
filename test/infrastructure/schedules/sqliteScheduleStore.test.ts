@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { createSqliteScheduleStore } from "../../../src/infrastructure/schedules/sqliteScheduleStore.js";
+import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
 
 const base = {
   tenantId: "t1",
@@ -15,8 +16,19 @@ const base = {
 
 function setup() {
   let clock = "2026-11-20T10:00:00.000Z";
-  const store = createSqliteScheduleStore(new DatabaseSync(":memory:"), () => clock);
-  return { store, setClock: (iso: string) => (clock = iso) };
+  const db = new DatabaseSync(":memory:");
+  createSqliteTenantStore(db);
+  const addTenant = (id: string, status: string) =>
+    db
+      .prepare(
+        `INSERT INTO tenants (id, waha_session, display_name, status, wrapped_dek, created_at)
+         VALUES (?, ?, ?, ?, 'dek', 0)`,
+      )
+      .run(id, `s-${id}`, id, status);
+  addTenant("t1", "active");
+  addTenant("t2", "active");
+  const store = createSqliteScheduleStore(db, () => clock);
+  return { store, addTenant, setClock: (iso: string) => (clock = iso) };
 }
 
 describe("sqliteScheduleStore", () => {
@@ -50,6 +62,36 @@ describe("sqliteScheduleStore", () => {
     const now = "2026-11-21T12:00:00.000Z";
     expect(store.due(now, 10).map((r) => r.id)).toEqual([early.id, late.id]);
     expect(store.due(now, 1).map((r) => r.id)).toEqual([early.id]);
+  });
+
+  it("due skips tenants that are not active and the excluded tenants", () => {
+    const { store, addTenant } = setup();
+    addTenant("t3", "revoked");
+    addTenant("t4", "pairing");
+    store.create({ ...base, tenantId: "t3", nextRunAt: "2026-11-21T07:00:00.000Z" });
+    store.create({ ...base, tenantId: "t4", nextRunAt: "2026-11-21T07:00:00.000Z" });
+    store.create({ ...base, tenantId: "t5", nextRunAt: "2026-11-21T07:00:00.000Z" }); // no tenant
+    const excluded = store.create({
+      ...base,
+      tenantId: "t2",
+      nextRunAt: "2026-11-21T07:30:00.000Z",
+    });
+    const ok = store.create({ ...base, nextRunAt: "2026-11-21T08:00:00.000Z" });
+    const now = "2026-11-21T12:00:00.000Z";
+    expect(store.due(now, 10).map((r) => r.id)).toEqual([excluded.id, ok.id]);
+    expect(store.due(now, 10, ["t2"]).map((r) => r.id)).toEqual([ok.id]);
+    expect(store.due(now, 10, ["t1", "t2"])).toEqual([]);
+  });
+
+  it("claimed returns active rows of active tenants whose run was claimed", () => {
+    const { store, addTenant } = setup();
+    addTenant("t3", "revoked");
+    const stuck = store.create({ ...base, nextRunAt: null });
+    store.create({ ...base, tenantId: "t3", nextRunAt: null });
+    store.create(base); // waiting
+    const cancelled = store.create(base);
+    store.update(cancelled.id, { state: "cancelled", nextRunAt: null });
+    expect(store.claimed().map((r) => r.id)).toEqual([stuck.id]);
   });
 
   it("listActive is newest first and excludes done and cancelled; countActive agrees", () => {

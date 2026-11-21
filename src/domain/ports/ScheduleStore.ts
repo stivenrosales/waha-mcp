@@ -27,8 +27,16 @@ export interface ScheduleStore {
   /** Active schedules of the tenant, newest first. */
   listActive(tenantId: string): ScheduleRow[];
   countActive(tenantId: string): number;
-  /** Active schedules with `nextRunAt <= nowIso`, oldest first. */
-  due(nowIso: string, limit: number): ScheduleRow[];
+  /**
+   * Active schedules of active tenants with `nextRunAt <= nowIso`, oldest first, leaving out
+   * `excludeTenantIds` (tenants whose runtime cannot be opened right now).
+   */
+  due(nowIso: string, limit: number, excludeTenantIds?: string[]): ScheduleRow[];
+  /**
+   * Active schedules of active tenants whose run was claimed (`nextRunAt` null) and never
+   * recorded: a shutdown, crash or database error between the claim and the record.
+   */
+  claimed(): ScheduleRow[];
   update(
     id: string,
     patch: Partial<Pick<ScheduleRow, "nextRunAt" | "runsDone" | "state" | "endedAt">>,

@@ -60,6 +60,8 @@ export interface ScheduleRunner {
 
 const DUE_BATCH = 20;
 const iso = (d: Date): string => d.toISOString();
+/** The error's class name, safe to log (its message may carry message text). */
+const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 
 interface Ctx {
   s: ScheduleRow;
@@ -70,14 +72,18 @@ interface Ctx {
 
 /**
  * Runs due scheduled messages. A run is attempted at most once: the row is claimed
- * (`nextRunAt = null`) before anything is sent, so a crash never resends. Log lines carry
- * schedule ids and outcomes only, never message text or instructions.
+ * (`nextRunAt = null`) before anything is sent, so a crash never resends. A claim that was
+ * never recorded (shutdown, crash, database error) is found at start and on every tick and
+ * logged as `unknown`, never sent. Log lines carry schedule ids, outcomes and error names
+ * only, never message text or instructions.
  */
 export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
   const { store, missions, limits, logger, timezone: tz } = deps;
   let chain: Promise<void> = Promise.resolve();
   let stopped = false;
   let timer: ReturnType<typeof setInterval> | undefined;
+  /** Schedules claimed by a run of this process that has not finished yet. */
+  const inFlight = new Set<string>();
 
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const run = chain.then(fn);
@@ -102,8 +108,8 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
   function appendRun(c: Ctx, run: ScheduleRun): void {
     try {
       c.port.log.appendRun(c.s.id, run);
-    } catch {
-      logger.info(`schedule=${c.s.id} runlog=failed`);
+    } catch (err) {
+      logger.info(`schedule=${c.s.id} runlog=failed error=${errName(err)}`);
     }
   }
 
@@ -147,10 +153,30 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
     return fa.some((id) => fb.includes(id));
   }
 
+  /**
+   * True when an active mission talks to the schedule's chat. When a `@lid` cannot be
+   * resolved because the lookup failed, the answer is unknown: fail closed (true).
+   */
   async function missionOnChat(c: Ctx): Promise<boolean> {
-    for (const m of missions.list(c.s.tenantId, "active"))
-      if (await sameChat(m.chatId, c.s.chatId, c.port)) return true;
-    return false;
+    const active = missions.list(c.s.tenantId, "active");
+    if (active.length === 0) return false;
+    let lookupFailed = false;
+    const lookup = async (lid: string): Promise<string | null> => {
+      try {
+        return await c.port.lookupLid(lid);
+      } catch (err) {
+        lookupFailed = true;
+        throw err;
+      }
+    };
+    const forms = await chatIdForms(c.s.chatId, lookup);
+    for (const m of active) {
+      if (m.chatId === c.s.chatId) return true;
+      const other = await chatIdForms(m.chatId, lookup);
+      if (other.some((id) => forms.includes(id))) return true;
+    }
+    if (lookupFailed) logger.info(`schedule=${c.s.id} lid-lookup=failed`);
+    return lookupFailed;
   }
 
   const overBudget = (tenantId: string, now: Date): boolean =>
@@ -160,19 +186,29 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
       toIso: iso(now),
     }) >= deps.monthlyBudgetUsd;
 
-  /** Runs `fn` with the tenant runtime; a tenant with none is left untouched. */
+  /**
+   * Runs `fn` with the tenant runtime; a tenant with none (or whose runtime fails to open) is
+   * left untouched. False when the runtime was unavailable.
+   */
   async function withTenant(
     tenantId: string,
     fn: (port: ScheduleTenantPort, owner: string | null) => Promise<void>,
-  ): Promise<void> {
-    const held = deps.acquire(tenantId);
-    if (!held) return;
+  ): Promise<boolean> {
+    let held: ReturnType<ScheduleRunnerDeps["acquire"]>;
+    try {
+      held = deps.acquire(tenantId);
+    } catch (err) {
+      logger.info(`tenant=${tenantId} runtime=unavailable error=${errName(err)}`);
+      return false;
+    }
+    if (!held) return false;
     try {
       const tenant = deps.tenants.getTenant(tenantId);
       await fn(held.port, ownerChatId(tenant?.waId ?? null));
     } finally {
       held.release();
     }
+    return true;
   }
 
   /** The text to send, or the outcome when there is nothing to send. */
@@ -190,8 +226,8 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
         { llm: deps.llm, readContext: (chatId) => c.port.readContext(chatId) },
         { chatId: s.chatId, instruction, now, timezone: tz },
       );
-    } catch {
-      logger.info(`schedule=${s.id} compose=failed`);
+    } catch (err) {
+      logger.info(`schedule=${s.id} compose=failed error=${errName(err)}`);
       return skip(SKIP_REASONS.llm);
     }
     try {
@@ -203,8 +239,8 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
         kind: "agent",
         usage: result.usage,
       });
-    } catch {
-      logger.info(`schedule=${s.id} usage=not-recorded`);
+    } catch (err) {
+      logger.info(`schedule=${s.id} usage=not-recorded error=${errName(err)}`);
     }
     const d = result.decision;
     return d.action === "send" ? { send: d.text } : skip(d.reason);
@@ -238,11 +274,71 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
     return outcome === "sent" ? { at, outcome, text } : { at, outcome };
   }
 
-  async function runOne(due: ScheduleRow, now: Date): Promise<void> {
+  /**
+   * Records the outcome of the claimed occurrence at `runsDone`, moves past it and notifies the
+   * owner. When the record fails the claim stays, and the next tick reports it as `unknown`.
+   */
+  async function finish(c: Ctx, run: ScheduleRun): Promise<void> {
+    const { s, now } = c;
+    // Occurrences that came due while this one was held (quiet hours, pause) are not sent late.
+    const cap = s.repeat === "none" ? 1 : s.maxRuns;
+    const passed: string[] = [];
+    let index = s.runsDone + 1;
+    while (index < cap && occurrence(s, index).getTime() <= now.getTime()) {
+      passed.push(iso(occurrence(s, index)));
+      index += 1;
+    }
+    let ended: boolean;
+    try {
+      ended = advance(c, index);
+    } catch (err) {
+      logger.info(`schedule=${s.id} record=failed error=${errName(err)}`);
+      return;
+    }
+    appendRun(c, run);
+    for (const missedAt of passed) appendRun(c, { at: missedAt, outcome: "missed" });
+    logger.info(`schedule=${s.id} run=${run.outcome}`);
+    if (run.outcome === "failed") await notify(c, scheduleTexts.failed(label(s)));
+    else if (run.outcome === "unknown") await notify(c, scheduleTexts.unknown(label(s)));
+    else if (s.kind === "ai" && run.outcome === "sent")
+      await notify(c, scheduleTexts.sent(label(s), run.text ?? ""));
+    else if (s.kind === "ai" && run.outcome === "skipped")
+      await notify(c, scheduleTexts.skipped(label(s), run.reason ?? ""));
+    if (passed.length > 0) await notify(c, scheduleTexts.missed(label(s), passed.length));
+    if (ended && s.repeat !== "none") await notify(c, scheduleTexts.ended(label(s)));
+  }
+
+  /** A claim no run of this process holds: its outcome is unknown. Never sends. */
+  async function recover(claimed: ScheduleRow): Promise<void> {
+    await withTenant(claimed.tenantId, async (port, owner) => {
+      const s = store.get(claimed.tenantId, claimed.id);
+      if (s?.state !== "active" || s.nextRunAt !== null || inFlight.has(s.id)) return;
+      logger.info(`schedule=${s.id} claim=stale`);
+      const run: ScheduleRun = { at: iso(occurrence(s, s.runsDone)), outcome: "unknown" };
+      await finish({ s, port, owner, now: deps.now() }, run);
+    });
+  }
+
+  async function recoverClaimed(): Promise<void> {
+    for (const s of store.claimed()) {
+      if (stopped) return;
+      if (inFlight.has(s.id)) continue;
+      try {
+        await recover(s);
+      } catch (err) {
+        logger.info(`schedule=${s.id} recover=error error=${errName(err)}`);
+      }
+    }
+  }
+
+  /** False when the tenant runtime was unavailable (the row was left untouched). */
+  async function runOne(due: ScheduleRow): Promise<boolean> {
     // Re-read: an earlier run of this batch may have paused long enough for a cancel.
     const s = store.get(due.tenantId, due.id);
-    if (s?.state !== "active" || s.nextRunAt !== due.nextRunAt) return;
-    await withTenant(s.tenantId, async (port, owner) => {
+    if (s?.state !== "active" || s.nextRunAt !== due.nextRunAt) return true;
+    return withTenant(s.tenantId, async (port, owner) => {
+      // Fresh per run: an earlier run of this batch may have taken minutes.
+      const now = deps.now();
       const c: Ctx = { s, port, owner, now };
       if (late(s, now)) {
         const { n, ended } = markMissed(c);
@@ -264,45 +360,45 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
       }
       // Claimed: from here on this occurrence is never attempted again.
       store.update(s.id, { nextRunAt: null });
-      // A throw from `attempt` happens before any send (send errors are outcomes): a failed run.
-      const run = await attempt(c).catch((): ScheduleRun => {
-        logger.info(`schedule=${s.id} attempt=error`);
-        return { at: iso(now), outcome: "failed" };
-      });
-      if (run === null) {
-        logger.info(`schedule=${s.id} run=cancelled`);
-        return;
+      inFlight.add(s.id);
+      try {
+        // A throw from `attempt` happens before any send (send errors are outcomes): a failed run.
+        const run = await attempt(c).catch((err: unknown): ScheduleRun => {
+          logger.info(`schedule=${s.id} attempt=error error=${errName(err)}`);
+          return { at: iso(now), outcome: "failed" };
+        });
+        if (run === null) {
+          logger.info(`schedule=${s.id} run=cancelled`);
+          return;
+        }
+        await finish(c, run);
+      } finally {
+        inFlight.delete(s.id);
       }
-      // Occurrences that came due while this one was held (quiet hours, pause) are not sent late.
-      const cap = s.repeat === "none" ? 1 : s.maxRuns;
-      const passed: string[] = [];
-      let index = s.runsDone + 1;
-      while (index < cap && occurrence(s, index).getTime() <= now.getTime()) {
-        passed.push(iso(occurrence(s, index)));
-        index += 1;
-      }
-      const ended = advance(c, index);
-      appendRun(c, run);
-      for (const missedAt of passed) appendRun(c, { at: missedAt, outcome: "missed" });
-      logger.info(`schedule=${s.id} run=${run.outcome}`);
-      if (run.outcome === "failed") await notify(c, scheduleTexts.failed(label(s)));
-      else if (run.outcome === "unknown") await notify(c, scheduleTexts.unknown(label(s)));
-      else if (s.kind === "ai" && run.outcome === "sent")
-        await notify(c, scheduleTexts.sent(label(s), run.text ?? ""));
-      else if (s.kind === "ai" && run.outcome === "skipped")
-        await notify(c, scheduleTexts.skipped(label(s), run.reason ?? ""));
-      if (passed.length > 0) await notify(c, scheduleTexts.missed(label(s), passed.length));
-      if (ended && s.repeat !== "none") await notify(c, scheduleTexts.ended(label(s)));
     });
   }
 
+  /**
+   * Recovers stale claims, then runs up to `DUE_BATCH` due rows. Rows of a tenant whose
+   * runtime is unavailable are paged past so they cannot fill the batch.
+   */
   async function runTick(now: Date): Promise<void> {
-    for (const s of store.due(iso(now), DUE_BATCH)) {
-      if (stopped) return;
-      try {
-        await runOne(s, now);
-      } catch {
-        logger.info(`schedule=${s.id} run=error`);
+    await recoverClaimed();
+    const unavailable = new Set<string>();
+    let handled = 0;
+    while (handled < DUE_BATCH && !stopped) {
+      const batch = store.due(iso(now), DUE_BATCH, [...unavailable]);
+      if (batch.length === 0) return;
+      for (const s of batch) {
+        if (stopped || handled >= DUE_BATCH) return;
+        if (unavailable.has(s.tenantId)) continue;
+        try {
+          if (await runOne(s)) handled += 1;
+          else unavailable.add(s.tenantId);
+        } catch (err) {
+          handled += 1;
+          logger.info(`schedule=${s.id} run=error error=${errName(err)}`);
+        }
       }
     }
   }
@@ -312,6 +408,7 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
     idle: () => chain,
     start(intervalMs = 30_000) {
       if (timer || stopped) return;
+      void serial(recoverClaimed).catch(() => logger.info("schedules recover=failed"));
       timer = setInterval(() => {
         void serial(() => runTick(deps.now())).catch(() => logger.info("schedules tick=failed"));
       }, intervalMs);
@@ -328,8 +425,8 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
       return true;
     },
     catchUp: (tenantId, now) =>
-      serial(() =>
-        withTenant(tenantId, async (port, owner) => {
+      serial(async () => {
+        await withTenant(tenantId, async (port, owner) => {
           let total = 0;
           let endedCount = 0;
           for (const s of store.listActive(tenantId)) {
@@ -347,7 +444,7 @@ export function createScheduleRunner(deps: ScheduleRunnerDeps): ScheduleRunner {
                 text: scheduleTexts.restoredMissed(total, endedCount),
               },
             );
-        }),
-      ),
+        });
+      }),
   };
 }

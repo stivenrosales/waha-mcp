@@ -16,6 +16,7 @@ import type { ScheduleRepeat } from "../../../src/domain/schedules/recurrence.js
 import { createSqliteMissionStore } from "../../../src/infrastructure/missions/sqliteMissionStore.js";
 import { createSealedScheduleLog } from "../../../src/infrastructure/schedules/sealedScheduleLog.js";
 import { createSqliteScheduleStore } from "../../../src/infrastructure/schedules/sqliteScheduleStore.js";
+import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { RecordingSender } from "../../fakes/InMemoryWahaGateway.js";
 import { testCipher } from "../../fakes/testCipher.js";
 
@@ -78,13 +79,29 @@ function harness(
   let now = T0;
   const authDb = new DatabaseSync(":memory:");
   const cacheDb = new DatabaseSync(":memory:");
+  createSqliteTenantStore(authDb);
+  const addTenant = (id: string, status: "active" | "pairing" | "revoked") =>
+    authDb
+      .prepare(
+        `INSERT INTO tenants (id, waha_session, display_name, status, wrapped_dek, created_at)
+         VALUES (?, ?, ?, ?, 'dek', 0)`,
+      )
+      .run(id, `s-${id}`, id, status);
+  addTenant(TENANT, opts.revoked ? "revoked" : "active");
   const store = createSqliteScheduleStore(authDb, () => now.toISOString());
   const missions = createSqliteMissionStore(authDb, () => now.toISOString());
   const log = createSealedScheduleLog(cacheDb, testCipher(TENANT));
   const sender = new Sender();
   const llm = new FakeLlm();
   const usageRows: object[] = [];
-  const hooks: { sleep?: () => Promise<void> } = {};
+  const hooks: {
+    sleep?: () => Promise<void>;
+    lookupLid?: (lid: string) => Promise<string | null>;
+  } = {};
+  /** `failAdvance`: recording a finished run fails like a database error would. */
+  const faults = { failAdvance: opts.failAdvance ?? false };
+  const logs: string[] = [];
+  const acquired: string[] = [];
   const tenants = {
     getTenant: (id: string) =>
       id === TENANT
@@ -102,11 +119,10 @@ function harness(
     },
     llmSpendUsd: () => opts.spend ?? 0,
   };
-  /** With `failAdvance`, recording a finished run fails like a database error would. */
   const runnerStore: typeof store = {
     ...store,
     update(id, patch) {
-      if (opts.failAdvance && patch.runsDone !== undefined) throw new Error("db locked");
+      if (faults.failAdvance && patch.runsDone !== undefined) throw new Error("db locked");
       store.update(id, patch);
     },
   };
@@ -114,8 +130,9 @@ function harness(
     store: runnerStore,
     missions,
     tenants,
-    acquire: (id) =>
-      id === TENANT && !opts.revoked
+    acquire: (id) => {
+      acquired.push(id);
+      return id === TENANT && !opts.revoked
         ? {
             port: {
               sender,
@@ -128,11 +145,13 @@ function harness(
                   }
                 : log,
               readContext: async () => [],
-              lookupLid: async (lid) => (lid === LID ? CHAT : null),
+              lookupLid: async (lid) =>
+                hooks.lookupLid ? hooks.lookupLid(lid) : lid === LID ? CHAT : null,
             },
             release() {},
           }
-        : null,
+        : null;
+    },
     llm,
     model: "anthropic/claude-haiku-5.5",
     monthlyBudgetUsd: 1,
@@ -141,7 +160,7 @@ function harness(
     timezone: TZ,
     paced: { sleep: async () => hooks.sleep?.(), rand: () => 0.5 },
     now: () => now,
-    logger: { info: () => {} },
+    logger: { info: (line: string) => logs.push(line) },
   });
 
   function schedule(
@@ -151,11 +170,12 @@ function harness(
       repeat?: ScheduleRepeat;
       first?: Date;
       maxRuns?: number;
+      tenantId?: string;
     } & ({ text: string } | { instruction: string }),
   ): ScheduleRow {
     const first = q.first ?? T0;
     const row = store.create({
-      tenantId: TENANT,
+      tenantId: q.tenantId ?? TENANT,
       chatId: q.chatId ?? CHAT,
       kind: q.kind ?? ("text" in q ? "fixed" : "ai"),
       repeat: q.repeat ?? "none",
@@ -176,6 +196,10 @@ function harness(
     llm,
     usageRows,
     hooks,
+    faults,
+    logs,
+    acquired,
+    addTenant,
     runner,
     schedule,
     row: (id: string) => store.get(TENANT, id) as ScheduleRow,
@@ -597,5 +621,131 @@ describe("schedule runner", () => {
     h.schedule({ text: "A", first: at(T0, DAY) });
     await h.runner.catchUp(TENANT, T0);
     expect(h.sender.calls).toEqual([]);
+  });
+  it("due runs of unavailable tenants never block other tenants", async () => {
+    const h = harness();
+    h.addTenant("t2", "active"); // runtime cannot be opened
+    h.addTenant("t3", "revoked");
+    for (let i = 0; i < 21; i += 1) {
+      h.schedule({ text: "Bloqueado", tenantId: "t2", first: at(T0, -30 * MIN) });
+      h.schedule({ text: "Revocado", tenantId: "t3", first: at(T0, -40 * MIN) });
+    }
+    const s = h.schedule({ text: "Hola" });
+    await h.tickAt(T0);
+    expect(h.sender.texts(CHAT)).toEqual(["Hola"]);
+    expect(h.row(s.id).state).toBe("done");
+    expect(h.acquired.filter((id) => id === "t2")).toHaveLength(1);
+    expect(h.acquired).not.toContain("t3");
+  });
+
+  it("a run claimed and never recorded is logged unknown, notified and never sent", async () => {
+    const h = harness();
+    const s = h.schedule({ text: "Hola", repeat: "daily", first: at(T0, -HOUR) });
+    h.store.update(s.id, { nextRunAt: null }); // claimed, then the process died
+    await h.tickAt(T0);
+    expect(h.sender.texts(CHAT)).toEqual([]);
+    expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.unknown("+51911111111")]);
+    expect(h.log.runs(s.id, 10)).toEqual([{ at: at(T0, -HOUR).toISOString(), outcome: "unknown" }]);
+    expect(h.row(s.id).runsDone).toBe(1);
+    expect(h.row(s.id).nextRunAt).toBe(at(T0, DAY - HOUR).toISOString());
+    await h.tickAt(at(T0, MIN));
+    expect(h.log.runs(s.id, 10)).toHaveLength(1);
+  });
+
+  it("start recovers claimed runs at once", async () => {
+    const h = harness();
+    const s = h.schedule({ text: "Hola", first: at(T0, -HOUR) });
+    h.store.update(s.id, { nextRunAt: null });
+    h.runner.start(60 * 60_000);
+    await h.runner.idle();
+    h.runner.stop();
+    expect(h.sender.texts(CHAT)).toEqual([]);
+    expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.unknown("+51911111111")]);
+    expect(h.row(s.id).state).toBe("done");
+  });
+
+  it("a record failure after sending is logged and recovered as unknown later", async () => {
+    const h = harness({ failAdvance: true });
+    const s = h.schedule({ text: "Hola", repeat: "daily" });
+    await h.tickAt(T0);
+    expect(h.logs).toContain(`schedule=${s.id} record=failed error=Error`);
+    expect(h.row(s.id).nextRunAt).toBeNull();
+    h.faults.failAdvance = false;
+    await h.tickAt(at(T0, MIN));
+    expect(h.sender.texts(CHAT)).toEqual(["Hola"]);
+    expect(h.sender.texts(OWNER)).toEqual([scheduleTexts.unknown("+51911111111")]);
+    expect(h.log.runs(s.id, 10)).toEqual([{ at: T0.toISOString(), outcome: "unknown" }]);
+    expect(h.row(s.id).nextRunAt).toBe(at(T0, DAY).toISOString());
+  });
+
+  it("a failed lid lookup with an active mission skips the run (fail closed)", async () => {
+    const h = harness();
+    h.hooks.lookupLid = async () => {
+      throw new Error("waha down");
+    };
+    h.missions.create({
+      tenantId: TENANT,
+      chatId: "51922222222@c.us",
+      newContact: false,
+      deadlineAt: at(T0, DAY).toISOString(),
+      expectsFiles: false,
+    });
+    const s = h.schedule({ text: "Hola", chatId: LID });
+    await h.tickAt(T0);
+    expect(h.sender.texts(LID)).toEqual([]);
+    expect(h.log.runs(s.id, 10)).toEqual([
+      { at: T0.toISOString(), outcome: "skipped", reason: "hay una misión activa en este chat" },
+    ]);
+  });
+
+  it("a failed lid lookup on a mission chat skips the run (fail closed)", async () => {
+    const h = harness();
+    h.hooks.lookupLid = async () => {
+      throw new Error("waha down");
+    };
+    h.missions.create({
+      tenantId: TENANT,
+      chatId: LID,
+      newContact: false,
+      deadlineAt: at(T0, DAY).toISOString(),
+      expectsFiles: false,
+    });
+    const s = h.schedule({ text: "Hola" });
+    await h.tickAt(T0);
+    expect(h.sender.texts(CHAT)).toEqual([]);
+    expect(h.log.runs(s.id, 10).map((r) => r.outcome)).toEqual(["skipped"]);
+  });
+
+  it("a failed lid lookup without active missions still sends", async () => {
+    const h = harness();
+    h.hooks.lookupLid = async () => {
+      throw new Error("waha down");
+    };
+    h.schedule({ text: "Hola", chatId: LID });
+    await h.tickAt(T0);
+    expect(h.sender.texts(LID)).toEqual(["Hola"]);
+  });
+
+  it("each run of a batch uses the clock at its own start", async () => {
+    const h = harness();
+    // 21:50 Lima: the first send takes 15 minutes, so the second run starts in quiet hours.
+    const start = new Date("2026-11-18T02:50:00.000Z");
+    const first = h.schedule({ text: "Primero", first: start });
+    const second = h.schedule({ text: "Segundo", first: at(start, MIN) });
+    h.hooks.sleep = async () => h.setNow(at(start, 15 * MIN));
+    await h.tickAt(at(start, MIN));
+    expect(h.sender.texts(CHAT)).toEqual(["Primero"]);
+    expect(h.log.runs(first.id, 10)).toEqual([
+      { at: at(start, MIN).toISOString(), outcome: "sent", text: "Primero" },
+    ]);
+    expect(h.row(second.id).nextRunAt).toBe("2026-11-18T13:00:00.000Z");
+  });
+
+  it("an error before sending logs its name only", async () => {
+    const h = harness({ failContent: true });
+    const s = h.schedule({ text: "Hola secreto" });
+    await h.tickAt(T0);
+    expect(h.logs).toContain(`schedule=${s.id} attempt=error error=Error`);
+    expect(h.logs.join("\n")).not.toContain("secreto");
   });
 });

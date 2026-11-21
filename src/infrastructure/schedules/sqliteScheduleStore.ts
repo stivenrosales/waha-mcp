@@ -66,7 +66,8 @@ const newId = (): string => randomBytes(9).toString("base64url");
 
 /**
  * Schedule metadata in the auth database (message text and run history live sealed in the
- * tenant's cache database, see `createSealedScheduleLog`). The caller owns `db`.
+ * tenant's cache database, see `createSealedScheduleLog`). The caller owns `db`, which must
+ * also hold the `tenants` table (`createSqliteTenantStore`): due runs skip inactive tenants.
  * @param now ISO clock (injectable for tests).
  */
 export function createSqliteScheduleStore(
@@ -116,12 +117,23 @@ export function createSqliteScheduleStore(
         .get(tenantId) as { n: number };
       return Number(r.n);
     },
-    due(nowIso, limit) {
+    due(nowIso, limit, excludeTenantIds = []) {
+      const excluded = excludeTenantIds.map(() => "?").join(", ");
       return all(
-        `SELECT * FROM schedules WHERE state = 'active' AND next_run_at IS NOT NULL
-           AND next_run_at <= ? ORDER BY next_run_at LIMIT ?`,
+        `SELECT s.* FROM schedules s JOIN tenants t ON t.id = s.tenant_id
+         WHERE s.state = 'active' AND t.status = 'active' AND s.next_run_at IS NOT NULL
+           AND s.next_run_at <= ?${excluded ? ` AND s.tenant_id NOT IN (${excluded})` : ""}
+         ORDER BY s.next_run_at LIMIT ?`,
         nowIso,
+        ...excludeTenantIds,
         limit,
+      );
+    },
+    claimed() {
+      return all(
+        `SELECT s.* FROM schedules s JOIN tenants t ON t.id = s.tenant_id
+         WHERE s.state = 'active' AND t.status = 'active' AND s.next_run_at IS NULL
+         ORDER BY s.created_at, s.rowid`,
       );
     },
     update(id, patch) {

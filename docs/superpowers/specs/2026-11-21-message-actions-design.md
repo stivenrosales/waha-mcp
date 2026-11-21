@@ -194,3 +194,21 @@ is dropped and no tool promises more than it does.
 - Tests: mirror `WahaHttpSender.test.ts`, `wahaWebhook.test.ts`, `sqliteMessageStore.test.ts`,
   `cachedMessages.test.ts`, and update the ordered tool list in `test/e2e/mcp-client.test.ts`.
 - README tool table and CHANGELOG.
+
+## Spike results (2026-11-21)
+
+Run on the owner's own number (GOWS). No numbers, keys or URLs are recorded here.
+
+| #   | Check                     | Result       | Observed                                                                                                                                                                                                                                              |
+| --- | ------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Delete                    | PASS         | `DELETE …/messages/{fullId}` → 200. WhatsApp sends REVOKE (`protocolMessage` type 0), so it deletes for everyone. WAHA then returns not-found for it and drops it from lists. `message.revoked` carries a bare `revokedMessageId` and `before: null`. |
+| 2   | Edit                      | PASS         | `PUT` → 200. `message.edited` carries `body` = the new text, a bare `editedMessageId` and `timestamp` = edit time (seconds); the payload `id` is the edit action's id.                                                                                |
+| 3   | Reaction                  | PASS         | `PUT /api/reaction` → 200 for setting an emoji and for `""` (remove). `message.reaction` carries `reaction.messageId` as the full id.                                                                                                                 |
+| 4   | Poll votes                | NOT VERIFIED | `sendPoll` → 201 with a string id. No vote was cast during the spike; verify after deploy.                                                                                                                                                            |
+| 5   | `GET` after edit / revoke | Observed     | After an edit WAHA still returns the original text (overrides are required). After a revoke `GET` returns not-found.                                                                                                                                  |
+
+Also observed: edits, revokes and reactions emitted no `message.any` (the mission engine still
+ignores such owner echoes defensively).
+
+Resulting wording: `delete_message` and `edit_message` are described plainly (delete for everyone,
+edit the text). `get_poll_results` stays conservative until check 4 is verified.

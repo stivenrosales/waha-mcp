@@ -117,6 +117,7 @@ One server serves several WhatsApp accounts ("tenants"). The admin (you) owns te
 | 🖼️           | `send_media`           | Sends an uploaded file, forwards a WhatsApp attachment or sends a public URL.     |
 | 📍           | `send_location`        | Sends a location pin.                                                             |
 | 👤           | `send_contact`         | Sends a contact card.                                                             |
+| 📊           | `send_poll`            | Sends a poll (2–12 options, single or multiple answers).                          |
 | 😀           | `react_message`        | Reacts to a message with an emoji, or removes your reaction.                      |
 | ✏️           | `edit_message`         | Edits the text of a message you sent.                                             |
 | 🗑️           | `delete_message`       | Deletes a message you sent, for everyone.                                         |

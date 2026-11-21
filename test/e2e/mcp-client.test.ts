@@ -186,6 +186,7 @@ const SEND_TOOLS = [
   "send_media",
   "send_location",
   "send_contact",
+  "send_poll",
   "react_message",
   "edit_message",
   "delete_message",

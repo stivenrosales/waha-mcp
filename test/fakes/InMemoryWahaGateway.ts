@@ -298,6 +298,9 @@ export class RecordingSender implements WhatsAppSender {
   sendLocation(q: Parameters<WhatsAppSender["sendLocation"]>[0]) {
     return this.record("sendLocation", q);
   }
+  sendPoll(q: Parameters<WhatsAppSender["sendPoll"]>[0]) {
+    return this.record("sendPoll", q);
+  }
   sendContact(q: Parameters<WhatsAppSender["sendContact"]>[0]) {
     return this.record("sendContact", q);
   }

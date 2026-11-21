@@ -40,10 +40,10 @@ function harness() {
 }
 
 describe("react_message", () => {
-  it("is a send tool listed after send_contact", () => {
+  it("is a send tool listed after send_poll", () => {
     expect(tool.annotations).toMatchObject({ readOnlyHint: false, openWorldHint: true });
     const names = createTools().map((t) => t.name);
-    expect(names.indexOf("react_message")).toBe(names.indexOf("send_contact") + 1);
+    expect(names.indexOf("react_message")).toBe(names.indexOf("send_poll") + 1);
   });
 
   it("reacts and stores the own reaction", async () => {

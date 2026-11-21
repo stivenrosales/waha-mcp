@@ -240,6 +240,16 @@ export function createWahaHttpSender(opts: WahaHttpSenderOptions): WhatsAppSende
         },
         false,
       ),
+    sendPoll: (q) =>
+      post(
+        "/api/sendPoll",
+        {
+          chatId: q.chatId,
+          reply_to: q.replyTo,
+          poll: { name: q.question, options: q.options, multipleAnswers: q.multipleAnswers },
+        },
+        false,
+      ),
     sendContact: (q) =>
       post(
         "/api/sendContactVcard",

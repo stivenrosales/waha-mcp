@@ -26,6 +26,7 @@ import { searchMessagesTool } from "./searchMessages.js";
 import { sendContactTool } from "./sendContact.js";
 import { sendLocationTool } from "./sendLocation.js";
 import { sendMediaTool } from "./sendMedia.js";
+import { sendPollTool } from "./sendPoll.js";
 import { sendTextTool } from "./sendText.js";
 import { transcribeAudioTool } from "./transcribeAudio.js";
 
@@ -53,6 +54,7 @@ export function createTools(): ToolDefinition[] {
     sendMediaTool,
     sendLocationTool,
     sendContactTool,
+    sendPollTool,
     reactMessageTool,
     editMessageTool,
     deleteMessageTool,

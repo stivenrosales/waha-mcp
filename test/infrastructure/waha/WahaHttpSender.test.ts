@@ -171,6 +171,27 @@ describe("WahaHttpSender", () => {
     });
   });
 
+  it("sends a poll with its options and reads the string id WAHA returns", async () => {
+    const { fn, calls } = fakeFetch(() => json({ id: "true_1@c.us_3EB0POLL" }, 201));
+    const sent = await make(fn).sendPoll({
+      chatId: "1@c.us",
+      replyTo: "r1",
+      question: "¿Cuándo?",
+      options: ["Lunes", "Martes"],
+      multipleAnswers: true,
+    });
+    expect(sent).toEqual({ id: "true_1@c.us_3EB0POLL", timestamp: null });
+    expect(calls[0]).toMatchObject({
+      path: "/api/sendPoll",
+      body: {
+        session: "default",
+        chatId: "1@c.us",
+        reply_to: "r1",
+        poll: { name: "¿Cuándo?", options: ["Lunes", "Martes"], multipleAnswers: true },
+      },
+    });
+  });
+
   it("reports an unknown outcome when WAHA cannot be reached or times out", async () => {
     const down = (async () => {
       throw new TypeError("fetch failed");

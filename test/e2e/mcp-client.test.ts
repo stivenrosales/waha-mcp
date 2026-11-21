@@ -273,6 +273,7 @@ function setup(
       maxBytes: b.config.uploadMaxBytes,
     }),
     missionLog: {} as TenantRuntime["missionLog"],
+    scheduleLog: {} as TenantRuntime["scheduleLog"],
     cipher: {} as TenantRuntime["cipher"],
     close() {},
   });

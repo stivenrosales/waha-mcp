@@ -214,6 +214,7 @@ function buildWith(fakes: Map<string, Fakes>): typeof buildTenantRuntime {
         maxBytes: b.config.uploadMaxBytes,
       }),
       missionLog: {} as TenantRuntime["missionLog"],
+      scheduleLog: {} as TenantRuntime["scheduleLog"],
       cipher: createTenantCipher(b.dek, b.tenant.id),
       close() {},
     };

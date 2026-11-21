@@ -12,6 +12,7 @@ import {
 import type { Config } from "../../config.js";
 import { WahaNotFoundError } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
+import type { ScheduleLog } from "../../domain/ports/ScheduleLog.js";
 import type { Tenant } from "../../domain/ports/TenantStore.js";
 import { createSqliteMessageStore, openCacheDatabase } from "../cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../cache/sqliteTranscriptStore.js";
@@ -20,6 +21,7 @@ import type { Logger, ToolRunContext } from "../mcp/defineTool.js";
 import { createMediaHandler } from "../media/mediaRoute.js";
 import { createSignedLinks } from "../media/signedLink.js";
 import { createSealedMissionLog, type MissionLog } from "../missions/sealedMissionLog.js";
+import { createSealedScheduleLog } from "../schedules/sealedScheduleLog.js";
 import {
   createOpenAiCompatibleTranscriber,
   type TranscriptionUsage,
@@ -58,6 +60,8 @@ export interface TenantRuntime {
   upload(req: Request, token: string): Promise<Response>;
   /** Sealed mission content of this tenant (`cache.db`). */
   missionLog: MissionLog;
+  /** Sealed scheduled-message content and run history of this tenant (`cache.db`). */
+  scheduleLog: ScheduleLog;
   /** This tenant's data cipher (e.g. to seal received webhook payloads). */
   cipher: TenantCipher;
   /** Closes the cache database and stops the upload sweep. Idempotent. */
@@ -175,6 +179,7 @@ export function buildTenantRuntime(deps: {
     });
 
     const missionLog = createSealedMissionLog(cacheDb, cipher);
+    const scheduleLog = createSealedScheduleLog(cacheDb, cipher);
     const missionsConfig = config.missions;
     const missions =
       missionsConfig && deps.missions
@@ -216,6 +221,7 @@ export function buildTenantRuntime(deps: {
       media,
       upload,
       missionLog,
+      scheduleLog,
       cipher,
       close() {
         if (closed) return;

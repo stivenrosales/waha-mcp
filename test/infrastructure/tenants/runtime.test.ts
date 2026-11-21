@@ -81,6 +81,8 @@ describe("buildTenantRuntime", () => {
     expect(runtime.tenantId).toBe("tid1");
     runtime.missionLog.append("m1", { kind: "prompt", at: "2026-11-17T10:00:00.000Z", body: "hi" });
     expect(runtime.missionLog.read("m1")).toHaveLength(1);
+    runtime.scheduleLog.putContent("s1", { text: "hi" });
+    expect(runtime.scheduleLog.content("s1")).toEqual({ text: "hi" });
     // The tenant cipher is exposed (the webhook route seals payloads with it).
     expect(runtime.cipher.openText(runtime.cipher.sealText("x", "a"), "a")).toBe("x");
     const token = runtime.context.links.sign("m1");

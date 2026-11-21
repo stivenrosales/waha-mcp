@@ -26,6 +26,7 @@ import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js"
 import { createSealedMissionLog } from "../../src/infrastructure/missions/sealedMissionLog.js";
 import { createSqliteEventStore } from "../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../src/infrastructure/missions/sqliteMissionStore.js";
+import { createSealedScheduleLog } from "../../src/infrastructure/schedules/sealedScheduleLog.js";
 import type { TenantRegistry } from "../../src/infrastructure/tenants/registry.js";
 import type { buildTenantRuntime } from "../../src/infrastructure/tenants/runtime.js";
 import { createSqliteTenantStore } from "../../src/infrastructure/tenants/sqliteTenantStore.js";
@@ -301,6 +302,7 @@ async function world(): Promise<World> {
         logger: b.logger,
       }),
       missionLog,
+      scheduleLog: createSealedScheduleLog(cacheDb, cipher),
       cipher,
       close() {
         cacheDb.close();

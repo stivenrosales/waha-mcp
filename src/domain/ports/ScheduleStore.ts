@@ -1,0 +1,40 @@
+import type { ScheduleRepeat } from "../schedules/recurrence.js";
+
+export type ScheduleKind = "fixed" | "ai";
+export type ScheduleState = "active" | "done" | "cancelled";
+
+/** Schedule metadata. The message text / instruction lives sealed in `ScheduleLog`. */
+export interface ScheduleRow {
+  id: string;
+  tenantId: string;
+  chatId: string;
+  kind: ScheduleKind;
+  repeat: ScheduleRepeat;
+  /** The original first occurrence (input to `occurrenceAt`). */
+  firstAt: string;
+  nextRunAt: string | null;
+  runsDone: number;
+  maxRuns: number;
+  newContact: boolean;
+  state: ScheduleState;
+  createdAt: string;
+  endedAt: string | null;
+}
+
+export interface ScheduleStore {
+  create(q: Omit<ScheduleRow, "id" | "runsDone" | "state" | "createdAt" | "endedAt">): ScheduleRow;
+  get(tenantId: string, id: string): ScheduleRow | null;
+  /** Active schedules of the tenant, newest first. */
+  listActive(tenantId: string): ScheduleRow[];
+  countActive(tenantId: string): number;
+  /** Active schedules with `nextRunAt <= nowIso`, oldest first. */
+  due(nowIso: string, limit: number): ScheduleRow[];
+  update(
+    id: string,
+    patch: Partial<Pick<ScheduleRow, "nextRunAt" | "runsDone" | "state" | "endedAt">>,
+  ): void;
+  countNewContactToday(tenantId: string, dayStartIso: string): number;
+  endedBefore(tenantId: string, iso: string): string[];
+  deleteSchedules(tenantId: string, ids: string[]): void;
+  deleteForTenant(tenantId: string): void;
+}

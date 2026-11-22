@@ -12,8 +12,13 @@
 - New tool `edit_message`: edits the text of a message you sent (WhatsApp only allows recent ones). The edit shows up in later reads right away and does not take over a mission.
 - New tool `delete_message`: deletes a message you sent, for everyone; it cannot be undone. The text is removed from the message cache, transcripts and overrides; mission logs, schedule history and WAHA's own storage keep their own retention.
 - New tools `mark_read` and `mark_unread`: mark a whole chat as read or unread. They do not take over a mission.
+- New tools `delete_my_data` and `unlink_account` (every account, `confirm: true` required): delete your own cached messages, transcripts and ended missions and schedules, or log your WhatsApp out of the server and sign out every connected app. They only ever act on the calling account. The `/privacidad` page explains them and the retention.
+- Missions and AI-written scheduled messages write in the owner's style: a description of how the owner writes in that chat (length, emojis, tone, capitalization, punctuation, language), derived from the owner's own recent messages there, is added to their prompts.
+- Automatic retention: cached message data (messages, edits, deletions, reactions, poll votes and voice-note transcripts) older than `CACHE_RETENTION_DAYS` (default 90) is deleted by the daily retention purge, for every active tenant, with the message cache on or off.
 
 ### Upgrade
+
+- `CACHE_RETENTION_DAYS` replaces `CACHE_MAX_AGE_DAYS` (still read when the new one is unset) and its default changes from "keep forever" to 90 days. To keep cached data forever, set `CACHE_RETENTION_DAYS=0`.
 
 - The first start after upgrading reconfigures each active session's webhook (new events), and WAHA restarts each session once.
 - `WAHA_WEBHOOK_SECRET` alone now turns webhooks on (no missions needed). `OPENROUTER_API_KEY` without `WAHA_WEBHOOK_SECRET` is a startup error: `OPENROUTER_API_KEY needs WAHA_WEBHOOK_SECRET (missions receive messages through webhooks).`

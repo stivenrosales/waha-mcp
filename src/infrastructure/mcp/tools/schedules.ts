@@ -44,7 +44,7 @@ const scheduleInput = z.object({
   kind: z
     .enum(KINDS)
     .describe(
-      '"fixed": send `text` exactly. "ai": at each run the server\'s AI reads the recent chat and writes the message from `instruction`, or skips the run when it is no longer needed.',
+      '"fixed": send `text` exactly. "ai": at each run the server\'s AI reads the recent chat and writes the message from `instruction` in the owner\'s own writing style in that chat, or skips the run when it is no longer needed.',
     ),
   text: z
     .string()

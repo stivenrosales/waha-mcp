@@ -106,15 +106,24 @@ export function readCacheOwner(db: DatabaseSync): string | null {
   return row?.value ?? null;
 }
 
+/**
+ * Deletes every cached message, sync state, transcript, edit, reaction and poll vote (not the
+ * owner). Run it inside a transaction; returns the messages and transcripts deleted.
+ */
+export function wipeCachedContent(db: DatabaseSync): { messages: number; transcripts: number } {
+  const messages = Number(db.prepare("DELETE FROM messages").run().changes);
+  db.exec("DELETE FROM chat_sync");
+  const transcripts = Number(db.prepare("DELETE FROM transcripts").run().changes);
+  db.exec("DELETE FROM message_overrides");
+  db.exec("DELETE FROM message_reactions");
+  db.exec("DELETE FROM poll_votes");
+  return { messages, transcripts };
+}
+
 /** Wipes every cached message, sync state and transcript, then records `owner`, atomically. */
 export function resetCacheForOwner(db: DatabaseSync, owner: string): void {
   inTransaction(db, () => {
-    db.exec("DELETE FROM messages");
-    db.exec("DELETE FROM chat_sync");
-    db.exec("DELETE FROM transcripts");
-    db.exec("DELETE FROM message_overrides");
-    db.exec("DELETE FROM message_reactions");
-    db.exec("DELETE FROM poll_votes");
+    wipeCachedContent(db);
     db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('owner', ?)").run(owner);
   });
 }

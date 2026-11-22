@@ -41,8 +41,11 @@ export interface Config {
   cacheEnabled: boolean;
   /** How far back from the newest cached message every sync re-reads (edits, deletions). */
   cacheRefreshHours: number;
-  /** Cached messages older than this many days are pruned; 0 keeps them forever. */
-  cacheMaxAgeDays: number;
+  /**
+   * Cached message data (messages, edits, reactions, poll votes, transcripts) older than this
+   * many days is deleted by the daily retention job; 0 keeps it forever.
+   */
+  cacheRetentionDays: number;
   /** Voice-note transcription via an OpenAI-compatible API; null when off (the default). */
   transcription: TranscriptionConfig | null;
   /** Server-side Claude agent on WhatsApp missions; null when off (the default). */
@@ -118,6 +121,9 @@ const positiveInt = (name: string, fallback: number) =>
         .transform(Number)
         .refine((n) => n > 0, `${name} must be a positive integer.`),
     );
+
+/** Cached message data is deleted this many days after it was sent (`CACHE_RETENTION_DAYS`). */
+export const DEFAULT_CACHE_RETENTION_DAYS = 90;
 
 const nonNegativeInt = (name: string, fallback: number) =>
   z
@@ -244,7 +250,19 @@ const envSchema = z
     UPLOAD_TTL_SECONDS: positiveInt("UPLOAD_TTL_SECONDS", 900),
     CACHE_ENABLED: boolean("CACHE_ENABLED", true),
     CACHE_REFRESH_HOURS: positiveInt("CACHE_REFRESH_HOURS", 48),
-    CACHE_MAX_AGE_DAYS: nonNegativeInt("CACHE_MAX_AGE_DAYS", 0),
+    // Legacy name of CACHE_RETENTION_DAYS, read only when the new one is unset.
+    CACHE_MAX_AGE_DAYS: nonNegativeInt("CACHE_MAX_AGE_DAYS", DEFAULT_CACHE_RETENTION_DAYS),
+    CACHE_RETENTION_DAYS: z
+      .string()
+      .optional()
+      .transform((v) => (v === "" ? undefined : v))
+      .pipe(
+        z
+          .string()
+          .regex(/^\d+$/, "CACHE_RETENTION_DAYS must be a non-negative integer.")
+          .transform(Number)
+          .optional(),
+      ),
     TRANSCRIPTION_API_URL: z
       .string()
       .optional()
@@ -379,7 +397,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     uploadTtlSeconds: v.UPLOAD_TTL_SECONDS,
     cacheEnabled: v.CACHE_ENABLED,
     cacheRefreshHours: v.CACHE_REFRESH_HOURS,
-    cacheMaxAgeDays: v.CACHE_MAX_AGE_DAYS,
+    cacheRetentionDays: v.CACHE_RETENTION_DAYS ?? v.CACHE_MAX_AGE_DAYS,
     transcription:
       v.TRANSCRIPTION_API_URL && v.TRANSCRIPTION_API_KEY && v.TRANSCRIPTION_MODEL
         ? {

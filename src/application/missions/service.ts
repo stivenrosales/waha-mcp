@@ -31,6 +31,11 @@ export interface MissionServiceDeps {
   hasHistory(chatId: string): Promise<boolean>;
   /** Phone JID behind a `@lid` (chat ids are matched in both forms). */
   lookupLid(lid: string): Promise<string | null>;
+  /**
+   * The owner's writing style in this chat (`ownerStyleHint` over the owner's recent messages
+   * there); null when there is too little to imitate. Absent: no style is added.
+   */
+  ownerStyle?(chatId: string): Promise<string | null>;
   /** Mission ids and outcomes only; never content. */
   logger: { info(message: string): void };
 }
@@ -200,6 +205,18 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
       const ids = await forms(q.chatId);
       // Stored in its normalized form (`@s.whatsapp.net` → `@c.us`), the one webhooks match.
       const chatId = ids[0] ?? q.chatId;
+
+      // Appended once to the stored prompt, so every turn sends the same system prompt (cache).
+      // Read before the limit checks and before the mission exists: nothing slow may be awaited
+      // between checking the caps and creating the mission, or concurrent starts overshoot them,
+      // and a tick could step a mission created without its prompt and spec.
+      let style: string | null = null;
+      try {
+        style = (await deps.ownerStyle?.(chatId)) ?? null;
+      } catch (error) {
+        deps.logger.info(`mission style=unavailable error=${errorName(error)}`);
+      }
+
       const [busy] = await activeIn(ids);
       if (busy) throw new InvalidInputError(MISSION_TEXTS.chatBusy(busy.id));
       if (store.countActive(tenantId) >= limits.maxActivePerTenant)
@@ -230,7 +247,11 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
       startMissionContent(
         log,
         mission.id,
-        { systemPrompt: q.systemPrompt, objective: q.objective, doneWhen: q.doneWhen },
+        {
+          systemPrompt: style ? `${q.systemPrompt}\n\n${style}` : q.systemPrompt,
+          objective: q.objective,
+          doneWhen: q.doneWhen,
+        },
         iso(now),
       );
       engine.wake();

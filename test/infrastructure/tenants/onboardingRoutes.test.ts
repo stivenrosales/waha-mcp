@@ -14,7 +14,9 @@ const PRIVACY_LINK = '<a href="/privacidad">Cómo se tratan tus datos</a>';
 const USED = "Este enlace ya se usó.";
 const TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
 
-function setup(opts: { webhook?: { url: string; secret: string } } = {}) {
+function setup(
+  opts: { webhook?: { url: string; secret: string }; cacheRetentionDays?: number } = {},
+) {
   let t = 1_800_000_000_000;
   const now = () => t;
   const db = openAuthDatabase(":memory:");
@@ -32,6 +34,9 @@ function setup(opts: { webhook?: { url: string; secret: string } } = {}) {
     limiter: createLoginLimiter({ now }),
     now,
     ...(opts.webhook ? { webhook: opts.webhook } : {}),
+    ...(opts.cacheRetentionDays !== undefined
+      ? { cacheRetentionDays: opts.cacheRetentionDays }
+      : {}),
   });
 
   // Every response body and header, to prove secrets never leak.
@@ -651,5 +656,30 @@ describe("privacy", () => {
     // The existing sections stay.
     expect(html).toContain("<h2>Qué se guarda</h2>");
     expect(html).toContain("<h2>Cómo salir</h2>");
+  });
+
+  it("explains the automatic deletion (90 days by default) and how to delete your data or unlink", async () => {
+    const ctx = setup();
+    const html = await (await ctx.request("/privacidad")).text();
+    expect(html).toContain("<h2>Cuánto tiempo se guarda</h2>");
+    expect(html).toContain(
+      "Los mensajes guardados, sus ediciones, reacciones y votos, y las transcripciones se borran solos a los 90 días",
+    );
+    expect(html).toContain("<code>delete_my_data</code>");
+    expect(html).toContain("<code>unlink_account</code>");
+    expect(html).toContain("solo actúan sobre tu cuenta");
+  });
+
+  it("states the configured retention, or that it is kept until you delete it", async () => {
+    const thirty = setup({ cacheRetentionDays: 30 });
+    expect(await (await thirty.request("/privacidad")).text()).toContain(
+      "las transcripciones se borran solos a los 30 días",
+    );
+    const forever = setup({ cacheRetentionDays: 0 });
+    const html = await (await forever.request("/privacidad")).text();
+    expect(html).toContain(
+      "Este servidor no borra automáticamente los mensajes guardados ni las transcripciones",
+    );
+    expect(html).not.toContain("se borran solos a los");
   });
 });

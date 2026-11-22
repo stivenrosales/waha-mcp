@@ -108,6 +108,36 @@ describe("composeScheduled", () => {
     );
   });
 
+  it("feeds the owner's writing style, from the owner's own lines only, into the prompt", async () => {
+    const llm = new FakeLlm(result(decide({ action: "skip", reason: "x" })));
+    const lines: ContextLine[] = [
+      { at: "2026-11-19 10:00", fromOwner: true, text: "jaja dale 😂" },
+      { at: "2026-11-19 10:01", fromOwner: false, text: "Estimado, le escribo formalmente." },
+      { at: "2026-11-19 10:02", fromOwner: true, text: "nos vemos mañana 👍" },
+      { at: "2026-11-19 10:03", fromOwner: true, text: "ok bro 😂" },
+      { at: "2026-11-19 10:04", fromOwner: true, text: "va, te aviso" },
+    ];
+    await composeScheduled(
+      { llm, readContext: async () => lines },
+      { chatId: "5199@c.us", instruction: "Saluda a Jose", now: NOW, timezone: TZ },
+    );
+    const req = llm.requests[0];
+    const user = JSON.stringify(req.messages);
+    expect(user).toContain(
+      "very short messages (about 3 words); uses emojis often (😂 👍); informal, casual tone",
+    );
+    expect(user).toContain("from their last 4 messages");
+    expect(req.system).toContain(
+      "Write the message in the owner's own writing style: when the owner's writing style is given, imitate its length, emojis, tone, capitalization, punctuation and language.",
+    );
+  });
+
+  it("without enough owner messages there is no style section", async () => {
+    const llm = new FakeLlm(result(decide({ action: "skip", reason: "x" })));
+    await run(llm);
+    expect(JSON.stringify(llm.requests[0].messages)).not.toContain("writing style");
+  });
+
   it("returns usage from the fake", async () => {
     const llm = new FakeLlm(result(decide({ action: "skip", reason: "x" })));
     expect((await run(llm)).usage).toEqual(usage);

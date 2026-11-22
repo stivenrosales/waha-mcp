@@ -141,6 +141,7 @@ async function world(opts: { cache?: boolean } = {}) {
       missionLog: {} as never,
       scheduleLog: {} as never,
       cipher,
+      cacheData: {} as never,
       close() {},
     };
   };

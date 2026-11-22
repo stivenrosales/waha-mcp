@@ -106,8 +106,16 @@ export function pairTakenPage(message: string): string {
   );
 }
 
-/** Public, honest account of what the server stores and who can see it. */
-export function privacyPage(): string {
+/**
+ * Public, honest account of what the server stores and who can see it. `cacheRetentionDays` is
+ * `CACHE_RETENTION_DAYS` (0: cached data is kept until deleted).
+ */
+export function privacyPage(opts: { cacheRetentionDays: number }): string {
+  const days = opts.cacheRetentionDays;
+  const retention =
+    days > 0
+      ? `Los mensajes guardados, sus ediciones, reacciones y votos, y las transcripciones se borran solos a los ${days} días, en una limpieza que corre una vez al día. Si tu cuenta está suspendida, se borran cuando la reactiven.`
+      : "Este servidor no borra automáticamente los mensajes guardados ni las transcripciones: se guardan hasta que los borres tú o eliminen tu cuenta.";
   return layout(
     "Privacidad",
     `<h1>Cómo se tratan tus datos</h1>
@@ -132,7 +140,17 @@ export function privacyPage(): string {
 <li><span>El contenido de cada misión y sus datos de control se borran 30 días después de que termina, en una limpieza que corre una vez al día. Si tu cuenta está suspendida, se guardan hasta que la reactiven (entonces se borran en el plazo de un día) o la eliminen. Si eliminan tu cuenta, se borran en ese momento junto con todo lo demás.</span></li>
 <li><span>El administrador no accede al contenido de las misiones: no tiene herramientas para leerlo y se compromete a no hacerlo. Solo ve cuántas llamadas al modelo hizo cada cuenta y cuánto costaron.</span></li>
 </ul>
+<h2>Cuánto tiempo se guarda</h2>
+<ul class="steps">
+<li><span>${retention}</span></li>
+<li><span>Nunca se borran solos tu cuenta, tu usuario, tus aplicaciones conectadas ni tus misiones o mensajes programados activos.</span></li>
+</ul>
 <h2>Cómo salir</h2>
-<p>Para cortar el acceso a tu WhatsApp, ve a <strong>Dispositivos vinculados</strong> en tu teléfono y cierra la sesión de este servidor. Para borrar todo, pide al administrador que elimine tu cuenta: se borran tu usuario, tu llave, los mensajes guardados, tus misiones y la sesión de WhatsApp.</p>`,
+<p>Desde la aplicación que conectes (por ejemplo, Claude) puedes pedir dos cosas, que solo actúan sobre tu cuenta, nunca sobre la de otra persona:</p>
+<ul class="steps">
+<li><span><strong>Borrar tus datos</strong> (<code>delete_my_data</code>): borra en el momento tus mensajes guardados, sus ediciones, reacciones y votos, las transcripciones y el contenido de tus misiones y mensajes programados que ya terminaron. Tu cuenta sigue funcionando.</span></li>
+<li><span><strong>Desvincularte</strong> (<code>unlink_account</code>): cierra la sesión de tu WhatsApp en este servidor y en todas las aplicaciones conectadas. Para volver, inicia sesión en <a href="/pair">/pair</a> y escanea el código QR.</span></li>
+</ul>
+<p>También puedes cortar el acceso desde tu teléfono: ve a <strong>Dispositivos vinculados</strong> y cierra la sesión de este servidor. Para borrar todo, pide al administrador que elimine tu cuenta: se borran tu usuario, tu llave, los mensajes guardados, tus misiones y la sesión de WhatsApp.</p>`,
   );
 }

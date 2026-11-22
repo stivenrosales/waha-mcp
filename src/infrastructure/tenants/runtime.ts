@@ -18,11 +18,13 @@ import {
 import type { Config } from "../../config.js";
 import { WahaNotFoundError } from "../../domain/errors.js";
 import type { EngineMapper } from "../../domain/message.js";
+import type { CacheData } from "../../domain/ports/CacheData.js";
 import type { ScheduleLog } from "../../domain/ports/ScheduleLog.js";
 import type { ScheduleStore } from "../../domain/ports/ScheduleStore.js";
 import type { Tenant } from "../../domain/ports/TenantStore.js";
 import type { TranscriptStore } from "../../domain/ports/TranscriptStore.js";
 import type { WahaGateway } from "../../domain/ports/WahaGateway.js";
+import { createCacheData } from "../cache/cacheData.js";
 import { createSqliteMessageActionStore } from "../cache/sqliteMessageActionStore.js";
 import { createSqliteMessageStore, openCacheDatabase } from "../cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../cache/sqliteTranscriptStore.js";
@@ -32,6 +34,7 @@ import { createMediaHandler } from "../media/mediaRoute.js";
 import { createSignedLinks } from "../media/signedLink.js";
 import { createSealedMissionLog, type MissionLog } from "../missions/sealedMissionLog.js";
 import { createSealedScheduleLog } from "../schedules/sealedScheduleLog.js";
+import { readOwnerStyle } from "../schedules/tenantPort.js";
 import {
   createOpenAiCompatibleTranscriber,
   type TranscriptionUsage,
@@ -71,7 +74,7 @@ const TENANT_ID = /^[A-Za-z0-9_-]+$/;
  */
 export type TenantToolContext = Omit<
   ToolRunContext,
-  "mediaIdleTimeoutMs" | "mapper" | "admin" | "logger"
+  "mediaIdleTimeoutMs" | "mapper" | "admin" | "logger" | "self"
 > & {
   mapper: () => Promise<EngineMapper>;
 };
@@ -89,6 +92,8 @@ export interface TenantRuntime {
   scheduleLog: ScheduleLog;
   /** This tenant's data cipher (e.g. to seal received webhook payloads). */
   cipher: TenantCipher;
+  /** This tenant's cached message data as a whole: retention prunes it, `delete_my_data` wipes it. */
+  cacheData: CacheData;
   /** Closes the cache database and stops the upload sweep. Idempotent. */
   close(): void;
 }
@@ -131,6 +136,8 @@ export function buildTenantServices(deps: {
   scheduleLog: ScheduleLog;
   logger: Logger;
   wiring?: MissionWiring;
+  /** The owner's writing style in a chat, appended to a new mission's prompt; absent: none. */
+  ownerStyle?: (chatId: string) => Promise<string | null>;
 }): Pick<TenantToolContext, "missions" | "schedules"> {
   const { config, tenant, gateway, wiring } = deps;
   const missionsConfig = config.missions;
@@ -158,6 +165,7 @@ export function buildTenantServices(deps: {
       lookupLid,
       logger: deps.logger,
       hasHistory,
+      ...(deps.ownerStyle ? { ownerStyle: deps.ownerStyle } : {}),
     }),
     schedules: scheduleWiring
       ? createScheduleService({
@@ -262,7 +270,7 @@ export function buildTenantRuntime(deps: {
       cipher,
       session,
       cache: config.cacheEnabled
-        ? { refreshHours: config.cacheRefreshHours, maxAgeDays: config.cacheMaxAgeDays }
+        ? { refreshHours: config.cacheRefreshHours, maxAgeDays: config.cacheRetentionDays }
         : null,
     });
     const transcription = config.transcription
@@ -319,6 +327,8 @@ export function buildTenantRuntime(deps: {
       scheduleLog,
       logger,
       ...(deps.missions ? { wiring: deps.missions } : {}),
+      ownerStyle: (chatId) =>
+        readOwnerStyle({ gateway, mapper, transcription }, chatId, new Date()),
     });
 
     let closed = false;
@@ -342,6 +352,7 @@ export function buildTenantRuntime(deps: {
       missionLog,
       scheduleLog,
       cipher,
+      cacheData: createCacheData(cacheDb, cipher),
       close() {
         if (closed) return;
         closed = true;

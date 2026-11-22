@@ -10,6 +10,7 @@ import type { z } from "zod";
 import type { MessageActions } from "../../application/messageActions.js";
 import type { MissionService } from "../../application/missions/service.js";
 import type { ScheduleService } from "../../application/schedules/service.js";
+import type { SelfService } from "../../application/selfService.js";
 import type { TenantAdmin } from "../../application/tenantAdmin.js";
 import {
   DISABLED_TRANSCRIPTION,
@@ -56,6 +57,8 @@ export interface ToolRunContext {
   schedules: ScheduleService | null;
   /** This tenant's stored edits, revokes, reactions and poll votes. */
   messageActions: MessageActions;
+  /** The caller's own data deletion and unlink; null when the server did not wire it. */
+  self: SelfService | null;
   /** The call's logger (tool, kind and outcome only). */
   logger: Logger;
 }
@@ -111,6 +114,8 @@ export interface ToolDeps {
   /** Default null: schedule tools then answer that missions are not configured. */
   schedules?: ScheduleService | null;
   messageActions: MessageActions;
+  /** Default null: `delete_my_data` and `unlink_account` then refuse. */
+  self?: SelfService | null;
   logger?: Logger;
   /** Told about every call once it ends (usage accounting); a throw is logged, never surfaced. */
   onToolCall?: (call: ToolCallRecord) => void;
@@ -228,6 +233,7 @@ export function createToolHandler<InputSchema extends z.ZodType, OutputSchema ex
         missions: deps.missions ?? null,
         schedules: deps.schedules ?? null,
         messageActions: deps.messageActions,
+        self: deps.self ?? null,
         logger,
       });
       const ms = Date.now() - start;

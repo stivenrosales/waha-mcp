@@ -56,7 +56,13 @@ const noLlm: LlmClient = {
   },
 };
 
-function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
+function harness(
+  opts: {
+    spend?: number;
+    withHistory?: string[];
+    ownerStyle?: (chatId: string) => Promise<string | null>;
+  } = {},
+) {
   let now = T0;
   const authDb = new DatabaseSync(":memory:");
   const store = createSqliteMissionStore(authDb, () => now.toISOString());
@@ -140,6 +146,7 @@ function harness(opts: { spend?: number; withHistory?: string[] } = {}) {
       hasHistory: async (chatId) => history.has(chatId),
       lookupLid: async (lid) => (lid === CHAT_LID ? CHAT : null),
       logger: { info: (m: string) => lines.push(m) },
+      ...(opts.ownerStyle ? { ownerStyle: opts.ownerStyle } : {}),
     });
   const service = serviceFor(TENANT);
   const deps = (missions: MissionService | null): ToolDeps =>
@@ -352,6 +359,67 @@ describe("mission tools", () => {
     expect(h.store.list(TENANT)).toEqual([]);
   });
 
+  it("appends the owner's writing style in that chat to the stored system prompt", async () => {
+    const asked: string[] = [];
+    const h = harness({
+      ownerStyle: async (chatId) => {
+        asked.push(chatId);
+        return "Owner's writing style in this chat: very short messages.";
+      },
+    });
+    const r = await h.call("start_mission", h.startInput({ chat_id: CHAT_LID }));
+    expect(r.isError).toBe(false);
+    const [m] = h.store.list(TENANT);
+    // Read under the chat id the mission is stored with.
+    expect(asked).toEqual([m?.chatId]);
+    expect(h.log.read(m?.id as string)[0]).toMatchObject({
+      kind: "prompt",
+      body: {
+        text: "You are Stiven's assistant.\n\nOwner's writing style in this chat: very short messages.",
+      },
+    });
+  });
+
+  it("no engine tick can step the mission while the owner's style is still being read", async () => {
+    const dueWhileReading: unknown[] = [];
+    const h = harness({
+      ownerStyle: async () => {
+        // An engine tick landing here must find nothing due without its prompt and spec.
+        await h.engine.tick(h.now);
+        dueWhileReading.push(...h.store.due(h.now.toISOString()));
+        return "Owner's writing style in this chat: very short messages.";
+      },
+    });
+    const r = await h.call("start_mission", h.startInput());
+    expect(r.isError).toBe(false);
+    expect(dueWhileReading).toEqual([]);
+    const [m] = h.store.list(TENANT);
+    expect(h.log.read(m?.id as string).map((e) => e.kind)).toEqual(["prompt", "spec"]);
+    expect(m?.nextWakeAt).toBe(T0.toISOString());
+  });
+
+  it("starts without a style when there is none or it cannot be read (logged without content)", async () => {
+    const none = harness({ ownerStyle: async () => null });
+    await none.call("start_mission", none.startInput());
+    const [a] = none.store.list(TENANT);
+    expect(none.log.read(a?.id as string)[0]?.body).toEqual({
+      text: "You are Stiven's assistant.",
+    });
+    const failing = harness({
+      ownerStyle: async () => {
+        throw new Error("WAHA down with secret details");
+      },
+    });
+    const r = await failing.call("start_mission", failing.startInput());
+    expect(r.isError).toBe(false);
+    const [b] = failing.store.list(TENANT);
+    expect(failing.log.read(b?.id as string)[0]?.body).toEqual({
+      text: "You are Stiven's assistant.",
+    });
+    expect(failing.lines).toContain("mission style=unavailable error=Error");
+    expect(failing.lines.join("\n")).not.toContain("secret details");
+  });
+
   it("starts a mission: stores the prompt and spec, wakes the engine, reports id and deadline", async () => {
     const h = harness();
     const r = await h.call("start_mission", h.startInput({ closing_message: true }));
@@ -463,6 +531,25 @@ describe("mission tools", () => {
       isError: true,
       text: "Missions to 5 new contacts were already started today; try again tomorrow.",
     });
+  });
+
+  it("keeps the daily new-contact cap when two missions start at once while the style is read", async () => {
+    const h = harness({
+      withHistory: [],
+      ownerStyle: () => new Promise((resolve) => setTimeout(() => resolve(null), 20)),
+    });
+    for (const chat of ["1@c.us", "2@c.us", "3@c.us"])
+      await h.call("start_mission", h.startInput({ chat_id: chat }));
+    for (const m of h.store.list(TENANT)) await h.call("cancel_mission", { mission_id: m.id });
+    await h.call("start_mission", h.startInput({ chat_id: "4@c.us" }));
+    const results = await Promise.all(
+      ["5@c.us", "6@c.us"].map((chat) => h.call("start_mission", h.startInput({ chat_id: chat }))),
+    );
+    expect(results.filter((r) => !r.isError)).toHaveLength(1);
+    expect(results.find((r) => r.isError)).toMatchObject({
+      text: "Missions to 5 new contacts were already started today; try again tomorrow.",
+    });
+    expect(h.store.list(TENANT).filter((m) => m.state === "active")).toHaveLength(2);
   });
 
   it("counts scheduled messages to new contacts toward the same daily cap", async () => {

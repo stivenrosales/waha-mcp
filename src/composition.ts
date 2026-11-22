@@ -5,6 +5,7 @@ import { type CacheEventProcessor, createCacheEventProcessor } from "./applicati
 import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
 import { createMissionPurge, type MissionPurge } from "./application/missions/retention.js";
 import { createScheduleRunner, type ScheduleRunner } from "./application/schedules/runner.js";
+import { createSelfService } from "./application/selfService.js";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
 import {
@@ -66,6 +67,11 @@ export interface ComposeDeps {
    * `restore_tenant` catches up through it.
    */
   scheduleRunner?: () => ScheduleRunner | null;
+  /**
+   * The retention purge, read lazily (it is composed after the registry it needs):
+   * `delete_my_data` deletes the caller's ended missions and schedules through it.
+   */
+  missionPurge?: () => Pick<MissionPurge, "purgeTenantHistory"> | null;
   sessions: SessionAdmin;
   mediaSecret: Uint8Array;
   logger: Logger;
@@ -159,6 +165,17 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     timezone: config.timezone,
     ...(webhook ? { webhook } : {}),
   });
+  const selfService = createSelfService({
+    tenants,
+    auth: store,
+    sessions,
+    registry,
+    history: {
+      purgeTenantHistory: (tenantId, now) =>
+        deps.missionPurge?.()?.purgeTenantHistory(tenantId, now) ?? { missions: 0, schedules: 0 },
+    },
+    logger,
+  });
   const tools = createTools();
   const mcp = createMcpServer({
     tools,
@@ -167,6 +184,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
     config,
     registry,
     admin,
+    selfService,
     logger,
     recordToolCall: (tenantId, call) =>
       tenants.recordToolCall({ tenantId, at: new Date().toISOString(), ...call }),
@@ -190,6 +208,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       publicBaseUrl: config.publicBaseUrl,
       limiter,
       logger,
+      cacheRetentionDays: config.cacheRetentionDays,
       ...(webhook ? { webhook } : {}),
     }),
     guard: bearerGuard({ store, tenants, publicBaseUrl: config.publicBaseUrl }),
@@ -286,8 +305,9 @@ export function composeCacheEventProcessor(deps: {
 }
 
 /**
- * The mission retention purge over the registry. It runs whether missions are on or off: with
- * the engine it runs in the engine's tick; without it, `main.ts` calls `start()`.
+ * The daily retention purge over the registry (mission and schedule history, webhook events and
+ * cached message data). It runs whether missions are on or off: with the engine it runs in the
+ * engine's tick; without it, `main.ts` calls `start()`.
  */
 export function composeMissionPurge(deps: {
   registry: Pick<TenantRegistry, "acquire">;
@@ -297,9 +317,14 @@ export function composeMissionPurge(deps: {
   schedules?: ScheduleStore;
   events: EventStore | undefined;
   logger: Logger;
+  /** `CACHE_RETENTION_DAYS`: cached message data older than this is pruned daily (0 keeps it). */
+  cacheRetentionDays?: number;
 }): MissionPurge {
   return createMissionPurge({
     missions: deps.missions,
+    ...(deps.cacheRetentionDays !== undefined
+      ? { cacheRetentionDays: deps.cacheRetentionDays }
+      : {}),
     ...(deps.schedules ? { schedules: deps.schedules } : {}),
     ...(deps.events ? { events: deps.events } : {}),
     tenants: deps.tenants,
@@ -309,6 +334,7 @@ export function composeMissionPurge(deps: {
         ? {
             log: held.runtime.missionLog,
             scheduleLog: held.runtime.scheduleLog,
+            cache: held.runtime.cacheData,
             release: held.release,
           }
         : null;

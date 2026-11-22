@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import type { CacheEventProcessor } from "./application/cacheEvents.js";
 import type { MissionEngine } from "./application/missions/engine.js";
+import type { MissionPurge } from "./application/missions/retention.js";
 import type { ScheduleRunner } from "./application/schedules/runner.js";
 import {
   composeApp,
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
   let missionEngine: MissionEngine | null = null;
   let scheduleRunner: ScheduleRunner | null = null;
   let cacheEvents: CacheEventProcessor | null = null;
+  let retentionPurge: MissionPurge | null = null;
   const { app, registry, toolCount, configureWebhooks } = composeApp({
     config,
     store,
@@ -96,11 +98,21 @@ async function main(): Promise<void> {
     missionEngine: () => missionEngine,
     schedules,
     scheduleRunner: () => scheduleRunner,
+    missionPurge: () => retentionPurge,
     sessions,
     mediaSecret,
     logger,
   });
-  const purge = composeMissionPurge({ registry, tenants, missions, schedules, events, logger });
+  const purge = composeMissionPurge({
+    registry,
+    tenants,
+    missions,
+    schedules,
+    events,
+    logger,
+    cacheRetentionDays: config.cacheRetentionDays,
+  });
+  retentionPurge = purge;
   missionEngine = composeMissionEngine({
     config,
     registry,
@@ -111,7 +123,7 @@ async function main(): Promise<void> {
     purge,
   });
   // Migrations are done: process stored events and due missions every 5 s (the engine also runs
-  // the daily retention purge). With missions off, the purge runs on its own.
+  // the daily retention purge, which also prunes cached message data past CACHE_RETENTION_DAYS). With missions off, the purge runs on its own.
   // Scheduled messages need missions (quiet hours, pause state, budget): only with the engine.
   scheduleRunner = missionEngine
     ? composeScheduleRunner({ config, registry, tenants, missions, schedules, logger })

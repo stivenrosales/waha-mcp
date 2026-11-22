@@ -5,6 +5,11 @@ import { composeMissionEngine, composeMissionPurge } from "../../../src/composit
 import type { Config } from "../../../src/config.js";
 import type { TenantStore } from "../../../src/domain/ports/TenantStore.js";
 import { openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
+import { createCacheData } from "../../../src/infrastructure/cache/cacheData.js";
+import {
+  createSqliteMessageStore,
+  openCacheDatabase,
+} from "../../../src/infrastructure/cache/sqliteMessageStore.js";
 import { createSealedMissionLog } from "../../../src/infrastructure/missions/sealedMissionLog.js";
 import { createSqliteEventStore } from "../../../src/infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "../../../src/infrastructure/missions/sqliteMissionStore.js";
@@ -141,6 +146,177 @@ describe("mission purge", () => {
       logger: { info() {} },
     }).purge(NOW);
     expect(s.events.pending(10).map((e) => e.eventId)).toEqual(["evt_edge"]);
+  });
+
+  it("prunes every active tenant's message cache older than cacheRetentionDays, each in its own runtime", () => {
+    const s = stores();
+    const other = { ...tenant, id: "t2", wahaSession: "s2" };
+    const revoked = { ...tenant, id: "t3", wahaSession: "s3" };
+    const pruned: { tenantId: string; cutoffMs: number }[] = [];
+    const released: string[] = [];
+    createMissionPurge({
+      missions: s.missions,
+      tenants: { listTenants: () => [tenant, other, revoked] },
+      // No runtime for a revoked tenant: nothing to prune there until it is restored.
+      acquireLog: (tenantId) =>
+        tenantId === "t3"
+          ? null
+          : {
+              log: s.log,
+              cache: {
+                pruneBefore: (cutoffMs) => {
+                  pruned.push({ tenantId, cutoffMs });
+                  return { messages: 2, transcripts: 1 };
+                },
+              },
+              release: () => released.push(tenantId),
+            },
+      cacheRetentionDays: 90,
+      logger: { info() {} },
+    }).purge(NOW);
+    const cutoffMs = NOW.getTime() - 90 * DAY;
+    expect(pruned).toEqual([
+      { tenantId: TENANT, cutoffMs },
+      { tenantId: "t2", cutoffMs },
+    ]);
+    expect(released).toEqual([TENANT, "t2"]);
+  });
+
+  it("does not prune the message cache when cacheRetentionDays is 0 (keep forever)", () => {
+    const s = stores();
+    let acquired = 0;
+    createMissionPurge({
+      missions: s.missions,
+      tenants: { listTenants: () => [tenant] },
+      acquireLog: () => {
+        acquired += 1;
+        return {
+          log: s.log,
+          cache: {
+            pruneBefore: () => {
+              throw new Error("must not prune");
+            },
+          },
+          release() {},
+        };
+      },
+      cacheRetentionDays: 0,
+      logger: { info() {} },
+    }).purge(NOW);
+    expect(acquired).toBe(0);
+  });
+
+  it("a failing cache prune of one tenant is logged and does not stop the others", () => {
+    const s = stores();
+    const other = { ...tenant, id: "t2", wahaSession: "s2" };
+    const lines: string[] = [];
+    const pruned: string[] = [];
+    createMissionPurge({
+      missions: s.missions,
+      tenants: { listTenants: () => [tenant, other] },
+      acquireLog: (tenantId) => ({
+        log: s.log,
+        cache: {
+          pruneBefore: () => {
+            if (tenantId === TENANT) throw new Error("disk");
+            pruned.push(tenantId);
+            return { messages: 3, transcripts: 0 };
+          },
+        },
+        release() {},
+      }),
+      cacheRetentionDays: 90,
+      logger: { info: (m) => lines.push(m) },
+    }).purge(NOW);
+    expect(pruned).toEqual(["t2"]);
+    expect(lines).toContain(`tenant=${TENANT} purge=failed`);
+    expect(lines).toContain(
+      "missions purge missions=0 schedules=0 events=0 cached_messages=3 transcripts=0",
+    );
+  });
+
+  it("purgeTenantHistory deletes only that tenant's ended missions and keeps its active ones", () => {
+    const s = stores();
+    const endedNow = s.ended(1);
+    const active = s.missions.create({
+      tenantId: TENANT,
+      chatId: "51922222222@c.us",
+      newContact: false,
+      deadlineAt: NOW.toISOString(),
+      expectsFiles: false,
+    });
+    s.log.append(active.id, { kind: "prompt", at: NOW.toISOString(), body: "activa" });
+    const otherTenant = s.missions.create({
+      tenantId: "t2",
+      chatId: "51933333333@c.us",
+      newContact: false,
+      deadlineAt: NOW.toISOString(),
+      expectsFiles: false,
+    });
+    s.missions.update(otherTenant.id, { state: "cancelled", endedAt: NOW.toISOString() });
+    const acquired: string[] = [];
+    const result = createMissionPurge({
+      missions: s.missions,
+      tenants: { listTenants: () => [tenant] },
+      acquireLog: (tenantId) => {
+        acquired.push(tenantId);
+        return { log: s.log, release() {} };
+      },
+      logger: { info() {} },
+    }).purgeTenantHistory(TENANT, NOW);
+    expect(result).toEqual({ missions: 1, schedules: 0 });
+    expect(acquired).toEqual([TENANT]);
+    expect(s.missions.get(TENANT, endedNow)).toBeNull();
+    expect(s.log.read(endedNow)).toEqual([]);
+    expect(s.missions.get(TENANT, active.id)?.state).toBe("active");
+    expect(s.log.read(active.id)).toHaveLength(1);
+    expect(s.missions.get("t2", otherTenant.id)).not.toBeNull();
+  });
+
+  it("composeMissionPurge prunes each runtime's cache.db past CACHE_RETENTION_DAYS and keeps newer rows", () => {
+    const s = stores();
+    const chat = "51911111111@c.us";
+    const nowS = Math.floor(NOW.getTime() / 1000);
+    const caches = new Map(
+      ["t1", "t2"].map((id) => {
+        const db = openCacheDatabase(":memory:");
+        const cipher = testCipher(id);
+        createSqliteMessageStore(db, cipher).upsertRaw(chat, [
+          { id: `${id}_old`, ts: nowS - 90 * 86_400 - 1, raw: { id: `${id}_old` } },
+          { id: `${id}_edge`, ts: nowS - 90 * 86_400, raw: { id: `${id}_edge` } },
+        ]);
+        return [id, { db, cipher }] as const;
+      }),
+    );
+    const registry = {
+      acquire: (id: string) => {
+        const c = caches.get(id);
+        return c
+          ? {
+              runtime: {
+                missionLog: s.log,
+                cacheData: createCacheData(c.db, c.cipher),
+              } as unknown as TenantRuntime,
+              release() {},
+            }
+          : null;
+      },
+    } as unknown as TenantRegistry;
+    const purge = composeMissionPurge({
+      registry,
+      tenants: {
+        listTenants: () => [tenant, { ...tenant, id: "t2" }],
+      } as unknown as TenantStore,
+      missions: s.missions,
+      events: s.events,
+      logger: { info() {} },
+      cacheRetentionDays: 90,
+    });
+    purge.purge(NOW);
+    for (const [id, c] of caches)
+      expect(
+        createSqliteMessageStore(c.db, c.cipher).readRange(chat, { limit: 10, offset: 0 }),
+      ).toEqual([{ id: `${id}_edge` }]);
   });
 
   it("runs even when missions are off: no engine, but start() purges right away", () => {

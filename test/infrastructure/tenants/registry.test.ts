@@ -83,6 +83,7 @@ function fakeBuild() {
       missionLog: {} as TenantRuntime["missionLog"],
       scheduleLog: {} as TenantRuntime["scheduleLog"],
       cipher: {} as TenantRuntime["cipher"],
+      cacheData: {} as TenantRuntime["cacheData"],
       media: async () => new Response(null),
       upload: async () => new Response(null),
       close: () => {

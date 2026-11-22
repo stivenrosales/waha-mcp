@@ -9,6 +9,7 @@ import type {
   ScheduleState,
   ScheduleStore,
 } from "../../domain/ports/ScheduleStore.js";
+import { parseReplyWindow } from "../../domain/schedules/followUp.js";
 import type { ScheduleLimits } from "../../domain/schedules/limits.js";
 import {
   formatLocal,
@@ -46,10 +47,15 @@ export interface ScheduleInput {
   kind: ScheduleKind;
   text?: string;
   instruction?: string;
-  /** Local date-time in the server timezone, `YYYY-MM-DD HH:mm`. */
-  at: string;
+  /** Local date-time in the server timezone, `YYYY-MM-DD HH:mm`. Not given for a follow-up. */
+  at?: string;
   repeat: ScheduleRepeat;
   maxRuns?: number;
+  /**
+   * A follow-up: `"48h"` or `"3d"`. It runs once, that long after now, only when the contact
+   * has not written in the chat since now. Direct chats only; replaces `at`.
+   */
+  ifNoReplyWithin?: string;
 }
 
 export interface ScheduleView {
@@ -82,6 +88,14 @@ export const SCHEDULE_TEXTS = {
     `Missions and scheduled messages to ${n} new contacts were already created today; try again tomorrow.`,
   quietHours: (start: string, end: string, at: string) =>
     `This falls in quiet hours (${start}–${end}); it will be sent at ${at}.`,
+  needAt: "at is required (or if_no_reply_within, for a follow-up).",
+  followUpAt:
+    "A follow-up (if_no_reply_within) runs that long after now: leave out at, or drop if_no_reply_within.",
+  followUpDirect:
+    "Follow-ups (if_no_reply_within) are for direct chats only (…@c.us or …@lid), not groups.",
+  followUpOnce: 'A follow-up (if_no_reply_within) runs once: repeat must be "none".',
+  replyWindow:
+    'if_no_reply_within must be a whole number of hours or days, like "48h" or "3d", from 1h to 30d.',
   notFound: "Scheduled message not found.",
   notActive: (id: string, state: ScheduleState) =>
     `Scheduled message ${id} is not active (${state}).`,
@@ -142,9 +156,21 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
       if (!direct && !GROUP_CHAT.test(q.chatId)) throw new InvalidInputError(SCHEDULE_TEXTS.chatId);
       const content = contentOf(q);
       const now = deps.now();
-      const first = parseLocalDateTime(q.at, tz);
-      if (first.getTime() <= now.getTime())
-        throw new InvalidInputError(SCHEDULE_TEXTS.past(formatLocal(now, tz), tz));
+      const followUp = q.ifNoReplyWithin !== undefined;
+      let first: Date;
+      if (followUp) {
+        if (!direct) throw new InvalidInputError(SCHEDULE_TEXTS.followUpDirect);
+        if (q.repeat !== "none") throw new InvalidInputError(SCHEDULE_TEXTS.followUpOnce);
+        if (q.at !== undefined) throw new InvalidInputError(SCHEDULE_TEXTS.followUpAt);
+        const window = parseReplyWindow(q.ifNoReplyWithin ?? "");
+        if (window === null) throw new InvalidInputError(SCHEDULE_TEXTS.replyWindow);
+        first = new Date(now.getTime() + window);
+      } else {
+        if (q.at === undefined) throw new InvalidInputError(SCHEDULE_TEXTS.needAt);
+        first = parseLocalDateTime(q.at, tz);
+        if (first.getTime() <= now.getTime())
+          throw new InvalidInputError(SCHEDULE_TEXTS.past(formatLocal(now, tz), tz));
+      }
       const maxRuns = maxRunsOf(q);
       if (store.countActive(tenantId) >= limits.maxActivePerTenant)
         throw new InvalidInputError(SCHEDULE_TEXTS.active(limits.maxActivePerTenant));
@@ -184,6 +210,7 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
         nextRunAt: first.toISOString(),
         maxRuns,
         newContact,
+        followUpSince: followUp ? now.toISOString() : null,
       });
       try {
         log.putContent(row.id, content);

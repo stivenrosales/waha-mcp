@@ -46,9 +46,38 @@ describe("sqliteScheduleStore", () => {
       state: "active",
       createdAt: "2026-11-20T10:00:00.000Z",
       endedAt: null,
+      followUpSince: null,
     });
     expect(store.get("t1", row.id)).toEqual(row);
     expect(store.get("t2", row.id)).toBeNull();
+  });
+
+  it("stores the anchor of a follow-up", () => {
+    const { store } = setup();
+    const row = store.create({ ...base, followUpSince: "2026-11-20T10:00:00.000Z" });
+    expect(row.followUpSince).toBe("2026-11-20T10:00:00.000Z");
+    expect(store.get("t1", row.id)?.followUpSince).toBe("2026-11-20T10:00:00.000Z");
+  });
+
+  it("adds follow_up_since to a schedules table created before follow-ups; old rows read null", () => {
+    const db = new DatabaseSync(":memory:");
+    createSqliteTenantStore(db);
+    db.exec(`CREATE TABLE schedules (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, chat_id TEXT NOT NULL, kind TEXT NOT NULL,
+      repeat TEXT NOT NULL, first_at TEXT NOT NULL, next_run_at TEXT,
+      runs_done INTEGER NOT NULL DEFAULT 0, max_runs INTEGER NOT NULL,
+      new_contact INTEGER NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, ended_at TEXT)`);
+    db.prepare(
+      `INSERT INTO schedules (id, tenant_id, chat_id, kind, repeat, first_at, next_run_at,
+         max_runs, new_contact, state, created_at)
+       VALUES ('old', 't1', '51999@c.us', 'fixed', 'none', ?, ?, 1, 0, 'active', ?)`,
+    ).run(base.firstAt, base.firstAt, "2026-11-19T10:00:00.000Z");
+    const store = createSqliteScheduleStore(db);
+    expect(store.get("t1", "old")?.followUpSince).toBeNull();
+    const next = store.create({ ...base, followUpSince: "2026-11-20T10:00:00.000Z" });
+    expect(store.get("t1", next.id)?.followUpSince).toBe("2026-11-20T10:00:00.000Z");
+    // Opening it again does not add the column twice.
+    expect(() => createSqliteScheduleStore(db)).not.toThrow();
   });
 
   it("due returns only active rows with a past next_run_at, oldest first, honouring limit", () => {

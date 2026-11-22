@@ -61,7 +61,7 @@ people stays possible but has to be turned on.
 
 ### Compose stack
 
-- `waha`: `${WAHA_IMAGE:-devlikeapro/waha:latest}`, `WHATSAPP_DEFAULT_ENGINE=GOWS`,
+- `waha`: `${WAHA_IMAGE:-devlikeapro/waha:gows}`, `WHATSAPP_DEFAULT_ENGINE=GOWS`,
   `WAHA_API_KEY`, dashboard and swagger credentials, `WHATSAPP_START_SESSION=${WAHA_SESSION}`
   (the owner's session exists and starts on every boot), `WAHA_PRINT_QR=True`, volumes on
   `/app/.sessions` and `/app/.media`. Port published only on `127.0.0.1:${WAHA_HOST_PORT:-3001}`.
@@ -82,7 +82,7 @@ people stays possible but has to be turned on.
   same `.env` can drive both.
 - `MULTI_TENANT` unset means auto (members already present → multi-tenant), not a hard `false`,
   so upgrading the running multi-tenant deployment changes nothing.
-- WAHA image defaults to `devlikeapro/waha:latest` (GOWS needs WAHA 2026.6.1+ Core for media and
+- WAHA image defaults to `devlikeapro/waha:gows` (`gows-arm` on arm64, picked by the init script; `latest` is amd64 only) (GOWS needs WAHA 2026.6.1+ Core for media and
   more than one session); `WAHA_IMAGE` pins a version.
 - The owner pairs WhatsApp through WAHA (logs QR, dashboard via SSH tunnel, or curl PNG).
 - HTTPS on a VPS through the bundled Caddy profile; a laptop install uses

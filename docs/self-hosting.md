@@ -141,7 +141,9 @@ docker compose --profile https up -d --build   # or without --profile on a lapto
 ```
 
 Your volumes are kept. To update WAHA, pin a newer `WAHA_IMAGE` in `.env` (or
-`docker compose pull waha` when you use `latest`) and run the same command.
+`docker compose pull waha` when you use an unpinned tag) and run the same command. WAHA's GOWS
+image is per CPU: `devlikeapro/waha:gows` is amd64 only and `devlikeapro/waha:gows-arm` is
+arm64 (Apple Silicon, ARM VPS); `scripts/init-env.sh` picks the right one for the machine.
 
 ## Backups
 

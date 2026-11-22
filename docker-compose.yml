@@ -12,7 +12,7 @@ name: waha-mcp
 
 services:
   waha:
-    image: ${WAHA_IMAGE:-devlikeapro/waha:latest}
+    image: ${WAHA_IMAGE:-devlikeapro/waha:gows}
     restart: unless-stopped
     environment:
       WHATSAPP_DEFAULT_ENGINE: GOWS

@@ -76,13 +76,19 @@ else
   WEBHOOK_SECRET=""
 fi
 
+# WAHA publishes its GOWS image per CPU: "gows" is amd64 only, "gows-arm" is arm64.
+case "$(uname -m)" in
+  arm64 | aarch64) WAHA_IMAGE="devlikeapro/waha:gows-arm" ;;
+  *) WAHA_IMAGE="devlikeapro/waha:gows" ;;
+esac
+
 umask 077
 TMP="$OUT.tmp.$$"
 trap 'rm -f "$TMP"' EXIT
 # Values go through the environment, not the awk program text.
 MASTER_KEY="$MASTER_KEY" ADMIN_PASSWORD="$ADMIN_PASSWORD" WAHA_API_KEY="$WAHA_API_KEY" \
   DASHBOARD_PASSWORD="$DASHBOARD_PASSWORD" PUBLIC_BASE_URL="$PUBLIC_BASE_URL" \
-  WEBHOOK_SECRET="$WEBHOOK_SECRET" USERNAME="$USERNAME" DOMAIN="$DOMAIN" \
+  WEBHOOK_SECRET="$WEBHOOK_SECRET" USERNAME="$USERNAME" DOMAIN="$DOMAIN" WAHA_IMAGE="$WAHA_IMAGE" \
   awk '
     BEGIN {
       v["MASTER_KEY"] = ENVIRON["MASTER_KEY"]
@@ -93,6 +99,7 @@ MASTER_KEY="$MASTER_KEY" ADMIN_PASSWORD="$ADMIN_PASSWORD" WAHA_API_KEY="$WAHA_AP
       v["WAHA_DASHBOARD_PASSWORD"] = ENVIRON["DASHBOARD_PASSWORD"]
       v["PUBLIC_BASE_URL"] = ENVIRON["PUBLIC_BASE_URL"]
       v["DOMAIN"] = ENVIRON["DOMAIN"]
+      v["WAHA_IMAGE"] = ENVIRON["WAHA_IMAGE"]
     }
     /^[A-Z_]+=/ {
       key = substr($0, 1, index($0, "=") - 1)
@@ -109,6 +116,7 @@ trap - EXIT
 
 echo "Wrote $OUT (mode 600, readable only by you)."
 echo "PUBLIC_BASE_URL=$PUBLIC_BASE_URL"
+echo "WAHA image: $WAHA_IMAGE (matches this machine's CPU)."
 echo "Admin login: $USERNAME (password: the ADMIN_PASSWORD line in $OUT)."
 if [ -n "$DOMAIN" ]; then
   echo "Webhooks: on. Point $DOMAIN at this server, then: docker compose --profile https up -d --build"

@@ -267,6 +267,36 @@ describe("migrateToMultiTenant", () => {
     o.auth.close();
   });
 
+  it("reads the admin's wa_id on a later start once WhatsApp is paired, and never overwrites it", async () => {
+    const dir = scratch();
+    const unreachable = new FakeSessionAdmin();
+    unreachable.me = async () => {
+      throw new Error("WAHA down");
+    };
+    const waId = () => {
+      const o = open(dir);
+      const id = o.tenants.getTenant(o.tenants.getAdmin()?.tenantId as string)?.waId ?? null;
+      o.auth.close();
+      return id;
+    };
+    // First start of a fresh install: WAHA is up but the QR has not been scanned yet.
+    await migrate(dir, { sessions: new FakeSessionAdmin() });
+    expect(waId()).toBeNull();
+    // A later start while WAHA is down changes nothing and does not fail.
+    await migrate(dir, { sessions: unreachable });
+    expect(waId()).toBeNull();
+    // The owner scanned the QR: the next start records the account.
+    const logs: string[] = [];
+    await migrate(dir, { logs });
+    expect(waId()).toBe("51999000999@c.us");
+    expect(logs).toContain("admin tenant: WhatsApp account recorded");
+    // Once known, a start never replaces it (re-pairing goes through /pair).
+    const other = new FakeSessionAdmin();
+    other.setMe("default", "51888000888@c.us");
+    await migrate(dir, { sessions: other });
+    expect(waId()).toBe("51999000999@c.us");
+  });
+
   it("is idempotent: a second run changes neither auth.db nor cache.db", async () => {
     const dir = build030DataDir();
     await migrate(dir);

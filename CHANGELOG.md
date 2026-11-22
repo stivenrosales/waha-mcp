@@ -16,6 +16,10 @@
 - Missions and AI-written scheduled messages write in the owner's style: a description of how the owner writes in that chat (length, emojis, tone, capitalization, punctuation, language), derived from the owner's own recent messages there, is added to their prompts.
 - Automatic retention: cached message data (messages, edits, deletions, reactions, poll votes and voice-note transcripts) older than `CACHE_RETENTION_DAYS` (default 90) is deleted by the daily retention purge, for every active tenant, with the message cache on or off.
 
+- Single-owner by default: a new `MULTI_TENANT` variable. A fresh install serves only the admin's account (usage tools only; `list_tenants`, `create_invite`, `reset_password`, `revoke_tenant`, `restore_tenant` and `delete_tenant` are not listed and `/invite/:token` answers 404). `MULTI_TENANT=true` turns invites on; unset, a server that already has members stays multi-tenant. The startup log shows `mode: single-owner` or `mode: multi-tenant`.
+- Self-hosting with Docker Compose: `docker-compose.yml` runs WAHA (GOWS) and waha-mcp together, with an optional Caddy HTTPS proxy; `scripts/init-env.sh` generates every secret into `.env`. See `docs/self-hosting.md` and `AGENTS.md`.
+- When the admin's WhatsApp was paired after the first start (a fresh install), the next start records the account (`admin tenant: WhatsApp account recorded`), so mission and schedule notices reach the owner's own chat.
+
 ### Upgrade
 
 - `CACHE_RETENTION_DAYS` replaces `CACHE_MAX_AGE_DAYS` (still read when the new one is unset) and its default changes from "keep forever" to 90 days. To keep cached data forever, set `CACHE_RETENTION_DAYS=0`.

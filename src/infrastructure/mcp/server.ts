@@ -19,6 +19,8 @@ export interface CreateMcpServerOptions {
   /** Registered (and their instructions added) only for `role === "admin"`. */
   adminTools: ReadonlyArray<ToolDefinition>;
   instructions: string;
+  /** Appended to `instructions` for the admin role (default: `ADMIN_INSTRUCTIONS`). */
+  adminInstructions?: string;
   config: Config;
   registry: Pick<TenantRegistry, "acquire">;
   /** Tenant management handed to admin tools; members get null. */
@@ -75,6 +77,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
     tools,
     adminTools,
     instructions,
+    adminInstructions: extraAdminInstructions = ADMIN_INSTRUCTIONS,
     config,
     registry,
     admin,
@@ -83,7 +86,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServerHandl
     recordToolCall,
     selfService,
   } = options;
-  const adminInstructions = `${instructions}\n\n${ADMIN_INSTRUCTIONS}`;
+  const adminInstructions = `${instructions}\n\n${extraAdminInstructions}`;
 
   const http = createMcpHandler((ctx) => {
     const extra = ctx.authInfo?.extra as TenantExtra | undefined;

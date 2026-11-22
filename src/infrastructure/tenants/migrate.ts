@@ -53,7 +53,9 @@ export interface MigrateDeps {
  *    `WAHA_SESSION` with the admin user, moves the 0.3.0 `DATA_DIR/cache.db` into
  *    `DATA_DIR/tenants/<id>/`, seals its plaintext rows in batches, deletes the 0.3.0 uploads
  *    (plaintext, 15-minute slots) and revokes every OAuth client and token.
- * 3. `ADMIN_PASSWORD_RESET` overwrites the admin's password with `ADMIN_PASSWORD` and revokes the
+ * 3. When the admin tenant has no WhatsApp id yet (a fresh install paired after its first start),
+ *    reads it from WAHA (best effort).
+ * 4. `ADMIN_PASSWORD_RESET` overwrites the admin's password with `ADMIN_PASSWORD` and revokes the
  *    admin's OAuth clients and tokens, on every start while it is set.
  */
 export async function migrateToMultiTenant(deps: MigrateDeps): Promise<void> {
@@ -80,11 +82,24 @@ export async function migrateToMultiTenant(deps: MigrateDeps): Promise<void> {
   }
 
   const admin = tenants.getAdmin();
+  if (admin && !seeded) await recordAdminWaId(deps, admin.tenantId);
   if (admin && config.adminPasswordReset && !seeded) {
     await tenants.setPassword(admin.id, config.adminPassword);
     deps.auth.revokeUser(admin.id);
     logger.info("admin password reset from ADMIN_PASSWORD; admin sessions revoked");
   }
+}
+
+/**
+ * A fresh install starts before the owner scans the QR, so the seed leaves `wa_id` null; every
+ * later start reads it from WAHA until it is known (best effort, never fatal, never overwritten).
+ */
+async function recordAdminWaId(deps: MigrateDeps, tenantId: string): Promise<void> {
+  const tenant = deps.tenants.getTenant(tenantId);
+  if (!tenant || tenant.waId !== null) return;
+  const me = await deps.sessions.me(tenant.wahaSession).catch(() => null);
+  if (me && deps.tenants.setWaId(tenant.id, me.id) === "ok")
+    deps.logger.info("admin tenant: WhatsApp account recorded");
 }
 
 /** Unwraps every stored key; rewraps (after checking all of them) those that needed the old one. */

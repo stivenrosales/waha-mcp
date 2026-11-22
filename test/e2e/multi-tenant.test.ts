@@ -19,6 +19,11 @@ import {
 } from "../../src/infrastructure/cache/sqliteMessageStore.js";
 import { createSqliteTranscriptStore } from "../../src/infrastructure/cache/sqliteTranscriptStore.js";
 import { createTenantCipher, type TenantCipher } from "../../src/infrastructure/crypto/envelope.js";
+import {
+  ADMIN_INSTRUCTIONS,
+  OWNER_INSTRUCTIONS,
+  SERVER_INSTRUCTIONS,
+} from "../../src/infrastructure/mcp/instructions.js";
 import { createMediaHandler } from "../../src/infrastructure/media/mediaRoute.js";
 import { MEDIA_GONE } from "../../src/infrastructure/media/resolveMedia.js";
 import { createSignedLinks } from "../../src/infrastructure/media/signedLink.js";
@@ -174,6 +179,15 @@ interface World {
   /** Per-tenant WAHA fakes, keyed by display name (created on the first runtime build). */
   fakes: Map<string, Fakes>;
   admin: Client;
+  /** `ComposedApp.multiTenant` of this world. */
+  multiTenant: boolean;
+  /**
+   * A second app composed over the same stores (a restart with other variables), with the
+   * admin logged in to it.
+   */
+  restart(
+    extra: Record<string, string>,
+  ): Promise<{ app: Hono; multiTenant: boolean; admin: Client }>;
 }
 
 /**
@@ -339,10 +353,13 @@ const rawMcp = (app: Hono, token: string) =>
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
   });
 
-/** Admin tenant #1 seeded by the real migration (FakeSessionAdmin), then the composed app. */
+/**
+ * Admin tenant #1 seeded by the real migration (FakeSessionAdmin), then the composed app.
+ * Multi-tenant unless `extra` sets `MULTI_TENANT` (a fresh install is single-owner by default).
+ */
 async function world(extra: Record<string, string> = {}): Promise<World> {
   const dataDir = scratch();
-  const config = configFor(dataDir, { CACHE_ENABLED: "false", ...extra });
+  const config = configFor(dataDir, { CACHE_ENABLED: "false", MULTI_TENANT: "true", ...extra });
   const authDb = openAuthDatabase(join(dataDir, "auth.db"));
   const store = createAuthStore(authDb);
   const tenants = createSqliteTenantStore(authDb);
@@ -361,26 +378,48 @@ async function world(extra: Record<string, string> = {}): Promise<World> {
   });
   const fakes = new Map<string, Fakes>();
   const events = createSqliteEventStore(authDb);
-  const { app, registry, configureWebhooks } = composeApp({
-    config,
-    store,
-    tenants,
-    missions: createSqliteMissionStore(authDb),
-    events,
-    sessions,
-    mediaSecret: MEDIA_SECRET,
-    logger: { info: () => {} },
-    buildRuntime: buildWith(fakes),
-    mediaIdleTimeoutMs: 50,
-  });
+  const compose = (cfg: Config) =>
+    composeApp({
+      config: cfg,
+      store,
+      tenants,
+      missions: createSqliteMissionStore(authDb),
+      events,
+      sessions,
+      mediaSecret: MEDIA_SECRET,
+      logger: { info: () => {} },
+      buildRuntime: buildWith(fakes),
+      mediaIdleTimeoutMs: 50,
+    });
+  const loginAdmin = async (app: Hono): Promise<Client> => {
+    const login = await oauthLogin(app, "admin", ADMIN_PASSWORD);
+    expect(login.status).toBe(302);
+    return connect(app, login.token as string);
+  };
+  const { app, registry, configureWebhooks, multiTenant } = compose(config);
+  const registries = [registry];
   closers.push(() => {
-    registry.closeAll();
+    for (const r of registries) r.closeAll();
     store.close();
   });
-  const login = await oauthLogin(app, "admin", ADMIN_PASSWORD);
-  expect(login.status).toBe(302);
-  const admin = await connect(app, login.token as string);
-  return { app, events, configureWebhooks, tenants, sessions, registry, fakes, admin };
+  const admin = await loginAdmin(app);
+  const restart = async (more: Record<string, string>) => {
+    const again = compose(configFor(dataDir, { CACHE_ENABLED: "false", ...more }));
+    registries.push(again.registry);
+    return { app: again.app, multiTenant: again.multiTenant, admin: await loginAdmin(again.app) };
+  };
+  return {
+    app,
+    events,
+    configureWebhooks,
+    tenants,
+    sessions,
+    registry,
+    fakes,
+    admin,
+    multiTenant,
+    restart,
+  };
 }
 
 interface Member {
@@ -790,6 +829,92 @@ describe("e2e: self-service deletion and unlink are scoped to the caller", () =>
     expect((await rawMcp(w.app, alice.token)).status).toBe(200);
     expect((await call(alice.client, "list_chats")).isError).toBeFalsy();
     expect(cached(w.fakes.get("Alice"), A_CHAT)).toEqual({ messages: 1, transcripts: 1 });
+  });
+});
+
+const TENANT_TOOLS = [
+  "create_invite",
+  "delete_tenant",
+  "list_tenants",
+  "reset_password",
+  "restore_tenant",
+  "revoke_tenant",
+];
+const USAGE_TOOLS = ["get_llm_usage", "get_tool_usage", "get_transcription_usage"];
+const INVALID_LINK = "Enlace no válido";
+
+const toolNames = async (client: Client) => (await client.listTools()).tools.map((t) => t.name);
+
+describe("e2e: single-owner by default (MULTI_TENANT)", () => {
+  it("a fresh install with MULTI_TENANT unset serves the owner only: usage tools, no invites", async () => {
+    const w = await world({ MULTI_TENANT: "" });
+    expect(w.multiTenant).toBe(false);
+    const names = await toolNames(w.admin);
+    for (const name of USAGE_TOOLS) expect(names).toContain(name);
+    for (const name of TENANT_TOOLS) expect(names).not.toContain(name);
+    expect(names).toContain("list_chats");
+    expect(w.admin.getInstructions()).toBe(`${SERVER_INSTRUCTIONS}\n\n${OWNER_INSTRUCTIONS}`);
+    await expect(call(w.admin, "create_invite", { display_name: "Alice" })).rejects.toThrow(
+      "Tool create_invite not found",
+    );
+    expect(w.tenants.listTenants()).toHaveLength(1);
+
+    // An invite link that exists in the store (left from a multi-tenant period) is refused.
+    const tenant = w.tenants.createTenant({
+      displayName: "Alice",
+      wahaSession: "t_aaaaaaaaaa",
+      wrappedDek: "pending",
+    });
+    const { token } = w.tenants.issueLink(tenant.id, "invite", 60_000);
+    const page = await request(w.app, `/invite/${token}`);
+    expect(page.status).toBe(404);
+    expect(await page.text()).toContain(INVALID_LINK);
+    const password = "Alice long password 1";
+    const signup = await request(
+      w.app,
+      `/invite/${token}`,
+      form({ username: "alice", password, password_confirm: password }, { origin: BASE }),
+    );
+    expect(signup.status).toBe(404);
+    expect(await signup.text()).toContain(INVALID_LINK);
+    expect(w.tenants.getTenant(tenant.id)?.status).toBe("invited");
+    expect(w.tenants.getUserByTenant(tenant.id)).toBeNull();
+    expect(w.tenants.linkState(token, "invite")?.state).toBe("valid");
+  });
+
+  it("MULTI_TENANT=true on a fresh install lists the tenant tools and their instructions", async () => {
+    const w = await world({ MULTI_TENANT: "true" });
+    expect(w.multiTenant).toBe(true);
+    const names = await toolNames(w.admin);
+    for (const name of [...USAGE_TOOLS, ...TENANT_TOOLS]) expect(names).toContain(name);
+    expect(w.admin.getInstructions()).toBe(`${SERVER_INSTRUCTIONS}\n\n${ADMIN_INSTRUCTIONS}`);
+  });
+
+  it("MULTI_TENANT unset keeps a server that already has members multi-tenant", async () => {
+    const w = await world({ MULTI_TENANT: "true" });
+    await onboard(w, "Alice", "51911110000@c.us");
+    const again = await w.restart({});
+    expect(again.multiTenant).toBe(true);
+    const names = await toolNames(again.admin);
+    for (const name of TENANT_TOOLS) expect(names).toContain(name);
+    const invite = await call(again.admin, "create_invite", { display_name: "Bob" });
+    expect(invite.isError).toBeFalsy();
+    const { url } = sc(invite) as { url: string };
+    expect((await request(again.app, url)).status).toBe(200);
+  });
+
+  it("MULTI_TENANT=false forces single-owner on a server with members; members keep working", async () => {
+    const w = await world({ MULTI_TENANT: "true" });
+    const alice = await onboard(w, "Alice", "51911110000@c.us");
+    const again = await w.restart({ MULTI_TENANT: "false" });
+    expect(again.multiTenant).toBe(false);
+    const names = await toolNames(again.admin);
+    for (const name of TENANT_TOOLS) expect(names).not.toContain(name);
+    for (const name of USAGE_TOOLS) expect(names).toContain(name);
+    const member = await connect(again.app, alice.token);
+    const chats = await call(member, "list_chats");
+    expect(chats.isError).toBeFalsy();
+    expect(textOf(chats)).toContain("Alice friend");
   });
 });
 

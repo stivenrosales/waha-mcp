@@ -37,6 +37,16 @@ Privacy (delete_my_data, unlink_account; they act only on this account):
 - delete_my_data deletes the data this server stores about the owner's conversations (cached messages, transcripts, ended missions and scheduled messages); unlink_account logs WhatsApp out of this server and signs out every connected app. Both cannot be undone: call them only when the owner explicitly asked in this conversation, after saying what will happen.`;
 
 /** Appended to the instructions for the admin only (members never see the admin tools). */
+/**
+ * The admin's extra instructions on a single-owner server (`MULTI_TENANT` off): the usage tools
+ * only, no tenant management.
+ */
+export const OWNER_INSTRUCTIONS = `Usage (owner only; get_transcription_usage, get_tool_usage, get_llm_usage):
+- This server serves one WhatsApp account, the owner's. Inviting other people is off (MULTI_TENANT).
+- get_transcription_usage reports voice-note transcription spend (default: the current month). Costs are what the provider reported; spend from before usage tracking was added is not included.
+- get_tool_usage reports how this server is used: tool calls and errors per tool and the last call (default: the current month). Calls from before usage tracking was added are not included.
+- get_llm_usage reports mission LLM spend: calls, missions, tokens and cost (default: the current month). Costs are what the provider reported; calls without a reported cost are counted separately.`;
+
 export const ADMIN_INSTRUCTIONS = `Tenant management (admin only; list_tenants, get_transcription_usage, get_tool_usage, get_llm_usage, create_invite, reset_password, revoke_tenant, restore_tenant, delete_tenant):
 - Each tenant is one person's WhatsApp account on this server; the tools above act on the admin's own account (the admin tenant), never on another tenant's chats.
 - create_invite and reset_password return single-use links (72 hours); give them only to that tenant's owner.

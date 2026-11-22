@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   let scheduleRunner: ScheduleRunner | null = null;
   let cacheEvents: CacheEventProcessor | null = null;
   let retentionPurge: MissionPurge | null = null;
-  const { app, registry, toolCount, configureWebhooks } = composeApp({
+  const { app, registry, toolCount, multiTenant, configureWebhooks } = composeApp({
     config,
     store,
     tenants,
@@ -149,7 +149,7 @@ async function main(): Promise<void> {
     held?.release();
   }
   console.log(
-    `waha-mcp listening on :${config.port} | engine: ${engine} | public URL: ${config.publicBaseUrl} | tenants: ${tenants.listTenants().length} | tools: ${toolCount} | message cache: ${config.cacheEnabled ? "on" : "off"} | transcription: ${config.transcription ? "on" : "off"} | missions: ${config.missions ? "on" : "off"}`,
+    `waha-mcp listening on :${config.port} | engine: ${engine} | public URL: ${config.publicBaseUrl} | mode: ${multiTenant ? "multi-tenant" : "single-owner"} | tenants: ${tenants.listTenants().length} | tools: ${toolCount} | message cache: ${config.cacheEnabled ? "on" : "off"} | transcription: ${config.transcription ? "on" : "off"} | missions: ${config.missions ? "on" : "off"}`,
   );
   if (engine !== "GOWS" && !engine.startsWith("unknown")) {
     console.warn(`Engine ${engine} is not supported (GOWS only); tools will report this.`);

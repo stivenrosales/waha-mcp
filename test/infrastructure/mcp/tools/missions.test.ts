@@ -380,6 +380,24 @@ describe("mission tools", () => {
     });
   });
 
+  it("no engine tick can step the mission while the owner's style is still being read", async () => {
+    const dueWhileReading: unknown[] = [];
+    const h = harness({
+      ownerStyle: async () => {
+        // An engine tick landing here must find nothing due without its prompt and spec.
+        await h.engine.tick(h.now);
+        dueWhileReading.push(...h.store.due(h.now.toISOString()));
+        return "Owner's writing style in this chat: very short messages.";
+      },
+    });
+    const r = await h.call("start_mission", h.startInput());
+    expect(r.isError).toBe(false);
+    expect(dueWhileReading).toEqual([]);
+    const [m] = h.store.list(TENANT);
+    expect(h.log.read(m?.id as string).map((e) => e.kind)).toEqual(["prompt", "spec"]);
+    expect(m?.nextWakeAt).toBe(T0.toISOString());
+  });
+
   it("starts without a style when there is none or it cannot be read (logged without content)", async () => {
     const none = harness({ ownerStyle: async () => null });
     await none.call("start_mission", none.startInput());

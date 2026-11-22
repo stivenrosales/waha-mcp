@@ -221,6 +221,16 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
       )
         throw new InvalidInputError(MISSION_TEXTS.newContacts(limits.maxNewContactsPerDay));
 
+      // Appended once to the stored prompt, so every turn sends the same system prompt (cache).
+      // Read before the mission exists: it is due at once, and nothing may be awaited between
+      // creating it and storing its prompt and spec, or a tick could step an empty mission.
+      let style: string | null = null;
+      try {
+        style = (await deps.ownerStyle?.(chatId)) ?? null;
+      } catch (error) {
+        deps.logger.info(`mission style=unavailable error=${errorName(error)}`);
+      }
+
       const deadline = new Date(now.getTime() + q.maxDurationMinutes * 60_000);
       const mission = store.create({
         tenantId,
@@ -232,13 +242,6 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
         // The agent writes the closing line itself; the column only says whether to send one.
         closingMessage: q.closingMessage ? "yes" : null,
       });
-      // Appended once to the stored prompt, so every turn sends the same system prompt (cache).
-      let style: string | null = null;
-      try {
-        style = (await deps.ownerStyle?.(chatId)) ?? null;
-      } catch (error) {
-        deps.logger.info(`mission style=unavailable error=${errorName(error)}`);
-      }
       startMissionContent(
         log,
         mission.id,

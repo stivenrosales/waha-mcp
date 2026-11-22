@@ -533,6 +533,25 @@ describe("mission tools", () => {
     });
   });
 
+  it("keeps the daily new-contact cap when two missions start at once while the style is read", async () => {
+    const h = harness({
+      withHistory: [],
+      ownerStyle: () => new Promise((resolve) => setTimeout(() => resolve(null), 20)),
+    });
+    for (const chat of ["1@c.us", "2@c.us", "3@c.us"])
+      await h.call("start_mission", h.startInput({ chat_id: chat }));
+    for (const m of h.store.list(TENANT)) await h.call("cancel_mission", { mission_id: m.id });
+    await h.call("start_mission", h.startInput({ chat_id: "4@c.us" }));
+    const results = await Promise.all(
+      ["5@c.us", "6@c.us"].map((chat) => h.call("start_mission", h.startInput({ chat_id: chat }))),
+    );
+    expect(results.filter((r) => !r.isError)).toHaveLength(1);
+    expect(results.find((r) => r.isError)).toMatchObject({
+      text: "Missions to 5 new contacts were already started today; try again tomorrow.",
+    });
+    expect(h.store.list(TENANT).filter((m) => m.state === "active")).toHaveLength(2);
+  });
+
   it("counts scheduled messages to new contacts toward the same daily cap", async () => {
     const h = harness({ withHistory: [] });
     for (const chat of ["1@c.us", "2@c.us", "3@c.us", "4@c.us"])

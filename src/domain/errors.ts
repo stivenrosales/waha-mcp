@@ -69,6 +69,19 @@ export class TranscriptionError extends Error {
   }
 }
 
+export type EmailFailure = "auth" | "rateLimited" | "rejected" | "failed";
+
+/** An email could not be sent. Fixed message; `status` is the provider's HTTP status, for logs. */
+export class EmailSendError extends Error {
+  constructor(
+    public readonly kind: EmailFailure,
+    public readonly status: number | null = null,
+  ) {
+    super(`The email could not be sent (${kind}).`);
+    this.name = "EmailSendError";
+  }
+}
+
 /** A send request left the server but WAHA never confirmed it: the message may or may not exist. */
 export class SendOutcomeUnknownError extends Error {
   constructor() {

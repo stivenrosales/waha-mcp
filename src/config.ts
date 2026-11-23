@@ -48,6 +48,10 @@ export interface Config {
   cacheRetentionDays: number;
   /** Voice-note transcription via an OpenAI-compatible API; null when off (the default). */
   transcription: TranscriptionConfig | null;
+  /** Transactional email (password recovery) via Cloudflare Email Service; null when off. */
+  email: EmailConfig | null;
+  /** `ADMIN_EMAIL`, lowercased: the owner's address for password recovery; null when unset. */
+  adminEmail: string | null;
   /** Server-side Claude agent on WhatsApp missions; null when off (the default). */
   missions: MissionsConfig | null;
   /** Shared secret WAHA signs webhook deliveries with; null turns webhooks off. Never logged. */
@@ -85,6 +89,23 @@ export interface TranscriptionConfig {
   /** NEW automatic transcriptions per tool call; 0 = only on demand (transcribe_audio). */
   maxPerCall: number;
 }
+
+export interface EmailConfig {
+  /** Sender, e.g. `Zenbox <hola@usezenbox.com>`. */
+  from: string;
+  accountId: string;
+  /** Never logged. */
+  apiToken: string;
+}
+
+const EMAIL_REQUIRED = [
+  "EMAIL_FROM",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_EMAIL_API_TOKEN",
+] as const;
+
+/** Loose on purpose: the provider is the real validator; this only catches typos. */
+export const EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 const TRANSCRIPTION_REQUIRED = [
   "TRANSCRIPTION_API_URL",
@@ -281,6 +302,23 @@ const envSchema = z
           .transform(Number)
           .optional(),
       ),
+    EMAIL_FROM: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined),
+    CLOUDFLARE_ACCOUNT_ID: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined),
+    CLOUDFLARE_EMAIL_API_TOKEN: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined),
+    ADMIN_EMAIL: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim().toLowerCase() || undefined)
+      .refine((v) => !v || EMAIL_PATTERN.test(v), "ADMIN_EMAIL must be an email address."),
     TRANSCRIPTION_API_URL: z
       .string()
       .optional()
@@ -370,6 +408,17 @@ const envSchema = z
           "OPENROUTER_API_KEY needs WAHA_WEBHOOK_SECRET (missions receive messages through webhooks).",
       });
 
+    // Email: all three or none, like transcription below.
+    const emailSet = EMAIL_REQUIRED.filter((name) => Boolean(env[name]));
+    if (emailSet.length > 0 && emailSet.length < EMAIL_REQUIRED.length)
+      for (const name of EMAIL_REQUIRED)
+        if (!env[name])
+          ctx.addIssue({
+            code: "custom",
+            path: [name],
+            message: `${name} is required when email is configured (set EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_EMAIL_API_TOKEN together).`,
+          });
+
     // All three or none: a half-configured provider is a mistake, not "off".
     const set = TRANSCRIPTION_REQUIRED.filter((name) => Boolean(env[name]));
     if (set.length === 0 || set.length === TRANSCRIPTION_REQUIRED.length) return;
@@ -427,6 +476,15 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
             maxPerCall: v.TRANSCRIPTION_MAX_PER_CALL,
           }
         : null,
+    email:
+      v.EMAIL_FROM && v.CLOUDFLARE_ACCOUNT_ID && v.CLOUDFLARE_EMAIL_API_TOKEN
+        ? {
+            from: v.EMAIL_FROM,
+            accountId: v.CLOUDFLARE_ACCOUNT_ID,
+            apiToken: v.CLOUDFLARE_EMAIL_API_TOKEN,
+          }
+        : null,
+    adminEmail: v.ADMIN_EMAIL ?? null,
     webhookSecret: v.WAHA_WEBHOOK_SECRET ?? null,
     multiTenant: v.MULTI_TENANT,
     missions:

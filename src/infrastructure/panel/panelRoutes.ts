@@ -146,6 +146,15 @@ export function createPanelRoutes(deps: {
     );
   const toLogin = (c: Context) => c.redirect("/panel/login", 303);
 
+  const safely = <T>(fn: () => T[]): T[] => {
+    try {
+      return fn();
+    } catch {
+      deps.logger?.info("panel list failed");
+      return [];
+    }
+  };
+
   /** The signed-in user and tenant, or null (unknown, expired, or an account that can no longer log in). */
   const current = (c: Context): { user: User; tenant: Tenant; token: string } | null => {
     const token = getCookie(c, COOKIE);
@@ -215,14 +224,15 @@ export function createPanelRoutes(deps: {
     if (held) {
       try {
         const { missions: missionService, schedules } = held.runtime.context;
+        // A failing list leaves its section out instead of failing the whole page.
         if (schedules)
-          reminders = schedules.list().map((s) => ({
+          reminders = safely(() => schedules.list()).map((s) => ({
             title: s.content.text ?? s.content.instruction ?? "",
             meta: `${contactLabel(null, s.row.chatId)} · ${s.row.nextRunAt ? dateTime.format(new Date(s.row.nextRunAt)) : "Enviándose ahora"} · ${REPEAT_LABELS[s.row.repeat] ?? s.row.repeat}`,
             cancelAction: `/panel/schedules/${encodeURIComponent(s.row.id)}/cancel`,
           }));
         if (missionService)
-          missions = missionService.list("active").map((m) => ({
+          missions = safely(() => missionService.list("active")).map((m) => ({
             title: m.objective,
             meta: `${contactLabel(null, m.mission.chatId)} · hasta ${dateTime.format(new Date(m.mission.deadlineAt))}`,
             cancelAction: `/panel/missions/${encodeURIComponent(m.mission.id)}/cancel`,

@@ -141,8 +141,14 @@ describe("createApp tenant routing", () => {
     expect(await (await app.fetch(new Request(`${BASE}/pair`))).text()).toBe("pair page");
   });
 
-  it("serves the page font with long-lived caching and no auth", async () => {
+  it("serves both Zenbox fonts with long-lived caching and no auth", async () => {
     const { app } = appWith({});
+    const display = await app.fetch(new Request(`${BASE}/assets/newsreader.woff2`));
+    expect(display.status).toBe(200);
+    expect(new TextDecoder().decode(new Uint8Array(await display.arrayBuffer()).slice(0, 4))).toBe(
+      "wOF2",
+    );
+    expect((await app.fetch(new Request(`${BASE}/assets/satoshi.woff2`))).status).toBe(404);
     const res = await app.fetch(new Request(`${BASE}${FONT_PATH}`));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("font/woff2");

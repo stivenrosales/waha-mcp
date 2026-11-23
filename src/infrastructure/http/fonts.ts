@@ -1,24 +1,33 @@
 import { readFileSync } from "node:fs";
 
 /**
- * Satoshi (ITF Free Font License), the UI font of the HTML pages. Resolved relative to this
- * module so it works from `src/` (tests, dev) and `dist/` (production): both sit three levels
- * below the project root, where `assets/` lives. Read once, lazily; null when the file is missing,
- * in which case the pages fall back to the system font.
+ * Zenbox's typefaces (SIL Open Font License, see assets/fonts/OFL-*.txt), served to the HTML
+ * pages from this server so the CSP stays `font-src 'self'`. Resolved relative to this module so
+ * it works from `src/` (tests, dev) and `dist/` (production): both sit three levels below the
+ * project root, where `assets/` lives. Each file is read once, lazily; a missing file answers
+ * 404 and the pages fall back to the system fonts.
  */
-const FONT_URL = new URL("../../../assets/fonts/Satoshi-Variable.woff2", import.meta.url);
+export const FONT_FILES: Readonly<Record<string, URL>> = {
+  "/assets/dm-sans.woff2": new URL("../../../assets/fonts/DMSans-Variable.woff2", import.meta.url),
+  "/assets/newsreader.woff2": new URL(
+    "../../../assets/fonts/Newsreader-Variable.woff2",
+    import.meta.url,
+  ),
+};
 
-let cached: Uint8Array | null | undefined;
+const cache = new Map<string, Uint8Array | null>();
 
-export function pageFont(): Uint8Array | null {
-  if (cached === undefined) {
+/** The bytes of the font served at `path`; null when the file is missing. */
+export function fontBytes(path: string): Uint8Array | null {
+  if (!cache.has(path)) {
+    const url = FONT_FILES[path];
     try {
-      cached = new Uint8Array(readFileSync(FONT_URL));
+      cache.set(path, url ? new Uint8Array(readFileSync(url)) : null);
     } catch {
-      cached = null;
+      cache.set(path, null);
     }
   }
-  return cached;
+  return cache.get(path) ?? null;
 }
 
 export const FONT_HEADERS = {

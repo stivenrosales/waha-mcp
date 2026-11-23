@@ -4,6 +4,7 @@
 
 ### Features
 
+- Zenbox branding on every web page (login, invite, pairing, reset, recovery, panel, privacy): cream and sage palette, Newsreader titles, DM Sans text (self-hosted, OFL), the Zenbox logo and favicon, and Zenbox in titles and emails. Replaces the Satoshi font and the pixel mascot icon.
 - Account panel at `/panel`: sign in with the MCP username and password to see the WhatsApp state, active reminders and missions (with a cancel button), the latest tool calls and the subscription state. Sessions are server-side, last 12 hours and end with any revocation.
 - Billing with Polar (optional): `POST /webhooks/polar` verifies Standard Webhooks signatures, reads each subscription's current state from the Polar API, creates the customer's account and emails the invite on the first good state, starts the grace period on `past_due`, and ends access on `canceled`/`unpaid`. At most 20 new accounts per hour.
 - Password recovery by email (optional): with `EMAIL_FROM`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_EMAIL_API_TOKEN` set, sign-in pages link to `/forgot`, which emails a 1-hour reset link through Cloudflare Email Service. Users can add an email on the invite form; the owner's comes from `ADMIN_EMAIL`.

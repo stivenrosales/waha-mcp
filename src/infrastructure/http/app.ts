@@ -1,10 +1,9 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import type { AuthInfo, AuthVariables } from "../auth/bearer.js";
-import { FONT_PATH } from "../auth/loginPage.js";
 import { peekLinkTenant } from "../media/signedLink.js";
 import type { TenantRegistry } from "../tenants/registry.js";
 import type { TenantRuntime } from "../tenants/runtime.js";
-import { FONT_HEADERS, pageFont } from "./fonts.js";
+import { FONT_FILES, FONT_HEADERS, fontBytes } from "./fonts.js";
 import { ICON_SVG } from "./icon.js";
 import { releaseWhenDone } from "./releaseWhenDone.js";
 
@@ -44,7 +43,7 @@ export interface CreateAppDeps {
 
 /**
  * - `GET /health`: no auth (container healthcheck).
- * - `GET /favicon.svg`, `GET /icon.svg`: the mascot icon, no auth.
+ * - `GET /favicon.svg`, `GET /icon.svg`: the Zenbox icon, no auth.
  * - `GET /assets/satoshi.woff2`: the font of the HTML pages, no auth, cached for a year.
  * - OAuth and onboarding routes, mounted at the root (a PUBLIC_BASE_URL with a path is unsupported).
  * - `ALL /mcp`: behind the bearer guard; the verified client is passed as `authInfo`.
@@ -83,10 +82,12 @@ export function createApp(deps: CreateAppDeps): Hono {
   for (const path of ["/favicon.svg", "/icon.svg"]) {
     app.get(path, () => new Response(ICON_SVG, { headers: ICON_HEADERS }));
   }
-  app.get(FONT_PATH, () => {
-    const font = pageFont();
-    return font ? new Response(font, { headers: FONT_HEADERS }) : notFound();
-  });
+  for (const path of Object.keys(FONT_FILES)) {
+    app.get(path, () => {
+      const font = fontBytes(path);
+      return font ? new Response(font, { headers: FONT_HEADERS }) : notFound();
+    });
+  }
   app.route("/", deps.oauth);
   app.route("/", deps.onboarding);
   if (deps.panel) app.route("/", deps.panel);

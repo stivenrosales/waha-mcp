@@ -801,7 +801,7 @@ describe("forgot password", () => {
     expect(sent).toHaveLength(1);
     const mail = sent[0] as OutgoingEmail;
     expect(mail.to).toBe("alice@example.com");
-    expect(mail.subject).toBe("Restablece tu contraseña");
+    expect(mail.subject).toBe("Restablece tu contraseña de Zenbox");
     const url = /https:\/\/mcp\.example\.com\/reset\/[A-Za-z0-9_-]+/.exec(mail.text)?.[0] as string;
     expect(mail.text).toContain("alice");
     expect(mail.html).toContain(url);

@@ -46,7 +46,7 @@ const FORGOT_SENT =
 function resetEmail(username: string, to: string, url: string): OutgoingEmail {
   const text = `Hola ${username}:\n\nPara elegir una contraseña nueva, abre este enlace. Vale 1 hora y se usa una sola vez:\n${url}\n\nSi no lo pediste, ignora este correo: tu contraseña no cambia.`;
   const html = `<p>Hola ${escapeHtml(username)}:</p><p>Para elegir una contraseña nueva, abre este enlace. Vale 1 hora y se usa una sola vez:</p><p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p><p>Si no lo pediste, ignora este correo: tu contraseña no cambia.</p>`;
-  return { to, subject: "Restablece tu contraseña", text, html };
+  return { to, subject: "Restablece tu contraseña de Zenbox", text, html };
 }
 const INVITE_GONE = "Esta invitación ya no es válida.";
 const LINK_INVALID = "Este enlace no es válido o ya venció.";

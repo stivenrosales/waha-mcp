@@ -41,7 +41,9 @@ const schedule = (): ScheduleView =>
     runs: [],
   }) as unknown as ScheduleView;
 
-async function setup(opts: { missionsOn?: boolean; state?: SessionState } = {}) {
+async function setup(
+  opts: { missionsOn?: boolean; state?: SessionState; failingLists?: boolean } = {},
+) {
   let now = T0;
   const db = openAuthDatabase(":memory:");
   const auth = createAuthStore(db, () => now);
@@ -74,7 +76,10 @@ async function setup(opts: { missionsOn?: boolean; state?: SessionState } = {}) 
           context: {
             missions: missionsOn
               ? {
-                  list: () => missions,
+                  list: () => {
+                    if (opts.failingLists) throw new Error("log unreadable");
+                    return missions;
+                  },
                   cancel: async (id: string) => {
                     cancelled.push(`mission:${id}`);
                     return missions[0]?.mission;
@@ -83,7 +88,10 @@ async function setup(opts: { missionsOn?: boolean; state?: SessionState } = {}) 
               : null,
             schedules: missionsOn
               ? {
-                  list: () => schedules,
+                  list: () => {
+                    if (opts.failingLists) throw new Error("log unreadable");
+                    return schedules;
+                  },
                   cancel: (id: string) => {
                     cancelled.push(`schedule:${id}`);
                     return schedules[0]?.row;
@@ -260,5 +268,23 @@ describe("panel dashboard", () => {
     expect(s.cancelled).toEqual(["mission:m1", "schedule:s1"]);
     expect((await s.post("/panel/missions/m1/cancel", {})).status).toBe(303);
     expect(s.cancelled).toHaveLength(2);
+  });
+
+  it("still renders when the reminder or mission list fails, without those items", async () => {
+    const s = await setup({ failingLists: true });
+    const { cookie } = await s.login();
+    const res = await s.dashboard(cookie);
+    expect(res.status).toBe(200);
+    const page = await res.text();
+    expect(page).toContain("No tienes recordatorios activos.");
+    expect(page).not.toContain("Recuerda pagar la cuota");
+  });
+
+  it("carries the Zenbox brand", async () => {
+    const s = await setup();
+    const page = await (await s.request("/panel/login")).text();
+    expect(page).toContain("<title>Tu panel · Zenbox</title>");
+    expect(page).toContain('class="brand"');
+    expect(page).toContain("usezenbox.com");
   });
 });

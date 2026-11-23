@@ -132,7 +132,7 @@ export function createProvisioner(deps: {
 }
 
 function inviteEmail(to: string, url: string) {
-  const text = `¡Gracias por suscribirte!\n\nPara crear tu cuenta y vincular tu WhatsApp, abre este enlace. Vale 72 horas y se usa una sola vez:\n${url}\n\nSi no fuiste tú, ignora este correo.`;
-  const html = `<p>¡Gracias por suscribirte!</p><p>Para crear tu cuenta y vincular tu WhatsApp, abre este enlace. Vale 72 horas y se usa una sola vez:</p><p><a href="${url}">${url}</a></p><p>Si no fuiste tú, ignora este correo.</p>`;
-  return { to, subject: "Crea tu cuenta", text, html };
+  const text = `¡Gracias por suscribirte a Zenbox!\n\nPara crear tu cuenta y vincular tu WhatsApp, abre este enlace. Vale 72 horas y se usa una sola vez:\n${url}\n\nSi no fuiste tú, ignora este correo.`;
+  const html = `<p>¡Gracias por suscribirte a Zenbox!</p><p>Para crear tu cuenta y vincular tu WhatsApp, abre este enlace. Vale 72 horas y se usa una sola vez:</p><p><a href="${url}">${url}</a></p><p>Si no fuiste tú, ignora este correo.</p>`;
+  return { to, subject: "Crea tu cuenta de Zenbox", text, html };
 }

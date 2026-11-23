@@ -70,6 +70,8 @@ export function createOAuthRoutes(deps: {
   tenants: TenantStore;
   publicBaseUrl: string;
   limiter: LoginLimiter;
+  /** Where the login page sends a forgotten password; absent when password recovery is off. */
+  forgotUrl?: string;
 }): Hono {
   const { store, tenants, limiter } = deps;
   const base = deps.publicBaseUrl;
@@ -183,6 +185,7 @@ export function createOAuthRoutes(deps: {
         redirectHost: new URL(request.redirectUri).host,
         username,
         error,
+        ...(deps.forgotUrl ? { forgotUrl: deps.forgotUrl } : {}),
       }),
       status,
     );

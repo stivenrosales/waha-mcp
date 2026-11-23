@@ -4,15 +4,18 @@ import { bodyLimit } from "hono/body-limit";
 import { getCookie } from "hono/cookie";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { DEFAULT_CACHE_RETENTION_DAYS, EMAIL_PATTERN } from "../../config.js";
+import { EmailSendError } from "../../domain/errors.js";
+import type { EmailSender, OutgoingEmail } from "../../domain/ports/EmailSender.js";
 import type { SessionAdmin, WebhookTarget } from "../../domain/ports/SessionAdmin.js";
 import type { LinkKind, Tenant, TenantStore, User } from "../../domain/ports/TenantStore.js";
 import { USERNAME_PATTERN, USERNAME_RULE } from "../../domain/username.js";
 import { authenticateLogin } from "../auth/login.js";
-import { HTML_SECURITY_HEADERS, messagePage } from "../auth/loginPage.js";
-import type { LoginLimiter } from "../auth/rateLimit.js";
+import { escapeHtml, HTML_SECURITY_HEADERS, messagePage } from "../auth/loginPage.js";
+import { clientKey, type LoginLimiter } from "../auth/rateLimit.js";
 import type { AuthStore } from "../auth/store.js";
 import type { Logger } from "../mcp/defineTool.js";
 import {
+  forgotPage,
   invitePage,
   PRIVACY_PATH,
   pairDonePage,
@@ -34,6 +37,17 @@ const QR_MIMETYPE = /^image\/(png|jpeg)$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 const LINK_USED = "Este enlace ya se usó.";
+/** A reset link sent by email is valid this long (admin-issued links last 72 h). */
+const RECOVERY_LINK_TTL_MS = 60 * 60_000;
+const FORGOT_SENT =
+  "Si hay una cuenta con ese correo, te enviamos un enlace para elegir una contraseña nueva. Revisa también la carpeta de spam.";
+
+/** The password-recovery email, plain text plus a minimal HTML copy. */
+function resetEmail(username: string, to: string, url: string): OutgoingEmail {
+  const text = `Hola ${username}:\n\nPara elegir una contraseña nueva, abre este enlace. Vale 1 hora y se usa una sola vez:\n${url}\n\nSi no lo pediste, ignora este correo: tu contraseña no cambia.`;
+  const html = `<p>Hola ${escapeHtml(username)}:</p><p>Para elegir una contraseña nueva, abre este enlace. Vale 1 hora y se usa una sola vez:</p><p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p><p>Si no lo pediste, ignora este correo: tu contraseña no cambia.</p>`;
+  return { to, subject: "Restablece tu contraseña", text, html };
+}
 const INVITE_GONE = "Esta invitación ya no es válida.";
 const LINK_INVALID = "Este enlace no es válido o ya venció.";
 const NUMBER_TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
@@ -67,12 +81,16 @@ export function createOnboardingRoutes(deps: {
   logger?: Logger;
   /** `CACHE_RETENTION_DAYS`, stated on the privacy page; default 90. */
   cacheRetentionDays?: number;
+  /** Password recovery by email (`/forgot`); absent when email is off. Its own limiter. */
+  passwordRecovery?: { email: EmailSender; limiter: LoginLimiter };
 }): Hono {
   const { tenants, auth, sessions, registry, limiter } = deps;
   const now = deps.now ?? Date.now;
   const base = deps.publicBaseUrl;
   const baseOrigin = new URL(base).origin;
   const app = new Hono();
+  const recovery = deps.passwordRecovery;
+  const forgotUrl = recovery ? "/forgot" : undefined;
 
   const limitBody = bodyLimit({
     maxSize: MAX_BODY_BYTES,
@@ -249,6 +267,42 @@ export function createOnboardingRoutes(deps: {
     return c.redirect(`${base}/pair`, 303);
   });
 
+  // --- Forgot: email a reset link (only with email on) ---
+
+  app.get("/forgot", (c) => {
+    if (!recovery) return c.notFound();
+    return page(c)(forgotPage());
+  });
+
+  app.post("/forgot", limitBody, async (c) => {
+    if (!recovery) return c.notFound();
+    const html = page(c);
+    if (!sameOrigin(c)) return crossSite(html);
+    const email = ((await readForm(c)).get("email") ?? "").trim().toLowerCase();
+    if (!EMAIL_PATTERN.test(email) || email.length > 254)
+      return html(forgotPage({ email, error: "Ese correo no es válido." }), 400);
+    // Every request counts, found or not: the limit bounds both mail volume and probing.
+    const keys = [clientKey(c), `email:${email}`];
+    if (keys.some((k) => recovery.limiter.isBlocked(k)))
+      return html(
+        messagePage("Demasiados intentos", "Demasiadas solicitudes. Inténtalo más tarde."),
+        429,
+      );
+    recovery.limiter.recordFailure(keys);
+    const user = tenants.getUserByEmail(email);
+    if (user) {
+      const { token } = tenants.issueLink(user.tenantId, "reset", RECOVERY_LINK_TTL_MS);
+      // Not awaited: the answer and its timing must not reveal whether the account exists.
+      void recovery.email
+        .send(resetEmail(user.username, email, `${base}/reset/${token}`))
+        .catch((error: unknown) => {
+          const kind = error instanceof EmailSendError ? error.kind : "failed";
+          deps.logger?.info(`forgot email failed tenant=${user.tenantId} kind=${kind}`);
+        });
+    }
+    return html(messagePage("Revisa tu correo", FORGOT_SENT));
+  });
+
   // --- Reset: choose a new password ---
 
   app.get("/reset/:token", (c) => {
@@ -357,7 +411,7 @@ export function createOnboardingRoutes(deps: {
   app.get("/pair", async (c) => {
     const html = page(c, { qr: true });
     const session = pairingSession(c);
-    if (!session) return html(pairLoginPage());
+    if (!session) return html(pairLoginPage({ forgotUrl }));
     return pairStatus(html, session.user, session.tenant);
   });
 
@@ -374,7 +428,10 @@ export function createOnboardingRoutes(deps: {
       );
     }
     if (user === "invalid") {
-      return html(pairLoginPage({ username, error: "Usuario o contraseña incorrectos." }), 401);
+      return html(
+        pairLoginPage({ username, error: "Usuario o contraseña incorrectos.", forgotUrl }),
+        401,
+      );
     }
     const status = tenants.getTenant(user.tenantId)?.status;
     if (status === undefined || !PAIRABLE.has(status)) {

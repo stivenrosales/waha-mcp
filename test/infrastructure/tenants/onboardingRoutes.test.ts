@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { EmailSender, OutgoingEmail } from "../../../src/domain/ports/EmailSender.js";
 import { createLoginLimiter } from "../../../src/infrastructure/auth/rateLimit.js";
 import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
 import { createOnboardingRoutes } from "../../../src/infrastructure/tenants/onboardingRoutes.js";
@@ -15,7 +16,11 @@ const USED = "Este enlace ya se usó.";
 const TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
 
 function setup(
-  opts: { webhook?: { url: string; secret: string }; cacheRetentionDays?: number } = {},
+  opts: {
+    webhook?: { url: string; secret: string };
+    cacheRetentionDays?: number;
+    email?: EmailSender;
+  } = {},
 ) {
   let t = 1_800_000_000_000;
   const now = () => t;
@@ -36,6 +41,9 @@ function setup(
     ...(opts.webhook ? { webhook: opts.webhook } : {}),
     ...(opts.cacheRetentionDays !== undefined
       ? { cacheRetentionDays: opts.cacheRetentionDays }
+      : {}),
+    ...(opts.email
+      ? { passwordRecovery: { email: opts.email, limiter: createLoginLimiter({ now }) } }
       : {}),
   });
 
@@ -739,5 +747,101 @@ describe("invite email", () => {
     const { tenant, token } = ctx.invite();
     expect((await ctx.signUp(token)).status).toBe(303);
     expect(ctx.tenants.getUserByTenant(tenant.id)?.email).toBeNull();
+  });
+});
+
+describe("forgot password", () => {
+  const SENT =
+    "Si hay una cuenta con ese correo, te enviamos un enlace para elegir una contraseña nueva.";
+  const outbox = () => {
+    const sent: OutgoingEmail[] = [];
+    const sender: EmailSender = {
+      send: async (m) => {
+        sent.push(m);
+      },
+    };
+    return { sent, sender };
+  };
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const withEmail = async (sender: EmailSender) => {
+    const ctx = setup({ email: sender });
+    const { tenant } = await ctx.onboarded();
+    const user = ctx.tenants.getUserByTenant(tenant.id) as { id: string };
+    ctx.tenants.setEmail(user.id, "alice@example.com");
+    return { ctx, tenant, user };
+  };
+
+  it("is not offered when email is off", async () => {
+    const ctx = setup();
+    expect((await ctx.request("/forgot")).status).toBe(404);
+    expect((await ctx.post("/forgot", { email: "a@b.co" })).status).toBe(404);
+    expect(await (await ctx.request("/pair")).text()).not.toContain("/forgot");
+  });
+
+  it("the pair sign-in page links to it when email is on", async () => {
+    const { sender } = outbox();
+    const ctx = setup({ email: sender });
+    expect(await (await ctx.request("/pair")).text()).toContain('href="/forgot"');
+    expect(await (await ctx.request("/forgot")).text()).toContain('name="email"');
+  });
+
+  it("emails a 1-hour reset link that sets a new password", async () => {
+    const { sent, sender } = outbox();
+    const { ctx, tenant } = await withEmail(sender);
+    const res = await ctx.post("/forgot", { email: " Alice@Example.com " });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(SENT);
+    await flush();
+    expect(sent).toHaveLength(1);
+    const mail = sent[0] as OutgoingEmail;
+    expect(mail.to).toBe("alice@example.com");
+    expect(mail.subject).toBe("Restablece tu contraseña");
+    const url = /https:\/\/mcp\.example\.com\/reset\/[A-Za-z0-9_-]+/.exec(mail.text)?.[0] as string;
+    expect(mail.text).toContain("alice");
+    expect(mail.html).toContain(url);
+    const token = url.slice(url.lastIndexOf("/") + 1);
+    expect(ctx.tenants.peekLink(token, "reset")).toEqual({ tenantId: tenant.id });
+    ctx.advance(HOUR + 1);
+    expect(ctx.tenants.peekLink(token, "reset")).toBeNull();
+  });
+
+  it("answers the same for an unknown email and sends nothing", async () => {
+    const { sent, sender } = outbox();
+    const { ctx } = await withEmail(sender);
+    const res = await ctx.post("/forgot", { email: "nobody@example.com" });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(SENT);
+    await flush();
+    expect(sent).toEqual([]);
+  });
+
+  it("answers the same when the email provider fails", async () => {
+    const { ctx } = await withEmail({
+      send: async () => {
+        throw new Error("provider down");
+      },
+    });
+    const res = await ctx.post("/forgot", { email: "alice@example.com" });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(SENT);
+  });
+
+  it("refuses cross-site posts and rate-limits repeated requests", async () => {
+    const { sent, sender } = outbox();
+    const { ctx } = await withEmail(sender);
+    expect(
+      (
+        await ctx.post(
+          "/forgot",
+          { email: "alice@example.com" },
+          { origin: "https://evil.example" },
+        )
+      ).status,
+    ).toBe(403);
+    for (let i = 0; i < 5; i++) await ctx.post("/forgot", { email: "alice@example.com" });
+    const blocked = await ctx.post("/forgot", { email: "alice@example.com" });
+    expect(blocked.status).toBe(429);
+    await flush();
+    expect(sent).toHaveLength(5);
   });
 });

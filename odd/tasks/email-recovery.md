@@ -12,11 +12,13 @@ Objective: every account can have an email, and a user who forgets the password 
 
 ## Tasks
 
-- T1 (S1, S2) EmailSender port, Cloudflare adapter, config group; inline; pending.
-- T2 (S3) email column, invite field, ADMIN_EMAIL; inline; pending.
-- T3 (S4) /forgot route, links on login pages, docs; inline; pending.
+- T1 (S1, S2) EmailSender port, Cloudflare adapter, config group; inline; done d6265ef.
+- T2 (S3) email column, invite field, ADMIN_EMAIL; inline; done bf657ec.
+- T3 (S4) /forgot route, links on login pages, docs; inline; done (this commit).
 
 ## Log
 
 - L1 (2026-11-23, user): "Configura todo ok, par aencerder todo con un boton, y suufue con lo del email y eso, supigno que con Cloudfare no?" then "osae estar aqui haciendo todo y cuando todo lo de factuacion y nube este ok, pues mandaleo a produccion".
 - L2: Cloudflare Email Service is public beta, Workers Paid, 3,000 emails/month included then US$0.35/1,000; `from` domain must be onboarded in the dashboard (DNS on `cf-bounce`).
+- L3: Pre-existing flaky test `oauth.test.ts > limiter hardening > 51st failure…` hits its 5 s timeout under full-suite load (passes alone 3/3); not touched by this feature.
+- L4: All tasks done; full suite 1316 passed; lint clean on feature files.

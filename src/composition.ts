@@ -26,6 +26,7 @@ import { createOAuthRoutes } from "./infrastructure/auth/oauth.js";
 import { createLoginLimiter } from "./infrastructure/auth/rateLimit.js";
 import type { AuthStore } from "./infrastructure/auth/store.js";
 import { generateDek, wrapDek } from "./infrastructure/crypto/envelope.js";
+import { createCloudflareEmailSender } from "./infrastructure/email/cloudflareEmailSender.js";
 import { createApp } from "./infrastructure/http/app.js";
 import { createOpenRouterClaude } from "./infrastructure/llm/openRouterClaude.js";
 import type { Logger } from "./infrastructure/mcp/defineTool.js";
@@ -215,8 +216,19 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   const cookieSecret = new Uint8Array(
     createHmac("sha256", mediaSecret).update("pair-cookie").digest(),
   );
+  // Password recovery by email: only with EMAIL_FROM and the Cloudflare credentials set.
+  const emailSender = config.email ? createCloudflareEmailSender(config.email) : null;
+  const passwordRecovery = emailSender
+    ? { email: emailSender, limiter: createLoginLimiter() }
+    : null;
   const app = createApp({
-    oauth: createOAuthRoutes({ store, tenants, publicBaseUrl: config.publicBaseUrl, limiter }),
+    oauth: createOAuthRoutes({
+      store,
+      tenants,
+      publicBaseUrl: config.publicBaseUrl,
+      limiter,
+      ...(passwordRecovery ? { forgotUrl: "/forgot" } : {}),
+    }),
     onboarding: createOnboardingRoutes({
       tenants,
       auth: store,
@@ -229,6 +241,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       cacheRetentionDays: config.cacheRetentionDays,
       invites: multiTenant,
       ...(webhook ? { webhook } : {}),
+      ...(passwordRecovery ? { passwordRecovery } : {}),
     }),
     guard: bearerGuard({ store, tenants, publicBaseUrl: config.publicBaseUrl }),
     mcpHandler: mcp.handler,

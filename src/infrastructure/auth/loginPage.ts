@@ -112,11 +112,19 @@ export const credentialFields = (username = ""): string =>
 <label for="password">Contraseña</label>
 <input id="password" name="password" type="password" autocomplete="current-password" required>`;
 
+/** "Forgot password?" link under a sign-in form; empty when password recovery is off. */
+export const forgotLink = (forgotUrl?: string): string =>
+  forgotUrl
+    ? `\n<p class="muted"><a href="${escapeHtml(forgotUrl)}">¿Olvidaste tu contraseña?</a></p>`
+    : "";
+
 export function loginPage(opts: {
   params: Record<string, string>;
   redirectHost: string;
   username?: string;
   error?: string;
+  /** Shown when password recovery by email is on. */
+  forgotUrl?: string;
 }): string {
   const hidden = Object.entries(opts.params)
     .map(
@@ -133,7 +141,7 @@ ${errorLine(opts.error)}
 ${hidden}
 ${credentialFields(opts.username)}
 <button type="submit">Autorizar acceso</button>
-</form>`,
+</form>${forgotLink(opts.forgotUrl)}`,
   );
 }
 

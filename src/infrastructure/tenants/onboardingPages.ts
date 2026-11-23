@@ -1,5 +1,5 @@
 /** HTML pages for invite sign-up, password reset and WhatsApp pairing. No scripts. */
-import { credentialFields, errorLine, escapeHtml, layout } from "../auth/loginPage.js";
+import { credentialFields, errorLine, escapeHtml, forgotLink, layout } from "../auth/loginPage.js";
 
 export const TRUST_NOTICE =
   "El administrador de este servidor puede acceder técnicamente a tus datos de WhatsApp. Continúa solo si confías en quien lo administra.";
@@ -53,7 +53,9 @@ ${newPasswordFields}
   );
 }
 
-export function pairLoginPage(opts: { username?: string; error?: string } = {}): string {
+export function pairLoginPage(
+  opts: { username?: string; error?: string; forgotUrl?: string } = {},
+): string {
   return layout(
     "Conectar WhatsApp",
     `<h1>Conecta tu WhatsApp</h1>
@@ -62,7 +64,7 @@ ${errorLine(opts.error)}
 <form method="post" action="pair">
 ${credentialFields(opts.username)}
 <button type="submit">Continuar</button>
-</form>`,
+</form>${forgotLink(opts.forgotUrl)}`,
   );
 }
 
@@ -156,5 +158,19 @@ export function privacyPage(opts: { cacheRetentionDays: number }): string {
 <li><span><strong>Desvincularte</strong> (<code>unlink_account</code>): cierra la sesión de tu WhatsApp en este servidor y en todas las aplicaciones conectadas. Para volver, inicia sesión en <a href="/pair">/pair</a> y escanea el código QR.</span></li>
 </ul>
 <p>También puedes cortar el acceso desde tu teléfono: ve a <strong>Dispositivos vinculados</strong> y cierra la sesión de este servidor. Para borrar todo, pide al administrador que elimine tu cuenta: se borran tu usuario, tu llave, los mensajes guardados, tus misiones y la sesión de WhatsApp.</p>`,
+  );
+}
+
+export function forgotPage(opts: { email?: string; error?: string } = {}): string {
+  return layout(
+    "Recuperar contraseña",
+    `<h1>Recupera tu contraseña</h1>
+<p class="lead">Escribe el correo de tu cuenta y te enviaremos un enlace para elegir una contraseña nueva.</p>
+${errorLine(opts.error)}
+<form method="post" action="forgot">
+<label for="email">Correo</label>
+<input id="email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" value="${escapeHtml(opts.email ?? "")}" required autofocus>
+<button type="submit">Enviar enlace</button>
+</form>`,
   );
 }

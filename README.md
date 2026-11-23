@@ -226,6 +226,14 @@ Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the
 
 `delete_message` removes one of your own messages for everyone in the chat, and it cannot be undone. Once WhatsApp accepts it, the deleted text is removed from waha-mcp's message cache, its voice-note transcripts and its edit overrides, and later reads show the message as deleted. It does not reach mission logs and schedule history, which keep their own retention, nor WAHA's own storage, which waha-mcp does not control.
 
+## Password recovery by email (optional)
+
+Off by default. Set `EMAIL_FROM`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_EMAIL_API_TOKEN` together (setting only some of them is a startup error). The server sends through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/) (`POST /accounts/{id}/email/sending/send`), which needs the Workers Paid plan and the sender's domain onboarded under Email Service > Email Sending. The provider sits behind an `EmailSender` port, so another one can replace it.
+
+When on, the sign-in pages (`/authorize` and `/pair`) link to `/forgot`. There a user types the email of the account and always gets the same answer, so the page does not reveal which emails have accounts. When an account has that email, it gets a reset link valid for 1 hour and usable once, which opens the usual `/reset` page; setting the new password signs out every connected app. Requests are limited per IP and per email (5 in 15 minutes). A failed send is logged as `forgot email failed tenant=<id> kind=<kind>`, never with the address or the provider's answer.
+
+Users give their email, optionally, on the invite form; the owner's comes from `ADMIN_EMAIL`, applied on every start. Each email belongs to one account. Without email configured, `/forgot` answers 404 and the sign-in pages show no link.
+
 ## Voice-note transcription (optional)
 
 Off by default. Set `TRANSCRIPTION_API_URL`, `TRANSCRIPTION_API_KEY` and `TRANSCRIPTION_MODEL` together (setting only some of them is a startup error) and any OpenAI-compatible speech-to-text API works. For example, with [OpenRouter](https://openrouter.ai):
@@ -359,6 +367,10 @@ All configuration is through environment variables.
 | `CACHE_REFRESH_HOURS`                | no       | `48`                         | Each sync re-reads this window before the newest cached message.                          |
 | `CACHE_RETENTION_DAYS`               | no       | `90`                         | Delete cached messages and transcripts older than N days, daily (`0` keeps them forever). |
 | `CACHE_MAX_AGE_DAYS`                 | no       |                              | Legacy name of `CACHE_RETENTION_DAYS`, read only when that one is unset.                  |
+| `EMAIL_FROM`                         | no       |                              | Sender for password-recovery email, e.g. `Zenbox <hola@usezenbox.com>`.                   |
+| `CLOUDFLARE_ACCOUNT_ID`              | no       |                              | Cloudflare account that sends the email (Email Service).                                 |
+| `CLOUDFLARE_EMAIL_API_TOKEN`         | no       |                              | Cloudflare API token with Email Sending permission. Never logged.                         |
+| `ADMIN_EMAIL`                        | no       |                              | The owner's email for password recovery; applied on every start.                         |
 | `TRANSCRIPTION_API_URL`              | no       |                              | OpenAI-compatible speech-to-text base URL (`https://openrouter.ai/api/v1`).               |
 | `TRANSCRIPTION_API_KEY`              | no       |                              | API key of that provider.                                                                 |
 | `TRANSCRIPTION_MODEL`                | no       |                              | Model id (`openai/whisper-large-v3-turbo`).                                               |

@@ -246,7 +246,7 @@ In Polar, add a webhook endpoint `{PUBLIC_BASE_URL}/webhooks/polar` with the `su
 | `past_due`                                                | The 3-day grace of the billing lifecycle starts.                                                                             |
 | `canceled`, `unpaid`, `incomplete_expired`, `trial_ended` | Access ends now: WhatsApp is logged out and the account revoked; it is deleted 30 days later unless the customer pays again. |
 
-A subscription that was never in good standing creates no account. At most 20 accounts are created per hour; above that the webhook answers 429 and Polar redelivers later. Answers: 202 handled or ignored, 403 bad signature, 429 over the cap, 500 failed (Polar retries). If the invite email fails, the account exists and the admin can send a new link with `create_invite` and the tenant id. The customer's email becomes the account's recovery email unless the user gave another.
+A subscription that was never in good standing creates no account. A returning customer (a new subscription after cancelling) gets their existing account back, as long as it was not deleted yet. At most 20 accounts are created per hour; above that the webhook answers 429 and Polar redelivers later. Answers: 202 handled or ignored, 403 bad signature, 429 over the cap, 500 failed (Polar retries). If the invite email fails, the account exists and the admin can send a new link with `create_invite` and the tenant id. The customer's email becomes the account's recovery email unless the user gave another.
 
 ## Voice-note transcription (optional)
 

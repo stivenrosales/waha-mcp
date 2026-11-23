@@ -23,6 +23,7 @@ function setup(current: PolarSubscription) {
   const provisioned: string[] = [];
   const store = createSqlitePolarStore(openAuthDatabase(":memory:"));
   const emails = new Map<string, string | null>();
+  const deleted = new Set<string>();
   const sync = createPolarSync({
     fetchSubscription: async (id) => {
       calls.push(`fetch:${id}`);
@@ -39,12 +40,24 @@ function setup(current: PolarSubscription) {
       return `tenant_${provisioned.length}`;
     },
     users: {
+      tenantExists: (t) => !deleted.has(t),
       emailOfTenant: (t) => emails.get(t) ?? null,
-      setTenantEmail: (t, e) => void emails.set(t, e),
+      setTenantEmail: (t, e) => {
+        emails.set(t, e);
+        return "ok";
+      },
     },
     logger: { info: () => {} },
   });
-  return { sync, calls, provisioned, store, emails, set: (s: PolarSubscription) => (state = s) };
+  return {
+    sync,
+    calls,
+    provisioned,
+    store,
+    emails,
+    deleted,
+    set: (s: PolarSubscription) => (state = s),
+  };
 }
 
 describe("polar sync", () => {
@@ -97,6 +110,55 @@ describe("polar sync", () => {
     s.emails.set("tenant_1", "chosen@example.com");
     await s.sync.handle("sub_1");
     expect(s.emails.get("tenant_1")).toBe("chosen@example.com");
+  });
+  it("a returning customer with a new subscription gets their old account back", async () => {
+    const s = setup(sub());
+    await s.sync.handle("sub_1");
+    s.set(sub({ status: "canceled" }));
+    await s.sync.handle("sub_1");
+    s.set(sub({ id: "sub_2", status: "active" }));
+    await s.sync.handle("sub_2");
+    expect(s.provisioned).toEqual(["ana@example.com"]);
+    expect(s.store.tenantFor("sub_2")).toBe("tenant_1");
+    expect(s.calls.at(-1)).toBe("succeeded:tenant_1");
+  });
+
+  it("a returning customer whose old account was deleted gets a new one", async () => {
+    const s = setup(sub());
+    await s.sync.handle("sub_1");
+    s.deleted.add("tenant_1");
+    s.set(sub({ id: "sub_2", status: "active" }));
+    await s.sync.handle("sub_2");
+    expect(s.provisioned).toEqual(["ana@example.com", "ana@example.com"]);
+    expect(s.store.tenantFor("sub_2")).toBe("tenant_2");
+  });
+
+  it("ignores a status it does not know", async () => {
+    const s = setup(sub());
+    await s.sync.handle("sub_1");
+    s.set(sub({ status: "something_new" as PolarSubscription["status"] }));
+    await s.sync.handle("sub_1");
+    expect(s.calls.at(-1)).toBe("fetch:sub_1");
+  });
+});
+
+describe("provisioner cap", () => {
+  it("does not spend the cap on failed invites", async () => {
+    let fail = true;
+    const provision = createProvisioner({
+      admin: {
+        createInvite: async () => {
+          if (fail) throw new Error("WAHA down");
+          return { tenantId: "t1", url: "https://x/invite/t", expiresAt: "" };
+        },
+      },
+      email: { send: async () => {} },
+      logger: { info: () => {} },
+      maxPerHour: 1,
+    });
+    await expect(provision({ email: "a@example.com" })).rejects.toThrow("WAHA down");
+    fail = false;
+    expect(await provision({ email: "a@example.com" })).toBe("t1");
   });
 });
 

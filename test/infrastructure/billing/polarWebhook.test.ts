@@ -168,7 +168,7 @@ describe("Polar API client", () => {
       apiUrl: "https://api.polar.sh",
       accessToken: "t",
       fetch: async () =>
-        new Response(JSON.stringify({ id: "sub_1", status: "weird" }), { status: 200 }),
+        new Response(JSON.stringify({ id: "sub_1", status: "active" }), { status: 200 }),
     });
     await expect(odd.getSubscription("sub_1")).rejects.toThrow(
       "Polar API returned an unexpected subscription.",

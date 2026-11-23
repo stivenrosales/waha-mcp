@@ -330,7 +330,11 @@ const envSchema = z
     POLAR_WEBHOOK_SECRET: z
       .string()
       .optional()
-      .transform((v) => v?.trim() || undefined),
+      .transform((v) => v?.trim() || undefined)
+      .refine(
+        (v) => !v || v.startsWith("whsec_"),
+        "POLAR_WEBHOOK_SECRET must start with whsec_ (create a new secret in Polar if it does not).",
+      ),
     POLAR_ACCESS_TOKEN: z
       .string()
       .optional()

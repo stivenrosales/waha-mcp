@@ -1,17 +1,8 @@
 import type { PolarStatus, PolarSubscription } from "../../application/polarSync.js";
 
+// Statuses Polar adds later pass through: the sync ignores what it does not know.
+
 const TIMEOUT_MS = 5_000;
-const STATUSES: ReadonlySet<string> = new Set<PolarStatus>([
-  "incomplete",
-  "incomplete_expired",
-  "trialing",
-  "active",
-  "past_due",
-  "canceled",
-  "unpaid",
-  "paused",
-  "trial_ended",
-]);
 
 /** Fixed messages: the token, the URL and Polar's body never reach callers or logs. */
 export class PolarApiError extends Error {
@@ -53,7 +44,6 @@ export function createPolarClient(opts: {
       if (
         typeof body?.id !== "string" ||
         typeof body.status !== "string" ||
-        !STATUSES.has(body.status) ||
         typeof body.customer_id !== "string" ||
         typeof customer.email !== "string"
       )

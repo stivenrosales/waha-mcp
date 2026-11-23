@@ -33,13 +33,14 @@ const ENDED: ReadonlySet<PolarStatus> = new Set([
 export interface PolarSyncDeps {
   /** Current state from the Polar API: events can arrive out of order, so they are not trusted. */
   fetchSubscription(id: string): Promise<PolarSubscription>;
-  store: Pick<PolarStore, "tenantFor" | "link">;
+  store: Pick<PolarStore, "tenantFor" | "tenantForCustomer" | "link">;
   billing: Pick<Billing, "paymentSucceeded" | "paymentFailed" | "endAccess">;
   /** Creates the customer's account and emails the invite; returns the tenant id. */
   provision(q: { email: string }): Promise<string>;
   users: {
+    tenantExists(tenantId: string): boolean;
     emailOfTenant(tenantId: string): string | null;
-    setTenantEmail(tenantId: string, email: string): void;
+    setTenantEmail(tenantId: string, email: string): "ok" | "taken";
   };
   logger: { info(message: string): void };
 }
@@ -59,18 +60,27 @@ export function createPolarSync(deps: PolarSyncDeps): PolarSync {
   return {
     async handle(subscriptionId) {
       const sub = await deps.fetchSubscription(subscriptionId);
-      let tenantId = store.tenantFor(sub.id);
+      const existing = (id: string | null) => (id && deps.users.tenantExists(id) ? id : null);
+      let tenantId = existing(store.tenantFor(sub.id));
       const email = sub.customerEmail.trim().toLowerCase();
       if (GOOD.has(sub.status)) {
         if (!tenantId) {
-          tenantId = await deps.provision({ email });
+          // A returning customer (new subscription after a cancel) gets their account back.
+          tenantId = existing(store.tenantForCustomer(sub.customerId));
+          if (!tenantId) {
+            tenantId = await deps.provision({ email });
+            logger.info(`polar provision subscription=${sub.id} tenant=${tenantId}`);
+          }
           store.link({ subscriptionId: sub.id, tenantId, customerId: sub.customerId });
-          logger.info(`polar provision subscription=${sub.id} tenant=${tenantId}`);
         }
         billing.paymentSucceeded(tenantId);
         // The account's user gets the customer's email for recovery, unless they chose one.
-        if (email && deps.users.emailOfTenant(tenantId) === null)
-          deps.users.setTenantEmail(tenantId, email);
+        if (
+          email &&
+          deps.users.emailOfTenant(tenantId) === null &&
+          deps.users.setTenantEmail(tenantId, email) === "taken"
+        )
+          logger.info(`polar email not set tenant=${tenantId} reason=taken`);
         return;
       }
       if (!tenantId) {
@@ -108,8 +118,9 @@ export function createProvisioner(deps: {
     const t = now();
     while (recent.length && (recent[0] as number) <= t - 3_600_000) recent.shift();
     if (recent.length >= max) throw new ProvisionCapError();
-    recent.push(t);
     const invite = await deps.admin.createInvite({ displayName: email });
+    // Counted only once the account exists: failed attempts (WAHA down) do not spend the cap.
+    recent.push(t);
     try {
       await deps.email.send(inviteEmail(email, invite.url));
     } catch {

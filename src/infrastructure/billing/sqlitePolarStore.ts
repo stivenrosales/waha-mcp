@@ -5,7 +5,8 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS polar_subscriptions (
   subscription_id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
-  customer_id TEXT NOT NULL
+  customer_id TEXT NOT NULL,
+  linked_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS polar_webhook_deliveries (
   webhook_id TEXT PRIMARY KEY,
@@ -18,8 +19,13 @@ export function createSqlitePolarStore(db: DatabaseSync): PolarStore {
   const tenantFor = db.prepare(
     "SELECT tenant_id FROM polar_subscriptions WHERE subscription_id = ?",
   );
+  const forCustomer = db.prepare(
+    `SELECT tenant_id FROM polar_subscriptions WHERE customer_id = ?
+     ORDER BY linked_at DESC, rowid DESC LIMIT 1`,
+  );
   const link = db.prepare(
-    `INSERT INTO polar_subscriptions (subscription_id, tenant_id, customer_id) VALUES (?, ?, ?)
+    `INSERT INTO polar_subscriptions (subscription_id, tenant_id, customer_id, linked_at)
+     VALUES (?, ?, ?, ?)
      ON CONFLICT (subscription_id) DO UPDATE SET tenant_id = excluded.tenant_id`,
   );
   const processed = db.prepare("SELECT 1 FROM polar_webhook_deliveries WHERE webhook_id = ?");
@@ -32,8 +38,12 @@ export function createSqlitePolarStore(db: DatabaseSync): PolarStore {
       const row = tenantFor.get(id) as { tenant_id: string } | undefined;
       return row?.tenant_id ?? null;
     },
+    tenantForCustomer(id) {
+      const row = forCustomer.get(id) as { tenant_id: string } | undefined;
+      return row?.tenant_id ?? null;
+    },
     link(q) {
-      link.run(q.subscriptionId, q.tenantId, q.customerId);
+      link.run(q.subscriptionId, q.tenantId, q.customerId, Date.now());
     },
     isProcessed(id) {
       return processed.get(id) !== undefined;

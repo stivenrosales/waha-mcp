@@ -1,6 +1,8 @@
 /** Which tenant each Polar subscription created, and which webhook deliveries were handled. */
 export interface PolarStore {
   tenantFor(subscriptionId: string): string | null;
+  /** The account of the customer's most recently linked subscription, for returning customers. */
+  tenantForCustomer(customerId: string): string | null;
   link(q: { subscriptionId: string; tenantId: string; customerId: string }): void;
   /** True when the delivery with this `webhook-id` was already handled. */
   isProcessed(webhookId: string): boolean;

@@ -476,10 +476,11 @@ function composePolarWebhook(q: {
       billing: q.billing,
       provision: createProvisioner({ admin: q.admin, email: q.email, logger: q.logger }),
       users: {
+        tenantExists: (t) => q.tenants.getTenant(t) !== null,
         emailOfTenant: (t) => q.tenants.getUserByTenant(t)?.email ?? null,
         setTenantEmail: (t, email) => {
           const user = q.tenants.getUserByTenant(t);
-          if (user) q.tenants.setEmail(user.id, email);
+          return user ? q.tenants.setEmail(user.id, email) : "ok";
         },
       },
       logger: q.logger,

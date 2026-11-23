@@ -47,6 +47,12 @@ describe("polar config", () => {
     expect(m).not.toContain("polar_oat_secret");
   });
 
+  it("refuses a webhook secret without the whsec_ prefix", () => {
+    expect(
+      messageOf({ ...minimal, ...email, ...polar, POLAR_WEBHOOK_SECRET: "c2VjcmV0" }),
+    ).toContain("POLAR_WEBHOOK_SECRET must start with whsec_");
+  });
+
   it("needs email, and refuses MULTI_TENANT=false", () => {
     expect(messageOf({ ...minimal, ...polar })).toContain(
       "Polar needs email (EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_EMAIL_API_TOKEN): invites are sent by email.",

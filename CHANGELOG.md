@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- `send_text` no longer duplicates a message when a send with an unknown outcome is retried: within 10 minutes the same text to the same chat first checks the chat, and an already delivered message is reported with `already_sent: true` instead of being sent again.
+
 ### Features
 
 - Webhooks no longer depend on missions: with `WAHA_WEBHOOK_SECRET` set, `/webhooks/waha` is mounted and every WAHA session is pointed at it.

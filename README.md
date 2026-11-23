@@ -311,7 +311,7 @@ Only small images and stickers come back inline. Claude does not accept PDFs or 
 
 ## Sending
 
-Every sending tool is annotated as a write (`readOnlyHint: false`), so clients ask you to approve each call. The server instructions tell the model to send only what you explicitly asked to send, to show you the final text and recipient first, and never to retry on its own. When WAHA does not confirm a send in time, the tool says the outcome is unknown and the model checks the chat before trying again.
+Every sending tool is annotated as a write (`readOnlyHint: false`), so clients ask you to approve each call. The server instructions tell the model to send only what you explicitly asked to send, to show you the final text and recipient first, and never to retry on its own. When WAHA does not confirm a send in time, the tool says the outcome is unknown and the model checks the chat before trying again. The server also guards this: for 10 minutes after a `send_text` with an unknown outcome, the same text to the same chat first reads the chat from WAHA; if the first message arrived, it is not sent again and the tool answers `already_sent: true`. If the chat cannot be read, the send is refused with the same unknown-outcome message.
 
 **WhatsApp formatting.** WhatsApp has its own syntax (`*bold*`, `_italic_`, `~strikethrough~`, ` ```monospace``` `, `> quote`, `- ` and `1. ` lists) and no headings, tables or `[text](url)` links. The tool descriptions teach it to the model, and the server converts the usual Markdown (`**bold**`, `# Heading`, links, tables) before sending. Code is left untouched. Each send returns the exact text that went out.
 

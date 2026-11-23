@@ -11,6 +11,7 @@ import {
 } from "../../application/missions/service.js";
 import { createOwnerCheck } from "../../application/ownerCheck.js";
 import { createScheduleService } from "../../application/schedules/service.js";
+import { guardUnknownSends } from "../../application/sendGuard.js";
 import {
   createTranscriptionService,
   DISABLED_TRANSCRIPTION,
@@ -304,11 +305,14 @@ export function buildTenantRuntime(deps: {
     sweeper = setInterval(() => uploads.sweep(), UPLOAD_SWEEP_INTERVAL_MS);
     sweeper.unref();
 
-    const sender = createWahaHttpSender({
-      baseUrl: config.wahaApiUrl,
-      apiKey: config.wahaApiKey,
-      session,
-    });
+    const sender = guardUnknownSends(
+      createWahaHttpSender({
+        baseUrl: config.wahaApiUrl,
+        apiKey: config.wahaApiKey,
+        session,
+      }),
+      { gateway: wahaGateway },
+    );
     const media = createMediaHandler({ gateway, links, maxBytes: config.mediaMaxBytes, logger });
     const upload = createUploadHandler({
       store: uploads,

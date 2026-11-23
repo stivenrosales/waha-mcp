@@ -9,6 +9,13 @@
 </p>
 
 <p align="center">
+  The open-source core of <a href="https://usezenbox.com">Zenbox</a>. Guides:
+  <a href="https://usezenbox.com/en/blog">English</a> ·
+  <a href="https://usezenbox.com/blog">Español</a>
+</p>
+
+<p align="center">
+  <a href="https://usezenbox.com">Website</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#tools">Tools</a> ·
   <a href="docs/self-hosting.md">Self-host</a> ·

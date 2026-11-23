@@ -683,3 +683,61 @@ describe("privacy", () => {
     expect(html).not.toContain("se borran solos a los");
   });
 });
+
+describe("invite email", () => {
+  const signUpWith = (
+    ctx: ReturnType<typeof setup>,
+    token: string,
+    email: string,
+    username = "alice",
+  ) =>
+    ctx.post(`/invite/${token}`, {
+      username,
+      email,
+      password: PASSWORD,
+      password_confirm: PASSWORD,
+    });
+
+  it("the invite page asks for an optional email", async () => {
+    const ctx = setup();
+    const { token } = ctx.invite();
+    const body = await (await ctx.request(`/invite/${token}`)).text();
+    expect(body).toContain('name="email"');
+    expect(body).toContain('type="email"');
+  });
+
+  it("stores the email, lowercased, with the new user", async () => {
+    const ctx = setup();
+    const { tenant, token } = ctx.invite();
+    expect((await signUpWith(ctx, token, " Alice@Example.com ")).status).toBe(303);
+    expect(ctx.tenants.getUserByTenant(tenant.id)?.email).toBe("alice@example.com");
+  });
+
+  it("rejects an invalid email and keeps the link usable", async () => {
+    const ctx = setup();
+    const { tenant, token } = ctx.invite();
+    const res = await signUpWith(ctx, token, "not-an-email");
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Ese correo no es válido.");
+    expect(ctx.tenants.getUserByTenant(tenant.id)).toBeNull();
+    expect((await ctx.signUp(token)).status).toBe(303);
+  });
+
+  it("rejects an email another account uses, without creating the user", async () => {
+    const ctx = setup();
+    const first = ctx.invite("Acme");
+    await signUpWith(ctx, first.token, "same@example.com");
+    const second = ctx.invite("Beta");
+    const res = await signUpWith(ctx, second.token, "SAME@example.com", "bob");
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Ese correo ya está en uso.");
+    expect(ctx.tenants.getUserByTenant(second.tenant.id)).toBeNull();
+  });
+
+  it("still signs up without an email", async () => {
+    const ctx = setup();
+    const { tenant, token } = ctx.invite();
+    expect((await ctx.signUp(token)).status).toBe(303);
+    expect(ctx.tenants.getUserByTenant(tenant.id)?.email).toBeNull();
+  });
+});

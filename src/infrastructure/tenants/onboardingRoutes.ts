@@ -3,7 +3,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { getCookie } from "hono/cookie";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { DEFAULT_CACHE_RETENTION_DAYS } from "../../config.js";
+import { DEFAULT_CACHE_RETENTION_DAYS, EMAIL_PATTERN } from "../../config.js";
 import type { SessionAdmin, WebhookTarget } from "../../domain/ports/SessionAdmin.js";
 import type { LinkKind, Tenant, TenantStore, User } from "../../domain/ports/TenantStore.js";
 import { USERNAME_PATTERN, USERNAME_RULE } from "../../domain/username.js";
@@ -199,10 +199,14 @@ export function createOnboardingRoutes(deps: {
 
     const form = await readForm(c);
     const username = form.get("username") ?? "";
-    const retry = (error: string) => html(invitePage({ username, error }), 400);
+    const email = (form.get("email") ?? "").trim().toLowerCase();
+    const retry = (error: string) => html(invitePage({ username, email, error }), 400);
     if (!USERNAME_PATTERN.test(username)) {
       return retry(`Username must be ${USERNAME_RULE}.`);
     }
+    if (email && (email.length > 254 || !EMAIL_PATTERN.test(email)))
+      return retry("Ese correo no es válido.");
+    if (email && tenants.getUserByEmail(email)) return retry("Ese correo ya está en uso.");
     const problem = passwordError(form);
     if (problem) return retry(problem);
 
@@ -224,6 +228,8 @@ export function createOnboardingRoutes(deps: {
       // A concurrent sign-up with the same username won the race for this very tenant.
       return tenants.getUserByTenant(tenantId) ? used() : retry("Ese usuario ya está en uso.");
     }
+    // Checked above; a concurrent sign-up taking the same email meanwhile leaves this one without.
+    if (email) tenants.setEmail(user.id, email);
     // The UNIQUE insert above made this request the single winner, so consumeLink fails only when
     // the link expired during hashing (the user exists by then: finish the sign-up) or when the
     // link was removed or re-issued meanwhile (stop: the admin replaced it).

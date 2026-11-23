@@ -82,6 +82,12 @@ export async function migrateToMultiTenant(deps: MigrateDeps): Promise<void> {
   }
 
   const admin = tenants.getAdmin();
+  // ADMIN_EMAIL is applied on every start, so changing it in .env changes the owner's email.
+  if (admin && config.adminEmail && admin.email !== config.adminEmail) {
+    if (tenants.setEmail(admin.id, config.adminEmail) === "ok")
+      logger.info("admin email set from ADMIN_EMAIL");
+    else logger.info("admin email not set: ADMIN_EMAIL belongs to another account");
+  }
   if (admin && !seeded) await recordAdminWaId(deps, admin.tenantId);
   if (admin && config.adminPasswordReset && !seeded) {
     await tenants.setPassword(admin.id, config.adminPassword);

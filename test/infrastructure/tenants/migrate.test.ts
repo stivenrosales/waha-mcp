@@ -425,3 +425,34 @@ describe("migrateToMultiTenant", () => {
     expect(verifies(second)).toBe(false);
   });
 });
+
+describe("ADMIN_EMAIL", () => {
+  const adminEmail = (dir: string) => {
+    const o = open(dir);
+    try {
+      return o.tenants.getAdmin()?.email ?? null;
+    } finally {
+      o.auth.close();
+    }
+  };
+
+  it("sets the owner's email on the first start and updates it when it changes", async () => {
+    const dir = scratch();
+    const logs: string[] = [];
+    await migrate(dir, { env: { ADMIN_EMAIL: "Owner@Example.com" }, logs });
+    expect(adminEmail(dir)).toBe("owner@example.com");
+    expect(logs).toContain("admin email set from ADMIN_EMAIL");
+    await migrate(dir, { env: { ADMIN_EMAIL: "new@example.com" } });
+    expect(adminEmail(dir)).toBe("new@example.com");
+  });
+
+  it("leaves the email alone when ADMIN_EMAIL is unset or unchanged", async () => {
+    const dir = scratch();
+    await migrate(dir, { env: { ADMIN_EMAIL: "owner@example.com" } });
+    const logs: string[] = [];
+    await migrate(dir, { env: { ADMIN_EMAIL: "owner@example.com" }, logs });
+    expect(logs).not.toContain("admin email set from ADMIN_EMAIL");
+    await migrate(dir);
+    expect(adminEmail(dir)).toBe("owner@example.com");
+  });
+});

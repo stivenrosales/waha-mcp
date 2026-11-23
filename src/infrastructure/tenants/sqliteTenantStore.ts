@@ -94,6 +94,7 @@ interface UserRow {
   username: string;
   role: Role;
   last_login_at: number | null;
+  email: string | null;
 }
 
 const toTenant = (r: TenantRow): Tenant => ({
@@ -110,10 +111,18 @@ const toUser = (r: UserRow): User => ({
   username: r.username,
   role: r.role,
   lastLoginAt: r.last_login_at === null ? null : Number(r.last_login_at),
+  email: r.email,
 });
 
 const TENANT_COLS = "id, waha_session, display_name, status, wa_id, created_at";
-const USER_COLS = "id, tenant_id, username, role, last_login_at";
+const USER_COLS = "id, tenant_id, username, role, last_login_at, email";
+
+/** Adds `users.email` (one per user, unique) to databases created before it existed. */
+function migrateUserEmail(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (!columns.some((c) => c.name === "email")) db.exec("ALTER TABLE users ADD COLUMN email TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email) WHERE email IS NOT NULL");
+}
 
 /**
  * Tenants, their user and single-use links, stored in the auth database.
@@ -125,6 +134,7 @@ export function createSqliteTenantStore(
   now: () => number = Date.now,
 ): TenantStore {
   db.exec(SCHEMA);
+  migrateUserEmail(db);
 
   const transaction = <T>(fn: () => T): T => {
     db.exec("BEGIN IMMEDIATE");
@@ -387,6 +397,25 @@ export function createSqliteTenantStore(
         | UserRow
         | undefined;
       return row ? toUser(row) : null;
+    },
+
+    getUserByEmail(email) {
+      const row = db
+        .prepare(`SELECT ${USER_COLS} FROM users WHERE email = ?`)
+        .get(email.trim().toLowerCase()) as UserRow | undefined;
+      return row ? toUser(row) : null;
+    },
+
+    setEmail(userId, email) {
+      try {
+        db.prepare("UPDATE users SET email = ? WHERE id = ?").run(
+          email.trim().toLowerCase(),
+          userId,
+        );
+        return "ok";
+      } catch {
+        return "taken";
+      }
     },
 
     getUserByTenant(tenantId) {

@@ -19,6 +19,8 @@ export interface User {
   username: string;
   role: Role;
   lastLoginAt: number | null;
+  /** Lowercased; used only for password recovery. Null until the user gives one. */
+  email: string | null;
 }
 
 /** One tenant's paid transcriptions in a range (sums skip unknown values). */
@@ -84,6 +86,10 @@ export interface TenantStore {
   setPassword(userId: string, password: string): Promise<void>;
   getUser(userId: string): User | null;
   getUserByTenant(tenantId: string): User | null;
+  /** Case-insensitive; null when no user has this email. */
+  getUserByEmail(email: string): User | null;
+  /** Stores the email lowercased; "taken" (and no change) when another user has it. */
+  setEmail(userId: string, email: string): "ok" | "taken";
   getAdmin(): User | null;
   touchLogin(userId: string): void;
   /** Invalidates earlier links of the same kind for the tenant. */

@@ -143,6 +143,8 @@ export interface TenantStore {
     outcome: string;
     ms: number;
   }): void;
+  /** One tenant's latest tool calls, newest first (name, time and outcome only). */
+  recentToolCalls(tenantId: string, limit: number): { at: string; tool: string; outcome: string }[];
   /** Per tenant (by id), busiest tool first; both ISO bounds inclusive. */
   toolUsage(q: { fromIso: string; toIso: string; tenantId?: string }): ToolUsageRow[];
 }

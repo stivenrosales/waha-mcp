@@ -262,6 +262,14 @@ export function createSqliteTenantStore(
       ).run(tenantId, at, tool, outcome, Math.round(ms));
     },
 
+    recentToolCalls(tenantId, limit) {
+      return db
+        .prepare(
+          "SELECT at, tool, outcome FROM tool_calls WHERE tenant_id = ? ORDER BY at DESC, id DESC LIMIT ?",
+        )
+        .all(tenantId, limit) as { at: string; tool: string; outcome: string }[];
+    },
+
     toolUsage({ fromIso, toIso, tenantId }) {
       const rows = db
         .prepare(

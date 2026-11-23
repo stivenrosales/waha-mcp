@@ -52,7 +52,12 @@ export interface AuthStore {
   verifyAccessToken(token: string): { clientId: string; scope: string; userId: string } | null;
   /** Single use: the old refresh token is deleted atomically; bound to `clientId`. */
   rotateRefreshToken(token: string, clientId: string): IssuedTokens | null;
-  /** Removes the clients, codes and tokens of one user; other users are untouched. */
+  /** A new web-panel session for the user; returns the raw token (only its hash is stored). */
+  createPanelSession(userId: string): string;
+  /** The user of a live panel session; null when unknown or expired. */
+  getPanelSession(token: string): { userId: string } | null;
+  deletePanelSession(token: string): void;
+  /** Removes the clients, codes, tokens and panel sessions of one user; other users are untouched. */
   revokeUser(userId: string): void;
   /** Removes every client, code and token (the 0.4.0 migration). */
   revokeAll(): void;
@@ -62,8 +67,15 @@ export interface AuthStore {
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 const randomToken = (): string => randomBytes(32).toString("base64url");
+/** A web-panel session lasts this long from its login. */
+export const PANEL_SESSION_TTL_MS = 12 * 3_600_000;
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS panel_sessions (
+  hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS clients (
   client_id TEXT PRIMARY KEY,
   redirect_uris TEXT NOT NULL,
@@ -315,8 +327,31 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
       });
     },
 
+    createPanelSession(userId) {
+      const token = randomToken();
+      db.prepare("DELETE FROM panel_sessions WHERE expires_at <= ?").run(now());
+      db.prepare("INSERT INTO panel_sessions (hash, user_id, expires_at) VALUES (?, ?, ?)").run(
+        sha256(token),
+        userId,
+        now() + PANEL_SESSION_TTL_MS,
+      );
+      return token;
+    },
+
+    getPanelSession(token) {
+      const row = db
+        .prepare("SELECT user_id FROM panel_sessions WHERE hash = ? AND expires_at > ?")
+        .get(sha256(token), now()) as { user_id: string } | undefined;
+      return row ? { userId: row.user_id } : null;
+    },
+
+    deletePanelSession(token) {
+      db.prepare("DELETE FROM panel_sessions WHERE hash = ?").run(sha256(token));
+    },
+
     revokeUser(userId) {
       transaction(() => {
+        db.prepare("DELETE FROM panel_sessions WHERE user_id = ?").run(userId);
         db.prepare("DELETE FROM tokens WHERE user_id = ?").run(userId);
         db.prepare("DELETE FROM codes WHERE user_id = ?").run(userId);
         db.prepare("DELETE FROM clients WHERE user_id = ?").run(userId);
@@ -325,6 +360,7 @@ export function createAuthStore(db: DatabaseSync, now: () => number = Date.now):
 
     revokeAll() {
       transaction(() => {
+        db.exec("DELETE FROM panel_sessions");
         db.exec("DELETE FROM tokens");
         db.exec("DELETE FROM codes");
         db.exec("DELETE FROM clients");

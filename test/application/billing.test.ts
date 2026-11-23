@@ -227,4 +227,23 @@ describe("billing lifecycle", () => {
     expect(s.store.get(s.tenantId)?.state).toBe("active");
     expect(s.tenants.getTenant(s.tenantId)?.status).toBe("active");
   });
+  it("ends access at once when the subscription ends, and deletes 30 days later", async () => {
+    const s = await setup();
+    s.billing.paymentSucceeded(s.tenantId);
+    await s.billing.endAccess(s.tenantId);
+    expect(s.sessions.calls).toContain(`logout:${s.session}`);
+    expect(s.tenants.getTenant(s.tenantId)?.status).toBe("revoked");
+    expect(s.store.get(s.tenantId)).toEqual({
+      tenantId: s.tenantId,
+      state: "suspended",
+      since: T0,
+    });
+    await s.billing.endAccess(s.tenantId);
+    expect(s.sessions.calls.filter((c) => c.startsWith("logout:"))).toHaveLength(1);
+    s.advance(SUSPENDED_DELETE_MS);
+    await s.billing.sweep();
+    expect(s.tenants.getTenant(s.tenantId)).toBeNull();
+    await s.billing.endAccess(s.owner.id);
+    expect(s.tenants.getTenant(s.owner.id)?.status).toBe("active");
+  });
 });

@@ -25,6 +25,8 @@ export interface Billing {
   paymentSucceeded(tenantId: string): void;
   /** A payment failed: a billed tenant enters the grace period (once; later failures keep it). */
   paymentFailed(tenantId: string): void;
+  /** Access ended (subscription canceled or unpaid): suspend now, delete 30 days later. */
+  endAccess(tenantId: string): Promise<void>;
   /** Suspends tenants past the grace and deletes those suspended for too long. */
   sweep(): Promise<void>;
   start(intervalMs?: number): void;
@@ -119,6 +121,13 @@ export function createBilling(deps: BillingDeps): Billing {
       if (record && record.state !== "active") return;
       store.set({ tenantId, state: "past_due", since: now() });
       logger.info(`billing past_due tenant=${tenantId}`);
+    },
+    async endAccess(tenantId) {
+      const tenant = tenants.getTenant(tenantId);
+      if (!tenant || isAdmin(tenantId) || store.get(tenantId)?.state === "suspended") return;
+      // Past the grace already, so `suspend` sees the state it expects.
+      store.set({ tenantId, state: "past_due", since: now() - GRACE_MS });
+      await suspend(tenant.id, tenant.wahaSession);
     },
     sweep() {
       // One sweep at a time: an hourly tick never overlaps a slow WAHA logout.

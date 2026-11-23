@@ -368,9 +368,9 @@ All configuration is through environment variables.
 | `CACHE_RETENTION_DAYS`               | no       | `90`                         | Delete cached messages and transcripts older than N days, daily (`0` keeps them forever). |
 | `CACHE_MAX_AGE_DAYS`                 | no       |                              | Legacy name of `CACHE_RETENTION_DAYS`, read only when that one is unset.                  |
 | `EMAIL_FROM`                         | no       |                              | Sender for password-recovery email, e.g. `Zenbox <hola@usezenbox.com>`.                   |
-| `CLOUDFLARE_ACCOUNT_ID`              | no       |                              | Cloudflare account that sends the email (Email Service).                                 |
+| `CLOUDFLARE_ACCOUNT_ID`              | no       |                              | Cloudflare account that sends the email (Email Service).                                  |
 | `CLOUDFLARE_EMAIL_API_TOKEN`         | no       |                              | Cloudflare API token with Email Sending permission. Never logged.                         |
-| `ADMIN_EMAIL`                        | no       |                              | The owner's email for password recovery; applied on every start.                         |
+| `ADMIN_EMAIL`                        | no       |                              | The owner's email for password recovery; applied on every start.                          |
 | `TRANSCRIPTION_API_URL`              | no       |                              | OpenAI-compatible speech-to-text base URL (`https://openrouter.ai/api/v1`).               |
 | `TRANSCRIPTION_API_KEY`              | no       |                              | API key of that provider.                                                                 |
 | `TRANSCRIPTION_MODEL`                | no       |                              | Model id (`openai/whisper-large-v3-turbo`).                                               |

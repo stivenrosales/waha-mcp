@@ -4,6 +4,7 @@
 
 ### Features
 
+- Billing lifecycle for hosted tenants: after a failed payment, 3 days of grace; then WhatsApp is logged out and the tenant revoked; 30 days later the tenant and its data are deleted. A payment restores the tenant. Tenants without billing are never touched. Payment events are not wired yet.
 - Webhooks no longer depend on missions: with `WAHA_WEBHOOK_SECRET` set, `/webhooks/waha` is mounted and every WAHA session is pointed at it.
 - The webhook route also stores `message.edited`, `message.revoked`, `message.reaction`, `poll.vote` and `poll.vote.failed` events, sealed per tenant, for the message cache.
 - New tool `send_poll`: sends a poll (2–12 options, single or multiple answers) and takes over an active mission like any other send.

@@ -15,6 +15,7 @@ import {
 import { loadConfig } from "./config.js";
 import { CACHE_EVENT_KINDS } from "./domain/ports/EventStore.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
+import { createSqliteBillingStore } from "./infrastructure/billing/sqliteBillingStore.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
 import { createSqliteEventStore } from "./infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "./infrastructure/missions/sqliteMissionStore.js";
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
   // Always opened, also with missions off: the purge and tenant deletion still reach rows left
   // from a period when missions were on.
   const events = createSqliteEventStore(authDb);
+  const billingStore = createSqliteBillingStore(authDb);
   const sessions = createWahaSessionAdmin({
     baseUrl: config.wahaApiUrl,
     apiKey: config.wahaApiKey,
@@ -84,11 +86,12 @@ async function main(): Promise<void> {
   let scheduleRunner: ScheduleRunner | null = null;
   let cacheEvents: CacheEventProcessor | null = null;
   let retentionPurge: MissionPurge | null = null;
-  const { app, registry, toolCount, multiTenant, configureWebhooks } = composeApp({
+  const { app, registry, toolCount, multiTenant, configureWebhooks, billing } = composeApp({
     config,
     store,
     tenants,
     missions,
+    billing: billingStore,
     events,
     // Cache kinds wake the cache processor, mission kinds the engine (a no-op when missions are off).
     onWebhookEvent: ({ kind }) => {
@@ -133,6 +136,8 @@ async function main(): Promise<void> {
   scheduleRunner?.start(SCHEDULE_TICK_MS);
   cacheEvents = composeCacheEventProcessor({ config, registry, events, logger });
   cacheEvents?.start(SCHEDULE_TICK_MS);
+  // Paying tenants: suspends after the grace period and deletes long-suspended ones (hourly).
+  billing?.start();
 
   const server = serve({ fetch: app.fetch, port: config.port });
 
@@ -168,6 +173,7 @@ async function main(): Promise<void> {
     missionEngine?.stop();
     scheduleRunner?.stop();
     cacheEvents?.stop();
+    billing?.stop();
     purge.stop();
     let finished = false;
     const finish = (): void => {

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { InvalidInputError } from "../domain/errors.js";
 import type { SessionAdmin, SessionState, WebhookTarget } from "../domain/ports/SessionAdmin.js";
-import type { TenantStatus, TenantStore } from "../domain/ports/TenantStore.js";
+import type { Tenant, TenantStatus, TenantStore } from "../domain/ports/TenantStore.js";
 import { localMidnight, parseRange, zoneFormatter, zoneParts } from "./dates.js";
 
 /** Invite and reset links live 72 hours. */
@@ -81,6 +81,12 @@ export interface ToolUsageReport {
   total: ToolUsageTotals;
 }
 
+export interface DeleteResult {
+  whatsappCleanup: "ok" | "failed";
+  localCleanup: "ok" | "failed";
+  wahaSession?: string;
+}
+
 export interface TenantAdmin {
   /** Exactly one of `displayName` (new tenant) or `tenantId` (re-issue for a tenant with no user). */
   createInvite(q: {
@@ -98,14 +104,12 @@ export interface TenantAdmin {
    * data directory removal threw. The row and key are gone in every case. When either failed,
    * `wahaSession` names the WAHA session so the admin can clean it up by hand.
    */
-  delete(
-    tenantId: string,
-    confirmDisplayName: string,
-  ): Promise<{
-    whatsappCleanup: "ok" | "failed";
-    localCleanup: "ok" | "failed";
-    wahaSession?: string;
-  }>;
+  delete(tenantId: string, confirmDisplayName: string): Promise<DeleteResult>;
+  /**
+   * Deletes a tenant like `delete`, without the display-name confirmation: for automated
+   * deletion (a billing suspension that expired). Never the admin tenant.
+   */
+  purge(tenantId: string): Promise<DeleteResult>;
   /**
    * Paid transcriptions per tenant. Without `from`, the range starts on the 1st of the month
    * holding `to` (the current month when both are omitted), in `timezone`.
@@ -186,6 +190,59 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
     if (!tenant) throw new InvalidInputError("Tenant not found.");
     return tenant;
   };
+
+  /** Deletes the tenant row first (the data is unrecoverable from then on), then cleans up. */
+  async function removeTenant(tenant: Tenant, action: string): Promise<DeleteResult> {
+    const user = tenants.getUserByTenant(tenant.id);
+
+    // Row + wrapped DEK first: from here on the tenant's data is unrecoverable.
+    tenants.deleteTenant(tenant.id);
+
+    /** Runs one cleanup step; a failure is logged (never its error text) and reported. */
+    const step = async (name: string, fn: () => unknown): Promise<"ok" | "failed"> => {
+      try {
+        await fn();
+        return "ok";
+      } catch {
+        logger.info(
+          `admin ${action} tenant=${tenant.id} session=${tenant.wahaSession} step=${name} outcome=failed`,
+        );
+        return "failed";
+      }
+    };
+    const worst = (...r: ("ok" | "failed")[]) => (r.includes("failed") ? "failed" : "ok");
+
+    const missionsDeleted = await step("missions", () => deps.missions.deleteForTenant(tenant.id));
+    const schedulesDeleted = await step("schedules", () =>
+      deps.schedules?.deleteForTenant(tenant.id),
+    );
+    const eventsDeleted = await step("webhook_events", () =>
+      deps.events?.deleteForTenant(tenant.id),
+    );
+    const revoked = await step("revoke_user", () => user && auth.revokeUser(user.id));
+    const evicted = await step("evict", () => registry.evict(tenant.id));
+    const whatsappCleanup = worst(
+      await step("waha_logout", () => sessions.logout(tenant.wahaSession)),
+      await step("waha_remove", () => sessions.remove(tenant.wahaSession)),
+    );
+    const removed = await step("remove_data_dir", () =>
+      fs.rmSync(path.join(deps.dataDir, "tenants", tenant.id), {
+        recursive: true,
+        force: true,
+      }),
+    );
+    const localCleanup = worst(
+      missionsDeleted,
+      schedulesDeleted,
+      eventsDeleted,
+      revoked,
+      evicted,
+      removed,
+    );
+    return whatsappCleanup === "ok" && localCleanup === "ok"
+      ? { whatsappCleanup, localCleanup }
+      : { whatsappCleanup, localCleanup, wahaSession: tenant.wahaSession };
+  }
 
   /** Never log (or touch the filesystem with) a caller-supplied id that is not id-shaped. */
   const isSafeId = (tenantId: string): boolean => TENANT_ID_PATTERN.test(tenantId);
@@ -464,57 +521,19 @@ export function createTenantAdmin(deps: TenantAdminDeps): TenantAdmin {
             throw new InvalidInputError(
               "confirm_display_name does not match the tenant's display name; nothing was deleted.",
             );
-          const user = tenants.getUserByTenant(tenant.id);
+          return removeTenant(tenant, "delete_tenant");
+        },
+      );
+    },
 
-          // Row + wrapped DEK first: from here on the tenant's data is unrecoverable.
-          tenants.deleteTenant(tenant.id);
-
-          /** Runs one cleanup step; a failure is logged (never its error text) and reported. */
-          const step = async (name: string, fn: () => unknown): Promise<"ok" | "failed"> => {
-            try {
-              await fn();
-              return "ok";
-            } catch {
-              logger.info(
-                `admin delete_tenant tenant=${tenant.id} session=${tenant.wahaSession} step=${name} outcome=failed`,
-              );
-              return "failed";
-            }
-          };
-          const worst = (...r: ("ok" | "failed")[]) => (r.includes("failed") ? "failed" : "ok");
-
-          const missionsDeleted = await step("missions", () =>
-            deps.missions.deleteForTenant(tenant.id),
-          );
-          const schedulesDeleted = await step("schedules", () =>
-            deps.schedules?.deleteForTenant(tenant.id),
-          );
-          const eventsDeleted = await step("webhook_events", () =>
-            deps.events?.deleteForTenant(tenant.id),
-          );
-          const revoked = await step("revoke_user", () => user && auth.revokeUser(user.id));
-          const evicted = await step("evict", () => registry.evict(tenant.id));
-          const whatsappCleanup = worst(
-            await step("waha_logout", () => sessions.logout(tenant.wahaSession)),
-            await step("waha_remove", () => sessions.remove(tenant.wahaSession)),
-          );
-          const removed = await step("remove_data_dir", () =>
-            fs.rmSync(path.join(deps.dataDir, "tenants", tenant.id), {
-              recursive: true,
-              force: true,
-            }),
-          );
-          const localCleanup = worst(
-            missionsDeleted,
-            schedulesDeleted,
-            eventsDeleted,
-            revoked,
-            evicted,
-            removed,
-          );
-          return whatsappCleanup === "ok" && localCleanup === "ok"
-            ? { whatsappCleanup, localCleanup }
-            : { whatsappCleanup, localCleanup, wahaSession: tenant.wahaSession };
+    purge(tenantId) {
+      return audited(
+        "purge_tenant",
+        () => (isSafeId(tenantId) ? tenantId : "-"),
+        async () => {
+          assertSafeId(tenantId);
+          assertNotAdmin(tenantId);
+          return removeTenant(requireTenant(tenantId), "purge_tenant");
         },
       );
     },

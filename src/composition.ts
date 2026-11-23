@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Hono } from "hono";
+import { type Billing, createBilling } from "./application/billing.js";
 import { type CacheEventProcessor, createCacheEventProcessor } from "./application/cacheEvents.js";
 import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
 import { createMissionPurge, type MissionPurge } from "./application/missions/retention.js";
@@ -8,6 +9,7 @@ import { createScheduleRunner, type ScheduleRunner } from "./application/schedul
 import { createSelfService } from "./application/selfService.js";
 import { createTenantAdmin } from "./application/tenantAdmin.js";
 import type { Config } from "./config.js";
+import type { BillingStore } from "./domain/ports/BillingStore.js";
 import {
   CACHE_EVENT_KINDS,
   type EventStore,
@@ -55,6 +57,8 @@ export interface ComposeDeps {
   tenants: TenantStore;
   /** Mission rows, deleted with their tenant. */
   missions: MissionStore;
+  /** Billing state of paying tenants; without it there is no billing lifecycle. */
+  billing?: BillingStore;
   /** The WAHA webhook inbox; required whenever `WAHA_WEBHOOK_SECRET` is set. */
   events?: EventStore;
   /** Wakes the mission engine when a webhook event is stored. */
@@ -99,6 +103,8 @@ export interface ComposedApp {
    * never throws. A no-op when webhooks are off.
    */
   configureWebhooks(): Promise<void>;
+  /** The billing lifecycle of paying tenants, when a billing store was given. */
+  billing: Billing | null;
 }
 
 /**
@@ -246,7 +252,10 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   const configureWebhooks = async (): Promise<void> => {
     if (webhook) await configureTenantWebhooks({ tenants, sessions, target: webhook, logger });
   };
-  return { app, registry, toolCount: tools.length, multiTenant, configureWebhooks };
+  const billing = deps.billing
+    ? createBilling({ store: deps.billing, tenants, admin, sessions, logger })
+    : null;
+  return { app, registry, toolCount: tools.length, multiTenant, configureWebhooks, billing };
 }
 
 /**

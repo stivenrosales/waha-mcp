@@ -162,3 +162,39 @@ export function buildConversation(entries: MissionLogEntry[]): Conversation {
   flush();
   return { system, spec, messages, agentTurns, pending, sentIds, contactIds };
 }
+
+/** One line of a mission's WhatsApp conversation, for the owner's panel. */
+export interface TranscriptLine {
+  at: string;
+  from: "contact" | "agent";
+  text: string;
+}
+
+const PLACEHOLDERS: Record<string, string> = { image: "[imagen]", document: "[documento]" };
+
+/**
+ * What the contact wrote and what the agent replied, oldest first. Engine instructions, tool
+ * traffic and the agent's thinking are left out; non-text content shows as a placeholder.
+ */
+export function missionTranscript(entries: MissionLogEntry[]): TranscriptLine[] {
+  const lines: TranscriptLine[] = [];
+  for (const e of entries) {
+    if (e.kind !== "message" || typeof e.body !== "object" || e.body === null) continue;
+    const body = e.body as { from?: unknown; content?: unknown };
+    if ((body.from !== "contact" && body.from !== "agent") || !Array.isArray(body.content))
+      continue;
+    const parts: string[] = [];
+    for (const block of body.content as { type?: unknown; text?: unknown }[]) {
+      if (block?.type === "text" && typeof block.text === "string") parts.push(block.text);
+      else if (
+        body.from === "contact" &&
+        typeof block?.type === "string" &&
+        PLACEHOLDERS[block.type]
+      )
+        parts.push(PLACEHOLDERS[block.type] as string);
+    }
+    const text = parts.join(" ").trim();
+    if (text) lines.push({ at: e.at, from: body.from, text });
+  }
+  return lines;
+}

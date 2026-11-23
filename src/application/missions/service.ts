@@ -8,7 +8,12 @@ import type { ScheduleStore } from "../../domain/ports/ScheduleStore.js";
 import type { TenantStore } from "../../domain/ports/TenantStore.js";
 import type { CollectedItem } from "./agentTools.js";
 import type { MissionEngine } from "./engine.js";
-import { buildConversation, startMissionContent } from "./history.js";
+import {
+  buildConversation,
+  missionTranscript,
+  startMissionContent,
+  type TranscriptLine,
+} from "./history.js";
 import { chatIdForms } from "./inbound.js";
 
 /** What the service needs of the engine: owner actions are queued behind its ticks. */
@@ -76,6 +81,8 @@ export interface MissionService {
   start(input: StartMissionInput): Promise<StartedMission>;
   get(id: string): MissionView;
   list(state?: MissionState): MissionView[];
+  /** The mission's WhatsApp conversation (contact and agent), oldest first. */
+  transcript(id: string): TranscriptLine[];
   answer(id: string, text: string): Promise<MissionRow>;
   cancel(id: string): Promise<MissionRow>;
   /** The owner sent something to `chatId` through the MCP tools: its active mission is taken over. */
@@ -276,6 +283,10 @@ export function createMissionService(deps: MissionServiceDeps): MissionService {
 
     list(state) {
       return store.list(tenantId, state).map((m) => viewOf(m, log.read(m.id)));
+    },
+
+    transcript(id) {
+      return missionTranscript(log.read(find(id).id));
     },
 
     async answer(id, text) {

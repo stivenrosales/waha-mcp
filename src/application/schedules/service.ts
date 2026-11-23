@@ -69,6 +69,8 @@ export interface ScheduleView {
 export interface ScheduleService {
   schedule(q: ScheduleInput): Promise<{ row: ScheduleRow; note: string | null }>;
   list(): ScheduleView[];
+  /** Active and ended schedules still stored, newest first, with up to 20 runs each. */
+  history(limit?: number): ScheduleView[];
   cancel(id: string): ScheduleRow;
 }
 
@@ -103,6 +105,8 @@ export const SCHEDULE_TEXTS = {
 
 const MAX_INSTRUCTION = 2000;
 const LAST_RUNS = 5;
+const HISTORY_RUNS = 20;
+const HISTORY_SCHEDULES = 50;
 /** Direct chats: phone JIDs (`@c.us`, `@s.whatsapp.net`) and linked ids (`@lid`). */
 const DIRECT_CHAT = /^[^@\s]+@(c\.us|s\.whatsapp\.net|lid)$/;
 const GROUP_CHAT = /^[^@\s]+@g\.us$/;
@@ -227,6 +231,14 @@ export function createScheduleService(deps: ScheduleServiceDeps): ScheduleServic
         row,
         content: log.content(row.id) ?? {},
         runs: log.runs(row.id, LAST_RUNS),
+      }));
+    },
+
+    history(limit = HISTORY_SCHEDULES) {
+      return store.listRecent(tenantId, limit).map((row) => ({
+        row,
+        content: log.content(row.id) ?? {},
+        runs: log.runs(row.id, HISTORY_RUNS),
       }));
     },
 

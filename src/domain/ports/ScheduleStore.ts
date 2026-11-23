@@ -36,6 +36,8 @@ export interface ScheduleStore {
   get(tenantId: string, id: string): ScheduleRow | null;
   /** Active schedules of the tenant, newest first. */
   listActive(tenantId: string): ScheduleRow[];
+  /** Every schedule of the tenant still stored (active and ended), newest first. */
+  listRecent(tenantId: string, limit: number): ScheduleRow[];
   countActive(tenantId: string): number;
   /**
    * Active schedules of active tenants with `nextRunAt <= nowIso`, oldest first, leaving out

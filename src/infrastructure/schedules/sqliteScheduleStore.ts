@@ -123,6 +123,13 @@ export function createSqliteScheduleStore(
         tenantId,
       );
     },
+    listRecent(tenantId, limit) {
+      return all(
+        "SELECT * FROM schedules WHERE tenant_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        tenantId,
+        limit,
+      );
+    },
     countActive(tenantId) {
       const r = db
         .prepare("SELECT COUNT(*) AS n FROM schedules WHERE tenant_id = ? AND state = 'active'")

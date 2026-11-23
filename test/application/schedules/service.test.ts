@@ -327,3 +327,32 @@ describe("schedule service: list() and cancel()", () => {
     expect(h.service.list()).toEqual([]);
   });
 });
+
+describe("schedule service: history()", () => {
+  it("lists every schedule, ended ones included, newest first, with up to 20 runs each", async () => {
+    const h = harness();
+    const a = (await h.fixed({ repeat: "daily" })).row;
+    const b = (await h.fixed({ text: "Otro recordatorio" })).row;
+    h.service.cancel(b.id);
+    for (let i = 0; i < 25; i++)
+      h.log.appendRun(a.id, {
+        at: new Date(Date.UTC(2026, 10, 1, 14) + i * 86_400_000).toISOString(),
+        outcome: "sent",
+        text: "t",
+      });
+    const history = h.service.history();
+    expect(history.map((x) => [x.row.id, x.row.state])).toEqual([
+      [b.id, "cancelled"],
+      [a.id, "active"],
+    ]);
+    expect(history[0]?.content).toEqual({ text: "Otro recordatorio" });
+    expect(history[1]?.runs).toHaveLength(20);
+    expect(h.service.list().map((x) => x.row.id)).toEqual([a.id]);
+  });
+
+  it("is limited to the given number of schedules", async () => {
+    const h = harness();
+    for (let i = 0; i < 3; i++) await h.fixed({ text: `r${i}` });
+    expect(h.service.history(2)).toHaveLength(2);
+  });
+});

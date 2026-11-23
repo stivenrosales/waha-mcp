@@ -1,7 +1,9 @@
 # Billing lifecycle for hosted tenants
+
 Objective: what happens to a paying tenant when payments fail, before any Polar code. Branch `feat/billing-lifecycle`; delivery `ask-on-risk`; runner `pnpm test` (vitest).
 
 ## Specs
+
 - S1. "3 días de gracia, luego desconectar WhatsApp y pausar todo, y borrar los datos a los 30 días." (user, accepted proposal)
   - A failed payment moves a billed tenant to past due; nothing changes for the user for 3 days.
   - After 3 days past due the tenant is suspended: WhatsApp is logged out in WAHA, the tenant is revoked (no tool access, OAuth tokens revoked, missions stop, schedules wait).
@@ -12,10 +14,13 @@ Objective: what happens to a paying tenant when payments fail, before any Polar 
 - Assumption: the entry points (`paymentFailed`, `paymentSucceeded`) are called by the Polar webhook in a later feature; this feature has no user-facing trigger yet.
 
 ## Tasks
-- T1 (S1-S4) billing store, application service and sweeper, tests; route inline (one behavior, no writer reason); commit: pending.
-- T2 (S4) wire the sweeper in main/composition, docs and changelog; inline; commit: pending.
+
+- T1 (S1-S4) billing store, application service and sweeper, tests; route inline (one behavior, no writer reason); done, commits e80dd3d + fix commit.
+- T2 (S4) wire the sweeper in main/composition, docs and changelog; inline; done in e80dd3d.
 
 ## Log
+
 - L1 (2026-11-23, user): "Vale, vamos con tu sugernecia" — accepting: "¿Qué pasa cuando alguien deja de pagar? Mi propuesta: 3 días de gracia, luego desconectar WhatsApp y pausar todo, y borrar los datos a los 30 días."
 - L2: Critic review found `revoke()` never logs WhatsApp out (src/application/tenantAdmin.ts:384-400) and no email is stored; order agreed: lifecycle → email/recovery → Polar webhook → panel.
 - L3: Design: billing lives in its own table `tenant_billing` (the `tenants.status` CHECK constraint would need a table rebuild); suspension reuses status `revoked` so the existing gates stop missions and schedules.
+- L4: Independent verifier: S1-S4 pass; blockers fixed with regression tests: B1 admin-restored tenant was still deleted at 30 days (sweep now resets it to active); B2 this file broke `biome check`; B3 a payment during a slow WhatsApp logout was overwritten (sweep re-reads state before revoking or deleting). Advisories left: billing can undo a manual admin revoke; a partial delete is not retried; the worker also runs on self-hosted installs (no-op without records).

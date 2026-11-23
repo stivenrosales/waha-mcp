@@ -51,6 +51,11 @@ export function createBilling(deps: BillingDeps): Billing {
     } catch {
       whatsapp = "failed";
     }
+    // A payment may have arrived while WAHA answered: then the tenant stays (it re-pairs at /pair).
+    if (store.get(tenantId)?.state !== "past_due") {
+      logger.info(`billing suspend tenant=${tenantId} whatsapp=${whatsapp} outcome=skipped_paid`);
+      return;
+    }
     let outcome = "error";
     try {
       admin.revoke(tenantId);
@@ -83,7 +88,15 @@ export function createBilling(deps: BillingDeps): Billing {
       try {
         if (record.state === "past_due" && age >= GRACE_MS)
           await suspend(tenant.id, tenant.wahaSession);
-        else if (record.state === "suspended" && age >= SUSPENDED_DELETE_MS)
+        else if (record.state === "suspended" && tenant.status !== "revoked") {
+          // The admin restored it by hand: it is no longer suspended, so it must not be deleted.
+          store.set({ tenantId: tenant.id, state: "active", since: now() });
+          logger.info(`billing restored_by_admin tenant=${tenant.id}`);
+        } else if (
+          record.state === "suspended" &&
+          age >= SUSPENDED_DELETE_MS &&
+          store.get(tenant.id)?.state === "suspended"
+        )
           await remove(tenant.id);
       } catch {
         // Logged by the step; the next sweep tries again.

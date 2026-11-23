@@ -198,4 +198,33 @@ describe("billing lifecycle", () => {
     await s.billing.sweep();
     expect(s.store.get(s.tenantId)).toBeNull();
   });
+  it("does not delete a suspended tenant the admin restored by hand", async () => {
+    const s = await setup();
+    s.billing.paymentFailed(s.tenantId);
+    s.advance(GRACE_MS);
+    await s.billing.sweep();
+    s.tenants.transitionStatus(s.tenantId, "revoked", "active");
+    s.advance(SUSPENDED_DELETE_MS);
+    await s.billing.sweep();
+    expect(s.tenants.getTenant(s.tenantId)?.status).toBe("active");
+    expect(s.store.get(s.tenantId)?.state).toBe("active");
+  });
+
+  it("keeps a payment that arrives while the sweep waits on WhatsApp", async () => {
+    const s = await setup();
+    let release = () => {};
+    s.sessions.logout = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    s.billing.paymentFailed(s.tenantId);
+    s.advance(GRACE_MS);
+    const sweeping = s.billing.sweep();
+    await Promise.resolve();
+    s.billing.paymentSucceeded(s.tenantId);
+    release();
+    await sweeping;
+    expect(s.store.get(s.tenantId)?.state).toBe("active");
+    expect(s.tenants.getTenant(s.tenantId)?.status).toBe("active");
+  });
 });

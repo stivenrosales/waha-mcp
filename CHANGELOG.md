@@ -4,6 +4,7 @@
 
 ### Features
 
+- The account panel has tabs (Resumen, Recordatorios, Misiones, Actividad), 30-day metrics, the full history of reminders (each run and what went out) and missions (result, collected data and conversation), and a more compact layout.
 - Zenbox branding on every web page (login, invite, pairing, reset, recovery, panel, privacy): cream and sage palette, Newsreader titles, DM Sans text (self-hosted, OFL), the Zenbox logo and favicon, and Zenbox in titles and emails. Replaces the Satoshi font and the pixel mascot icon.
 - Account panel at `/panel`: sign in with the MCP username and password to see the WhatsApp state, active reminders and missions (with a cancel button), the latest tool calls and the subscription state. Sessions are server-side, last 12 hours and end with any revocation.
 - Billing with Polar (optional): `POST /webhooks/polar` verifies Standard Webhooks signatures, reads each subscription's current state from the Polar API, creates the customer's account and emails the invite on the first good state, starts the grace period on `past_due`, and ends access on `canceled`/`unpaid`. At most 20 new accounts per hour.

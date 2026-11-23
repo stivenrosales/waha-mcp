@@ -18,6 +18,10 @@ const mission = (over: Partial<MissionView["mission"]> = {}): MissionView =>
       id: "m1",
       chatId: "51999@c.us",
       state: "active",
+      stopReason: null,
+      sentCount: 2,
+      createdAt: new Date(T0 - 3_600_000).toISOString(),
+      endedAt: null,
       deadlineAt: new Date(T0 + 86_400_000).toISOString(),
       ...over,
     },
@@ -33,11 +37,40 @@ const schedule = (): ScheduleView =>
     row: {
       id: "s1",
       chatId: "51888@c.us",
+      state: "active",
       repeat: "weekly",
+      runsDone: 1,
       maxRuns: 4,
       nextRunAt: new Date(T0 + 3_600_000).toISOString(),
+      endedAt: null,
     },
     content: { text: "Recuerda pagar la cuota" },
+    runs: [
+      {
+        at: new Date(T0 - 86_400_000).toISOString(),
+        outcome: "sent",
+        text: "Recuerda pagar la cuota (enviado)",
+      },
+      {
+        at: new Date(T0 - 2 * 86_400_000).toISOString(),
+        outcome: "failed",
+        reason: "WhatsApp desconectado",
+      },
+    ],
+  }) as unknown as ScheduleView;
+const endedSchedule = (): ScheduleView =>
+  ({
+    row: {
+      id: "s2",
+      chatId: "51777@c.us",
+      state: "cancelled",
+      repeat: "none",
+      runsDone: 0,
+      maxRuns: 1,
+      nextRunAt: null,
+      endedAt: new Date(T0 - 3_600_000).toISOString(),
+    },
+    content: { instruction: "Saluda a Pedro por su cumpleaños" },
     runs: [],
   }) as unknown as ScheduleView;
 
@@ -63,8 +96,16 @@ async function setup(
   tenants.setStatus(tenant.id, "active");
   tenants.setEmail(user.id, "alice@example.com");
   const cancelled: string[] = [];
-  const missions = [mission()];
-  const schedules = [schedule()];
+  const missions = [
+    mission(),
+    {
+      ...mission({ id: "m2", state: "succeeded", endedAt: new Date(T0 - 60_000).toISOString() }),
+      objective: "Pedir el presupuesto",
+      outcome: { outcome: "succeeded", summary: "El técnico cobra S/ 250" },
+      collected: [{ label: "Precio", value: "S/ 250" }],
+    } as MissionView,
+  ];
+  const schedules = [schedule(), endedSchedule()];
   const missionsOn = opts.missionsOn ?? true;
   const app = createPanelRoutes({
     tenants,
@@ -76,10 +117,25 @@ async function setup(
           context: {
             missions: missionsOn
               ? {
-                  list: () => {
+                  list: (state?: string) => {
                     if (opts.failingLists) throw new Error("log unreadable");
-                    return missions;
+                    return state ? missions.filter((m) => m.mission.state === state) : missions;
                   },
+                  transcript: (id: string) =>
+                    id === "m2"
+                      ? [
+                          {
+                            at: new Date(T0 - 600_000).toISOString(),
+                            from: "agent",
+                            text: "Hola, ¿cuánto cobra?",
+                          },
+                          {
+                            at: new Date(T0 - 300_000).toISOString(),
+                            from: "contact",
+                            text: "250 soles",
+                          },
+                        ]
+                      : [],
                   cancel: async (id: string) => {
                     cancelled.push(`mission:${id}`);
                     return missions[0]?.mission;
@@ -89,6 +145,10 @@ async function setup(
             schedules: missionsOn
               ? {
                   list: () => {
+                    if (opts.failingLists) throw new Error("log unreadable");
+                    return schedules.filter((x) => x.row.state === "active");
+                  },
+                  history: () => {
                     if (opts.failingLists) throw new Error("log unreadable");
                     return schedules;
                   },
@@ -107,6 +167,7 @@ async function setup(
     limiter: createLoginLimiter({ now: () => now }),
     publicBaseUrl: BASE,
     timezone: "America/Lima",
+    now: () => now,
   });
   const request = (path: string, init?: RequestInit) => app.request(path, init);
   const post = (
@@ -286,5 +347,90 @@ describe("panel dashboard", () => {
     expect(page).toContain("<title>Tu panel · Zenbox</title>");
     expect(page).toContain('class="brand"');
     expect(page).toContain("usezenbox.com");
+  });
+});
+
+describe("panel tabs and metrics", () => {
+  it("shows 30-day metrics on every tab", async () => {
+    const s = await setup();
+    for (const [tool, outcome] of [
+      ["send_text", "ok"],
+      ["send_text", "ok"],
+      ["send_media", "WahaUnavailableError"],
+      ["get_messages", "ok"],
+    ])
+      s.tenants.recordToolCall({
+        tenantId: s.tenant.id,
+        at: new Date(T0 - 60_000).toISOString(),
+        tool,
+        outcome,
+        ms: 3,
+      });
+    const { cookie } = await s.login();
+    const page = await (await s.dashboard(cookie)).text();
+    expect(page).toMatch(/<b>4<\/b><span>Acciones de tu asistente<\/span><small>1 con error/);
+    expect(page).toMatch(/<b>2<\/b><span>Mensajes que envió/);
+    expect(page).toMatch(/<b>1<\/b><span>Recordatorios enviados<\/span><small>1 sin enviar/);
+    expect(page).toMatch(/<b>1\/1<\/b><span>Misiones logradas<\/span><small>1 en curso/);
+  });
+
+  it("the reminders tab lists ended reminders and every run with what went out", async () => {
+    const s = await setup();
+    const { cookie } = await s.login();
+    const page = await (
+      await s.request("/panel?tab=recordatorios", { headers: { cookie } })
+    ).text();
+    expect(page).toContain('aria-current="page">Recordatorios');
+    expect(page).toContain("Saluda a Pedro por su cumpleaños");
+    expect(page).toContain("Cancelado");
+    expect(page).toContain("1 de 4 envíos");
+    expect(page).toContain("Recuerda pagar la cuota (enviado)");
+    expect(page).toContain("Enviado");
+    expect(page).toContain("WhatsApp desconectado");
+    expect(page.match(/\/panel\/schedules\/[^/]+\/cancel/g)).toEqual([
+      "/panel/schedules/s1/cancel",
+    ]);
+  });
+
+  it("the missions tab shows outcomes, collected data and the conversation", async () => {
+    const s = await setup();
+    const { cookie } = await s.login();
+    const page = await (await s.request("/panel?tab=misiones", { headers: { cookie } })).text();
+    expect(page).toContain("Lograda");
+    expect(page).toContain("El técnico cobra S/ 250");
+    expect(page).toContain("Precio");
+    expect(page).toContain("Hola, ¿cuánto cobra?");
+    expect(page).toContain("250 soles");
+    expect(page).toContain("2 mensajes enviados");
+  });
+
+  it("the activity tab totals each action over 30 days", async () => {
+    const s = await setup();
+    s.tenants.recordToolCall({
+      tenantId: s.tenant.id,
+      at: new Date(T0 - 60_000).toISOString(),
+      tool: "send_text",
+      outcome: "ok",
+      ms: 3,
+    });
+    const { cookie } = await s.login();
+    const page = await (await s.request("/panel?tab=actividad", { headers: { cookie } })).text();
+    expect(page).toContain("Últimos 30 días");
+    expect(page).toMatch(/<td>Envió un mensaje<\/td><td class="num">1<\/td>/);
+  });
+
+  it("hides the reminder and mission tabs when missions are off, and falls back to the summary", async () => {
+    const s = await setup({ missionsOn: false });
+    const { cookie } = await s.login();
+    const page = await (await s.request("/panel?tab=misiones", { headers: { cookie } })).text();
+    expect(page).not.toContain("?tab=misiones");
+    expect(page).toContain('aria-current="page">Resumen');
+  });
+
+  it("an unknown tab shows the summary", async () => {
+    const s = await setup();
+    const { cookie } = await s.login();
+    const page = await (await s.request("/panel?tab=<x>", { headers: { cookie } })).text();
+    expect(page).toContain('aria-current="page">Resumen');
   });
 });

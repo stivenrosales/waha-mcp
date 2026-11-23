@@ -228,12 +228,14 @@ Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the
 
 ## Account panel
 
-Every account has a web panel at `{PUBLIC_BASE_URL}/panel`. It signs in with the same username and password as the MCP and shows:
+Every account has a web panel at `{PUBLIC_BASE_URL}/panel`. It signs in with the same username and password as the MCP. Its tabs are plain links and its details open with `<details>`, so it needs no JavaScript:
 
-- the WhatsApp state (connected, needs the QR, connecting, disconnected), linking to `/pair` when it is not connected; `/pair` asks for the password again before it shows the QR;
-- with missions on, the active scheduled messages and missions, each with a Cancelar button (the same cancel as `cancel_scheduled` and `cancel_mission`);
-- the latest 20 tool calls: a Spanish description, the time and whether it failed, never arguments or message content;
-- for a billed account, whether the subscription is up to date, or the date the account will be suspended.
+- **Resumen**: 30-day metrics (assistant actions and errors, messages it sent, reminders sent and not sent, missions achieved and in progress), the WhatsApp state (linking to `/pair`, which asks for the password again before it shows the QR), the account and subscription state, the active reminders and missions with a Cancelar button, and the latest 20 actions.
+- **Recordatorios** (with missions on): every stored reminder, ended ones included, with each run's time, result and the exact text that went out (or why it did not).
+- **Misiones** (with missions on): every mission with its state, dates and messages sent; opening one shows its result, the data it collected and its WhatsApp conversation.
+- **Actividad**: the latest 100 actions and a 30-day count per action, never arguments or message content.
+
+Reminder runs and mission conversations are the account's own data, read from its encrypted logs and kept as long as the retention allows (`CACHE_RETENTION_DAYS` and the mission retention).
 
 The panel session is a random token in a cookie (`HttpOnly; Secure; SameSite=Strict; Path=/panel`), stored only as a hash, valid 12 hours and replaced on every login. Signing out of the panel, `/logout`, `unlink_account`, a password reset, `revoke_tenant` or a billing suspension end it. Sign-ins share the login rate limiter, every form checks the request's origin, and only active or pairing accounts can sign in.
 

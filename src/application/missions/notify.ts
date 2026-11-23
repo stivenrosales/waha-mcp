@@ -2,7 +2,7 @@ import type { StopReason } from "../../domain/missions/mission.js";
 import type { WhatsAppSender } from "../../domain/ports/WhatsAppSender.js";
 
 /** Owner-facing texts (Spanish, like every page the owner sees). */
-const STOP_REASONS: Record<StopReason, string> = {
+export const STOP_REASONS: Record<StopReason, string> = {
   refusal: "el modelo se negó a continuar",
   restriction: "restricción de WhatsApp",
   revoked: "cuenta revocada",

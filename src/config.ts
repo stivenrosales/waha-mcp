@@ -52,6 +52,8 @@ export interface Config {
   email: EmailConfig | null;
   /** `ADMIN_EMAIL`, lowercased: the owner's address for password recovery; null when unset. */
   adminEmail: string | null;
+  /** Polar billing webhooks; null when off. Needs `email` and multi-tenant mode. */
+  polar: PolarConfig | null;
   /** Server-side Claude agent on WhatsApp missions; null when off (the default). */
   missions: MissionsConfig | null;
   /** Shared secret WAHA signs webhook deliveries with; null turns webhooks off. Never logged. */
@@ -97,6 +99,17 @@ export interface EmailConfig {
   /** Never logged. */
   apiToken: string;
 }
+
+export interface PolarConfig {
+  /** `whsec_…`; never logged. */
+  webhookSecret: string;
+  /** Organization access token with `subscriptions:read`; never logged. */
+  accessToken: string;
+  /** No trailing slash; `https://sandbox-api.polar.sh` for the sandbox. */
+  apiUrl: string;
+}
+
+const POLAR_REQUIRED = ["POLAR_WEBHOOK_SECRET", "POLAR_ACCESS_TOKEN"] as const;
 
 const EMAIL_REQUIRED = [
   "EMAIL_FROM",
@@ -314,6 +327,21 @@ const envSchema = z
       .string()
       .optional()
       .transform((v) => v?.trim() || undefined),
+    POLAR_WEBHOOK_SECRET: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined),
+    POLAR_ACCESS_TOKEN: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined),
+    POLAR_API_URL: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined)
+      .refine((v) => !v || isValidUrl(v), "POLAR_API_URL must be a valid URL.")
+      .refine((v) => !v || isSecureOrLocal(v), "POLAR_API_URL must use https.")
+      .transform((v) => (v ? stripTrailingSlashes(v) : undefined)),
     ADMIN_EMAIL: z
       .string()
       .optional()
@@ -419,6 +447,30 @@ const envSchema = z
             message: `${name} is required when email is configured (set EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_EMAIL_API_TOKEN together).`,
           });
 
+    // Polar: both or none; it sends invites by email and gives each customer an account.
+    const polarSet = POLAR_REQUIRED.filter((name) => Boolean(env[name]));
+    if (polarSet.length > 0 && polarSet.length < POLAR_REQUIRED.length)
+      for (const name of POLAR_REQUIRED)
+        if (!env[name])
+          ctx.addIssue({
+            code: "custom",
+            path: [name],
+            message: `${name} is required when Polar is configured (set POLAR_WEBHOOK_SECRET and POLAR_ACCESS_TOKEN together).`,
+          });
+    if (polarSet.length > 0 && emailSet.length < EMAIL_REQUIRED.length)
+      ctx.addIssue({
+        code: "custom",
+        path: ["POLAR_WEBHOOK_SECRET"],
+        message:
+          "Polar needs email (EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_EMAIL_API_TOKEN): invites are sent by email.",
+      });
+    if (polarSet.length > 0 && env.MULTI_TENANT === false)
+      ctx.addIssue({
+        code: "custom",
+        path: ["MULTI_TENANT"],
+        message: "Polar needs MULTI_TENANT on (each customer gets an account).",
+      });
+
     // All three or none: a half-configured provider is a mistake, not "off".
     const set = TRANSCRIPTION_REQUIRED.filter((name) => Boolean(env[name]));
     if (set.length === 0 || set.length === TRANSCRIPTION_REQUIRED.length) return;
@@ -485,6 +537,14 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
           }
         : null,
     adminEmail: v.ADMIN_EMAIL ?? null,
+    polar:
+      v.POLAR_WEBHOOK_SECRET && v.POLAR_ACCESS_TOKEN
+        ? {
+            webhookSecret: v.POLAR_WEBHOOK_SECRET,
+            accessToken: v.POLAR_ACCESS_TOKEN,
+            apiUrl: v.POLAR_API_URL ?? "https://api.polar.sh",
+          }
+        : null,
     webhookSecret: v.WAHA_WEBHOOK_SECRET ?? null,
     multiTenant: v.MULTI_TENANT,
     missions:

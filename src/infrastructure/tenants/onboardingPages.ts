@@ -21,7 +21,7 @@ const newPasswordFields = `<label for="password">Contraseña (mínimo 12 caracte
 
 /** Forms post back to the page's own URL (no `action`), so the link token stays out of the markup. */
 export function invitePage(
-  opts: { username?: string; email?: string; error?: string } = {},
+  opts: { username?: string; email?: string; error?: string; askEmail?: boolean } = {},
 ): string {
   return layout(
     "Crea tu cuenta",
@@ -32,9 +32,13 @@ ${errorLine(opts.error)}
 <form method="post">
 <label for="username">Usuario</label>
 <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" value="${escapeHtml(opts.username ?? "")}" required autofocus>
-<label for="email">Correo (opcional, para recuperar tu contraseña)</label>
+${
+  opts.askEmail
+    ? `<label for="email">Correo (opcional, para recuperar tu contraseña)</label>
 <input id="email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" value="${escapeHtml(opts.email ?? "")}">
-${newPasswordFields}
+`
+    : ""
+}${newPasswordFields}
 <button type="submit">Crear cuenta</button>
 </form>`,
   );

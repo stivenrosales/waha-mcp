@@ -22,3 +22,4 @@ Objective: every account can have an email, and a user who forgets the password 
 - L2: Cloudflare Email Service is public beta, Workers Paid, 3,000 emails/month included then US$0.35/1,000; `from` domain must be onboarded in the dashboard (DNS on `cf-bounce`).
 - L3: Pre-existing flaky test `oauth.test.ts > limiter hardening > 51st failure…` hits its 5 s timeout under full-suite load (passes alone 3/3); not touched by this feature.
 - L4: All tasks done; full suite 1316 passed; lint clean on feature files.
+- L5: Verifier: S1, S3, S4 pass, no security blocker. Fixed: the invite email field showed with email off (S2); recovery limiter global cap raised to 1000. Advisories left: a /forgot request cancels an admin reset link; 5 requests for a victim's email block their recovery for 15 min; invite holders can probe emails; revoked tenants still receive reset links (baseline behavior of /reset).

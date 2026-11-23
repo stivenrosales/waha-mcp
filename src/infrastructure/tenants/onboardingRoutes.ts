@@ -201,7 +201,7 @@ export function createOnboardingRoutes(deps: {
     const html = page(c);
     if (!invitesOn) return invitesOff(html);
     const link = linkProblem(html, c.req.param("token"), "invite");
-    return "response" in link ? link.response : html(invitePage());
+    return "response" in link ? link.response : html(invitePage({ askEmail: Boolean(recovery) }));
   });
 
   app.post("/invite/:token", limitBody, async (c) => {
@@ -217,8 +217,10 @@ export function createOnboardingRoutes(deps: {
 
     const form = await readForm(c);
     const username = form.get("username") ?? "";
-    const email = (form.get("email") ?? "").trim().toLowerCase();
-    const retry = (error: string) => html(invitePage({ username, email, error }), 400);
+    // Only asked for when recovery by email is on; ignored otherwise.
+    const email = recovery ? (form.get("email") ?? "").trim().toLowerCase() : "";
+    const retry = (error: string) =>
+      html(invitePage({ username, email, error, askEmail: Boolean(recovery) }), 400);
     if (!USERNAME_PATTERN.test(username)) {
       return retry(`Username must be ${USERNAME_RULE}.`);
     }

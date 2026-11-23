@@ -219,7 +219,12 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   // Password recovery by email: only with EMAIL_FROM and the Cloudflare credentials set.
   const emailSender = config.email ? createCloudflareEmailSender(config.email) : null;
   const passwordRecovery = emailSender
-    ? { email: emailSender, limiter: createLoginLimiter() }
+    ? {
+        email: emailSender,
+        // Its own limiter, so recovery never spends the login budget; a higher global cap, so
+        // requests for made-up emails cannot switch recovery off for everyone.
+        limiter: createLoginLimiter({ globalMaxFailures: 1000 }),
+      }
     : null;
   const app = createApp({
     oauth: createOAuthRoutes({

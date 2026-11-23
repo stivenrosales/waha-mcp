@@ -232,7 +232,7 @@ Off by default. Set `EMAIL_FROM`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_EMAIL_
 
 When on, the sign-in pages (`/authorize` and `/pair`) link to `/forgot`. There a user types the email of the account and always gets the same answer, so the page does not reveal which emails have accounts. When an account has that email, it gets a reset link valid for 1 hour and usable once, which opens the usual `/reset` page; setting the new password signs out every connected app. Requests are limited per IP and per email (5 in 15 minutes). A failed send is logged as `forgot email failed tenant=<id> kind=<kind>`, never with the address or the provider's answer.
 
-Users give their email, optionally, on the invite form; the owner's comes from `ADMIN_EMAIL`, applied on every start. Each email belongs to one account. Without email configured, `/forgot` answers 404 and the sign-in pages show no link.
+With email on, users give their email, optionally, on the invite form (the field is hidden otherwise); the owner's comes from `ADMIN_EMAIL`, applied on every start. A new recovery link replaces any earlier reset link of that account, including one issued with `reset_password`. Each email belongs to one account. Without email configured, `/forgot` answers 404 and the sign-in pages show no link.
 
 ## Voice-note transcription (optional)
 

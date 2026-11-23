@@ -16,6 +16,7 @@ import { loadConfig } from "./config.js";
 import { CACHE_EVENT_KINDS } from "./domain/ports/EventStore.js";
 import { createAuthStore, openAuthDatabase } from "./infrastructure/auth/store.js";
 import { createSqliteBillingStore } from "./infrastructure/billing/sqliteBillingStore.js";
+import { createSqlitePolarStore } from "./infrastructure/billing/sqlitePolarStore.js";
 import { loadOrCreateMediaSecret } from "./infrastructure/media/signedLink.js";
 import { createSqliteEventStore } from "./infrastructure/missions/sqliteEventStore.js";
 import { createSqliteMissionStore } from "./infrastructure/missions/sqliteMissionStore.js";
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
   // from a period when missions were on.
   const events = createSqliteEventStore(authDb);
   const billingStore = createSqliteBillingStore(authDb);
+  const polarStore = config.polar ? createSqlitePolarStore(authDb) : undefined;
   const sessions = createWahaSessionAdmin({
     baseUrl: config.wahaApiUrl,
     apiKey: config.wahaApiKey,
@@ -92,6 +94,7 @@ async function main(): Promise<void> {
     tenants,
     missions,
     billing: billingStore,
+    ...(polarStore ? { polar: polarStore } : {}),
     events,
     // Cache kinds wake the cache processor, mission kinds the engine (a no-op when missions are off).
     onWebhookEvent: ({ kind }) => {
@@ -154,7 +157,7 @@ async function main(): Promise<void> {
     held?.release();
   }
   console.log(
-    `waha-mcp listening on :${config.port} | engine: ${engine} | public URL: ${config.publicBaseUrl} | mode: ${multiTenant ? "multi-tenant" : "single-owner"} | tenants: ${tenants.listTenants().length} | tools: ${toolCount} | message cache: ${config.cacheEnabled ? "on" : "off"} | transcription: ${config.transcription ? "on" : "off"} | email: ${config.email ? "on" : "off"} | missions: ${config.missions ? "on" : "off"}`,
+    `waha-mcp listening on :${config.port} | engine: ${engine} | public URL: ${config.publicBaseUrl} | mode: ${multiTenant ? "multi-tenant" : "single-owner"} | tenants: ${tenants.listTenants().length} | tools: ${toolCount} | message cache: ${config.cacheEnabled ? "on" : "off"} | transcription: ${config.transcription ? "on" : "off"} | email: ${config.email ? "on" : "off"} | billing: ${config.polar ? "polar" : "off"} | missions: ${config.missions ? "on" : "off"}`,
   );
   if (engine !== "GOWS" && !engine.startsWith("unknown")) {
     console.warn(`Engine ${engine} is not supported (GOWS only); tools will report this.`);

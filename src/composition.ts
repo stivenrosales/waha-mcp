@@ -5,11 +5,13 @@ import { type Billing, createBilling } from "./application/billing.js";
 import { type CacheEventProcessor, createCacheEventProcessor } from "./application/cacheEvents.js";
 import { createMissionEngine, type MissionEngine } from "./application/missions/engine.js";
 import { createMissionPurge, type MissionPurge } from "./application/missions/retention.js";
+import { createPolarSync, createProvisioner } from "./application/polarSync.js";
 import { createScheduleRunner, type ScheduleRunner } from "./application/schedules/runner.js";
 import { createSelfService } from "./application/selfService.js";
-import { createTenantAdmin } from "./application/tenantAdmin.js";
-import type { Config } from "./config.js";
+import { createTenantAdmin, type TenantAdmin } from "./application/tenantAdmin.js";
+import type { Config, PolarConfig } from "./config.js";
 import type { BillingStore } from "./domain/ports/BillingStore.js";
+import type { EmailSender } from "./domain/ports/EmailSender.js";
 import {
   CACHE_EVENT_KINDS,
   type EventStore,
@@ -18,6 +20,7 @@ import {
 } from "./domain/ports/EventStore.js";
 import type { LlmClient } from "./domain/ports/LlmClient.js";
 import type { MissionStore } from "./domain/ports/MissionStore.js";
+import type { PolarStore } from "./domain/ports/PolarStore.js";
 import type { ScheduleStore } from "./domain/ports/ScheduleStore.js";
 import type { SessionAdmin, WebhookTarget } from "./domain/ports/SessionAdmin.js";
 import type { TenantStore } from "./domain/ports/TenantStore.js";
@@ -25,6 +28,8 @@ import { bearerGuard } from "./infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "./infrastructure/auth/oauth.js";
 import { createLoginLimiter } from "./infrastructure/auth/rateLimit.js";
 import type { AuthStore } from "./infrastructure/auth/store.js";
+import { createPolarClient } from "./infrastructure/billing/polarClient.js";
+import { createPolarWebhookRoute } from "./infrastructure/billing/polarWebhook.js";
 import { generateDek, wrapDek } from "./infrastructure/crypto/envelope.js";
 import { createCloudflareEmailSender } from "./infrastructure/email/cloudflareEmailSender.js";
 import { createApp } from "./infrastructure/http/app.js";
@@ -60,6 +65,8 @@ export interface ComposeDeps {
   missions: MissionStore;
   /** Billing state of paying tenants; without it there is no billing lifecycle. */
   billing?: BillingStore;
+  /** Polar links and handled deliveries; used when `config.polar` is set. */
+  polar?: PolarStore;
   /** The WAHA webhook inbox; required whenever `WAHA_WEBHOOK_SECRET` is set. */
   events?: EventStore;
   /** Wakes the mission engine when a webhook event is stored. */
@@ -194,7 +201,9 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   });
   const tools = createTools();
   // Decided once, at startup: a fresh install (only the admin's tenant) is single-owner.
-  const multiTenant = config.multiTenant ?? tenants.listTenants().length > 1;
+  // Polar billing gives each customer an account, so it turns invites on.
+  const multiTenant =
+    config.multiTenant ?? (config.polar !== null || tenants.listTenants().length > 1);
   const mcp = createMcpServer({
     tools,
     adminTools: multiTenant ? createAdminTools() : createUsageTools(),
@@ -226,6 +235,21 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
         limiter: createLoginLimiter({ globalMaxFailures: 1000 }),
       }
     : null;
+  const billing = deps.billing
+    ? createBilling({ store: deps.billing, tenants, admin, sessions, logger })
+    : null;
+  const polarWebhook =
+    config.polar && deps.polar && billing && emailSender
+      ? composePolarWebhook({
+          polar: config.polar,
+          store: deps.polar,
+          billing,
+          admin,
+          tenants,
+          email: emailSender,
+          logger,
+        })
+      : null;
   const app = createApp({
     oauth: createOAuthRoutes({
       store,
@@ -249,6 +273,7 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       ...(passwordRecovery ? { passwordRecovery } : {}),
     }),
     guard: bearerGuard({ store, tenants, publicBaseUrl: config.publicBaseUrl }),
+    polarWebhook,
     mcpHandler: mcp.handler,
     registry,
     webhooks:
@@ -270,9 +295,6 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   const configureWebhooks = async (): Promise<void> => {
     if (webhook) await configureTenantWebhooks({ tenants, sessions, target: webhook, logger });
   };
-  const billing = deps.billing
-    ? createBilling({ store: deps.billing, tenants, admin, sessions, logger })
-    : null;
   return { app, registry, toolCount: tools.length, multiTenant, configureWebhooks, billing };
 }
 
@@ -430,5 +452,37 @@ export function composeScheduleRunner(deps: {
     },
     now,
     logger: deps.logger,
+  });
+}
+
+/** `POST /webhooks/polar`: Polar subscriptions create accounts and drive the billing lifecycle. */
+function composePolarWebhook(q: {
+  polar: PolarConfig;
+  store: PolarStore;
+  billing: Billing;
+  admin: TenantAdmin;
+  tenants: TenantStore;
+  email: EmailSender;
+  logger: { info(message: string): void };
+}): Hono {
+  const client = createPolarClient({ apiUrl: q.polar.apiUrl, accessToken: q.polar.accessToken });
+  return createPolarWebhookRoute({
+    secret: q.polar.webhookSecret,
+    store: q.store,
+    logger: q.logger,
+    sync: createPolarSync({
+      fetchSubscription: (id) => client.getSubscription(id),
+      store: q.store,
+      billing: q.billing,
+      provision: createProvisioner({ admin: q.admin, email: q.email, logger: q.logger }),
+      users: {
+        emailOfTenant: (t) => q.tenants.getUserByTenant(t)?.email ?? null,
+        setTenantEmail: (t, email) => {
+          const user = q.tenants.getUserByTenant(t);
+          if (user) q.tenants.setEmail(user.id, email);
+        },
+      },
+      logger: q.logger,
+    }),
   });
 }

@@ -36,6 +36,8 @@ export interface CreateAppDeps {
   registry: Pick<TenantRegistry, "acquire">;
   /** `POST /webhooks/waha`; only when missions are on (otherwise that path is a 404). */
   webhooks?: Hono | null;
+  /** `POST /webhooks/polar`; only when Polar billing is configured. */
+  polarWebhook?: Hono | null;
 }
 
 /**
@@ -86,6 +88,7 @@ export function createApp(deps: CreateAppDeps): Hono {
   app.route("/", deps.oauth);
   app.route("/", deps.onboarding);
   if (deps.webhooks) app.route("/", deps.webhooks);
+  if (deps.polarWebhook) app.route("/", deps.polarWebhook);
   app.all("/mcp", deps.guard, (c) => deps.mcpHandler(c.req.raw, { authInfo: c.get("auth") }));
   app.get("/media/:token", (c) => {
     const token = c.req.param("token");

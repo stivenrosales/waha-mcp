@@ -13,12 +13,13 @@ Objective: a Polar subscription creates the customer's account and invite, and i
 
 ## Tasks
 
-- T1 (S2, S4) signature verifier, config group; inline; pending.
-- T2 (S3) Polar API client and subscription sync service (status → billing action), mapping store; inline; pending.
-- T3 (S1, S5) provisioning (tenant + invite + email) with hourly cap; inline; pending.
-- T4 (S2) `/webhooks/polar` route, dedupe, background queue, wiring, docs; inline; pending.
+- T1 (S2, S4) signature verifier, config group; inline; done.
+- T2 (S3) Polar API client and subscription sync service (status → billing action), mapping store; inline; done.
+- T3 (S1, S5) provisioning (tenant + invite + email) with hourly cap; inline; done.
+- T4 (S2) `/webhooks/polar` route, dedupe, background queue, wiring, docs; inline; done.
 
 ## Log
 
 - L1 (2026-11-23, user): "osae estar aqui haciendo todo y cuando todo lo de factuacion y nube este ok, pues mandaleo a produccion". Agreed order: lifecycle → email → Polar webhook → panel.
 - L2: Polar docs: Standard Webhooks for secrets created after 2026-09-08 (pass `whsec_…` as-is); 10 attempts, 10 s timeout; `subscription.past_due` = payment failed, `subscription.revoked` = access ends; `GET /v1/subscriptions/{id}` with an organization access token (`subscriptions:read`). Ordering not documented → reconcile by fetching.
+- L3: T1 b08b23a, T2+T3 bef9aa5, T4 this commit. Full suite 1341 passed; lint clean on feature files. Follow-up: an invite that expires unused needs the admin to resend (create_invite with tenant id).

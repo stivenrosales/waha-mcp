@@ -29,6 +29,8 @@ export interface CreateAppDeps {
   oauth: Hono;
   /** Invite, reset and pairing pages. */
   onboarding: Hono;
+  /** `/panel`: each account's web panel. */
+  panel?: Hono | null;
   /** `bearerGuard`: sets `c.get("auth")` or answers 401. */
   guard: MiddlewareHandler<{ Variables: AuthVariables }>;
   mcpHandler: (req: Request, opts: { authInfo: AuthInfo }) => Promise<Response>;
@@ -87,6 +89,7 @@ export function createApp(deps: CreateAppDeps): Hono {
   });
   app.route("/", deps.oauth);
   app.route("/", deps.onboarding);
+  if (deps.panel) app.route("/", deps.panel);
   if (deps.webhooks) app.route("/", deps.webhooks);
   if (deps.polarWebhook) app.route("/", deps.polarWebhook);
   app.all("/mcp", deps.guard, (c) => deps.mcpHandler(c.req.raw, { authInfo: c.get("auth") }));

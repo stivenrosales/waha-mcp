@@ -226,6 +226,17 @@ Enabled by default (`CACHE_ENABLED=true`). The server keeps a SQLite copy of the
 
 `delete_message` removes one of your own messages for everyone in the chat, and it cannot be undone. Once WhatsApp accepts it, the deleted text is removed from waha-mcp's message cache, its voice-note transcripts and its edit overrides, and later reads show the message as deleted. It does not reach mission logs and schedule history, which keep their own retention, nor WAHA's own storage, which waha-mcp does not control.
 
+## Account panel
+
+Every account has a web panel at `{PUBLIC_BASE_URL}/panel`. It signs in with the same username and password as the MCP and shows:
+
+- the WhatsApp state (connected, needs the QR, connecting, disconnected), linking to `/pair` when it is not connected; `/pair` asks for the password again before it shows the QR;
+- with missions on, the active scheduled messages and missions, each with a Cancelar button (the same cancel as `cancel_scheduled` and `cancel_mission`);
+- the latest 20 tool calls: a Spanish description, the time and whether it failed, never arguments or message content;
+- for a billed account, whether the subscription is up to date, or the date the account will be suspended.
+
+The panel session is a random token in a cookie (`HttpOnly; Secure; SameSite=Strict; Path=/panel`), stored only as a hash, valid 12 hours and replaced on every login. Signing out of the panel, `/logout`, `unlink_account`, a password reset, `revoke_tenant` or a billing suspension end it. Sign-ins share the login rate limiter, every form checks the request's origin, and only active or pairing accounts can sign in.
+
 ## Password recovery by email (optional)
 
 Off by default. Set `EMAIL_FROM`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_EMAIL_API_TOKEN` together (setting only some of them is a startup error). The server sends through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/) (`POST /accounts/{id}/email/sending/send`), which needs the Workers Paid plan and the sender's domain onboarded under Email Service > Email Sending. The provider sits behind an `EmailSender` port, so another one can replace it.

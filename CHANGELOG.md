@@ -4,6 +4,7 @@
 
 ### Features
 
+- Account panel at `/panel`: sign in with the MCP username and password to see the WhatsApp state, active reminders and missions (with a cancel button), the latest tool calls and the subscription state. Sessions are server-side, last 12 hours and end with any revocation.
 - Billing with Polar (optional): `POST /webhooks/polar` verifies Standard Webhooks signatures, reads each subscription's current state from the Polar API, creates the customer's account and emails the invite on the first good state, starts the grace period on `past_due`, and ends access on `canceled`/`unpaid`. At most 20 new accounts per hour.
 - Password recovery by email (optional): with `EMAIL_FROM`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_EMAIL_API_TOKEN` set, sign-in pages link to `/forgot`, which emails a 1-hour reset link through Cloudflare Email Service. Users can add an email on the invite form; the owner's comes from `ADMIN_EMAIL`.
 - Billing lifecycle for hosted tenants: after a failed payment, 3 days of grace; then WhatsApp is logged out and the tenant revoked; 30 days later the tenant and its data are deleted. A payment restores the tenant. Tenants without billing are never touched. Payment events are not wired yet.

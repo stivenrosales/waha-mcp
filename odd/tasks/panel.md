@@ -13,10 +13,11 @@ Objective: a minimal, usable web panel per account at `/panel`. Branch `feat/pan
 
 ## Tasks
 
-- T1 (S2, S4) panel sessions in the auth store (+ revokeUser), recent tool calls query; inline; pending.
-- T2 (S1-S6) panel routes and pages, wiring, docs; inline; pending.
+- T1 (S2, S4) panel sessions in the auth store (+ revokeUser), recent tool calls query; inline; done c4431d6.
+- T2 (S1-S6) panel routes and pages, wiring, docs; inline; done (this commit).
 
 ## Log
 
 - L1 (2026-11-23, user): "Si, asi seria o seria mejor un panel simple para escanear QR, ver historial de cosas que hizo, recordatorios y misiones activas, todo muy minimalista y usable, tambien, para qu se loggen, porque eos necesta el MCP no?" then "Dale con todo".
 - L2: Critic: long-lived panel session must be revocable (server-side table, cleared by revokeUser), new id on login, Origin check, re-auth before QR; activity log must hold no content.
+- L3: Visual proof of the real routes (desktop, 390 px, empty state, login) published as an artifact; fixed the forgot link's spacing. Full suite 1361 passed.

@@ -44,6 +44,7 @@ import { createMcpServer } from "./infrastructure/mcp/server.js";
 import { createAdminTools, createUsageTools } from "./infrastructure/mcp/tools/admin/index.js";
 import { createTools } from "./infrastructure/mcp/tools/index.js";
 import { missionTenantPort } from "./infrastructure/missions/tenantPort.js";
+import { createPanelRoutes } from "./infrastructure/panel/panelRoutes.js";
 import { scheduleTenantPort } from "./infrastructure/schedules/tenantPort.js";
 import { createOnboardingRoutes } from "./infrastructure/tenants/onboardingRoutes.js";
 import { createTenantRegistry, type TenantRegistry } from "./infrastructure/tenants/registry.js";
@@ -257,6 +258,18 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
       publicBaseUrl: config.publicBaseUrl,
       limiter,
       ...(passwordRecovery ? { forgotUrl: "/forgot" } : {}),
+    }),
+    panel: createPanelRoutes({
+      tenants,
+      auth: store,
+      sessions,
+      registry,
+      ...(deps.billing ? { billing: deps.billing } : {}),
+      limiter,
+      publicBaseUrl: config.publicBaseUrl,
+      timezone: config.timezone,
+      ...(passwordRecovery ? { forgotUrl: "/forgot" } : {}),
+      logger,
     }),
     onboarding: createOnboardingRoutes({
       tenants,

@@ -115,7 +115,7 @@ export const credentialFields = (username = ""): string =>
 /** "Forgot password?" link under a sign-in form; empty when password recovery is off. */
 export const forgotLink = (forgotUrl?: string): string =>
   forgotUrl
-    ? `\n<p class="muted"><a href="${escapeHtml(forgotUrl)}">¿Olvidaste tu contraseña?</a></p>`
+    ? `\n<p class="muted" style="margin-top:1rem"><a href="${escapeHtml(forgotUrl)}">¿Olvidaste tu contraseña?</a></p>`
     : "";
 
 export function loginPage(opts: {

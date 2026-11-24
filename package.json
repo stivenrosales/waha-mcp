@@ -1,7 +1,7 @@
 {
   "name": "waha-mcp",
   "version": "0.4.0",
-  "description": "MCP server over WAHA, the WhatsApp HTTP API: read chats and send messages",
+  "description": "Zenbox: MCP server over WAHA, the WhatsApp HTTP API, to read chats and send messages",
   "private": false,
   "type": "module",
   "engines": {

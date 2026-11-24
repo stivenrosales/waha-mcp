@@ -1,6 +1,6 @@
-# AGENTS.md — install waha-mcp for your user
+# AGENTS.md — install Zenbox (waha-mcp) for your user
 
-You are an AI agent (Claude Code or similar) installing waha-mcp: an MCP server that lets your
+You are an AI agent (Claude Code or similar) installing Zenbox, the self-hosted `waha-mcp` server: an MCP server that lets your
 user's AI read their WhatsApp and send messages for them. It runs next to WAHA (the WhatsApp
 HTTP API, GOWS engine) with Docker Compose. Follow the steps in order; each ends with a check.
 Humans have the same guide in prose at [docs/self-hosting.md](docs/self-hosting.md).
@@ -45,8 +45,8 @@ curl -fsS https://api.ipify.org  # the VPS's public IP, to compare
 ## 2. Clone
 
 ```bash
-git clone https://github.com/stivenrosales/waha-mcp.git
-cd waha-mcp
+git clone https://github.com/stivenrosales/zenbox.git
+cd zenbox
 ```
 
 Check: `ls docker-compose.yml compose.env.example scripts/init-env.sh` lists all three.

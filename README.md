@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="docs/assets/hero-pixel.svg" alt="waha-mcp pixel-art mascot: a green chat bubble holding a magnifying glass next to a checklist of pending replies" width="760">
+  <img src="docs/assets/hero-pixel.svg" alt="Zenbox pixel-art mascot: a green chat bubble holding a magnifying glass next to a checklist of pending replies" width="760">
 </p>
 
-<h1 align="center">waha-mcp</h1>
+<h1 align="center">Zenbox</h1>
 
 <p align="center">
   <strong>Let Claude, ChatGPT and Gemini read your WhatsApp and send messages for you. Self-hosted.</strong>
 </p>
 
 <p align="center">
-  The open-source core of <a href="https://usezenbox.com">Zenbox</a>. Guides:
+  Use it hosted at <a href="https://usezenbox.com">usezenbox.com</a> (nothing to install) or self-host this open-source server. Guides:
   <a href="https://usezenbox.com/en/blog">English</a> ·
   <a href="https://usezenbox.com/blog">Español</a>
 </p>
@@ -40,9 +40,16 @@
 
 ---
 
-`waha-mcp` is an [MCP](https://modelcontextprotocol.io) server over [WAHA](https://waha.devlike.pro) (the WhatsApp HTTP API). It lets Claude, ChatGPT and Gemini CLI analyze your WhatsApp groups and direct chats (summaries, activity stats, pending replies, search, shared files and media) and send messages from your number: text, images, documents, voice notes, video, locations and contact cards.
+Zenbox (formerly `waha-mcp`) is an [MCP](https://modelcontextprotocol.io) server over [WAHA](https://waha.devlike.pro) (the WhatsApp HTTP API). It lets Claude, ChatGPT and Gemini CLI analyze your WhatsApp groups and direct chats (summaries, activity stats, pending replies, search, shared files and media) and send messages from your number: text, images, documents, voice notes, video, locations and contact cards.
 
 Sending tools are marked as writes, so your client asks you to approve every send. You can also react to messages, edit or delete (for everyone) messages you sent, send polls and mark chats read or unread; a deletion cannot be undone. See [Sending](#sending) and [Deleting messages](#deleting-messages).
+
+## Hosted or self-hosted
+
+- **Hosted:** sign up at [usezenbox.com](https://usezenbox.com), pair your WhatsApp with a QR code and add `https://app.usezenbox.com/mcp` to your client. Nothing to run; billing is handled by Polar.
+- **Self-hosted:** run this server next to your own WAHA. Start at [Quick start](#quick-start) or [docs/self-hosting.md](docs/self-hosting.md).
+
+The code is the same in both. Technical names keep the old identifier (`waha-mcp` Docker service, image and volume), so existing installs keep working.
 
 ## What you can ask
 
@@ -57,7 +64,7 @@ Sending tools are marked as writes, so your client asks you to approve every sen
 
 ```mermaid
 flowchart LR
-  Client["Client<br/>(Claude / ChatGPT / Gemini CLI)"] -->|"OAuth 2.1 + MCP /mcp"| MCP["waha-mcp"]
+  Client["Client<br/>(Claude / ChatGPT / Gemini CLI)"] -->|"OAuth 2.1 + MCP /mcp"| MCP["Zenbox server"]
   MCP -->|"read (GET) + write (POST/PUT/DELETE)"| WAHA["WAHA (GOWS)"]
   WAHA --> WA["WhatsApp"]
   MCP -.-> Data[("/data<br/>auth.db, media secret,<br/>tenants/&lt;id&gt;/cache.db + uploads")]

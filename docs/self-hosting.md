@@ -1,4 +1,4 @@
-# Self-hosting with Docker Compose
+# Self-hosting Zenbox with Docker Compose
 
 Run WAHA (the WhatsApp HTTP API, GOWS engine) and waha-mcp together on one machine, with one
 `docker compose` command. A VPS is the main target: you get a public HTTPS URL that claude.ai,
@@ -35,8 +35,8 @@ people later, each with their own WhatsApp, set `MULTI_TENANT=true` in `.env` an
 ## 1. Get the code
 
 ```bash
-git clone https://github.com/stivenrosales/waha-mcp.git
-cd waha-mcp
+git clone https://github.com/stivenrosales/zenbox.git
+cd zenbox
 ```
 
 ## 2. Create `.env`

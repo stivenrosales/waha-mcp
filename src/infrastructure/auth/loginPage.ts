@@ -16,13 +16,6 @@ const ESCAPES: Record<string, string> = {
 export const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (ch) => ESCAPES[ch]);
 
 /**
- * Security headers for every HTML page: no framing (clickjacking), no scripts but the toggle,
- * no external resources (only the page font, served by this server), no caching,
- * no referrer leaking query parameters.
- * `form-action` is deliberately not set: browsers apply it to the redirect that
- * follows a successful login, which would block the redirect to the client.
- */
-/**
  * The only script any page runs: the show-password toggle next to each password field. Without
  * it the fields work as plain password inputs. The CSP allows exactly this text, by its hash.
  */
@@ -30,6 +23,13 @@ export const TOGGLE_SCRIPT =
   'for(const b of document.querySelectorAll(".pw-toggle"))b.addEventListener("click",()=>{const i=b.previousElementSibling;const show=i.type==="password";i.type=show?"text":"password";b.setAttribute("aria-pressed",String(show));b.setAttribute("aria-label",show?"Ocultar contraseña":"Mostrar contraseña")})';
 const TOGGLE_HASH = createHash("sha256").update(TOGGLE_SCRIPT).digest("base64");
 
+/**
+ * Security headers for every HTML page: no framing (clickjacking), no scripts but the toggle,
+ * no external resources (only the page font, served by this server), no caching,
+ * no referrer leaking query parameters.
+ * `form-action` is deliberately not set: browsers apply it to the redirect that
+ * follows a successful login, which would block the redirect to the client.
+ */
 export const HTML_SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": `default-src 'none'; script-src 'sha256-${TOGGLE_HASH}'; style-src 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'`,
   "X-Frame-Options": "DENY",

@@ -14,13 +14,14 @@ export async function authenticateLogin(
   deps: { tenants: TenantStore; limiter: LoginLimiter },
 ): Promise<"blocked" | "invalid" | User> {
   const identifier = (form.get("username") ?? "").trim();
-  const keys = loginLimitKeys(c, identifier);
-  if (keys.some((k) => deps.limiter.isBlocked(k))) return "blocked";
   // An email signs in as its account's username; an unknown email still runs the (dummy) hash,
-  // so the answer and its timing do not tell which emails have accounts.
+  // so the answer and its timing do not tell which emails have accounts. The limit is keyed on
+  // the resolved username, so email and username share one budget per account.
   const username = identifier.includes("@")
     ? (deps.tenants.getUserByEmail(identifier)?.username ?? identifier)
     : identifier;
+  const keys = loginLimitKeys(c, username);
+  if (keys.some((k) => deps.limiter.isBlocked(k))) return "blocked";
   const user = await deps.tenants.verifyPassword(username, form.get("password") ?? "");
   if (!user) {
     deps.limiter.recordFailure(keys);

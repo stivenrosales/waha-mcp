@@ -34,10 +34,13 @@ async function setup() {
     });
     return c.text(typeof result === "string" ? result : `ok:${result.username}`);
   });
+  let ip = 0;
+  /** Every attempt comes from a new address, so only the per-account limit can block it. */
   const login = async (username: string, password = PASSWORD) =>
     (
       await app.request("/login", {
         method: "POST",
+        headers: { "x-forwarded-for": `10.0.0.${++ip}` },
         body: new URLSearchParams({ username, password }).toString(),
       })
     ).text();
@@ -59,6 +62,16 @@ describe("login with email or username", () => {
     const s = await setup();
     expect(await s.login("ana@example.com", "wrong password!!")).toBe("invalid");
     expect(await s.login("nobody@example.com")).toBe("invalid");
+  });
+});
+
+describe("login limit per account", () => {
+  it("counts failures by email and by username against the same account", async () => {
+    const s = await setup();
+    for (let i = 0; i < 5; i++)
+      expect(await s.login("ana@example.com", "wrong password!!")).toBe("invalid");
+    expect(await s.login("ana", "wrong password!!")).toBe("blocked");
+    expect(await s.login("ana")).toBe("blocked");
   });
 });
 

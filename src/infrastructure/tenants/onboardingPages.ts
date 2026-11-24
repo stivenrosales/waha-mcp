@@ -1,4 +1,4 @@
-/** HTML pages for invite sign-up, password reset and WhatsApp pairing. No scripts. */
+/** HTML pages for invite sign-up, password reset and WhatsApp pairing (password toggle only). */
 import {
   credentialFields,
   errorLine,

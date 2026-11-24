@@ -754,6 +754,21 @@ describe("invite email", () => {
     expect((await signUpWith(ctx, token, "free@example.com")).status).toBe(303);
   });
 
+  it("a double submit whose name before the @ is taken answers used, not an error", async () => {
+    for (let run = 0; run < 5; run++) {
+      const ctx = withEmail();
+      const first = ctx.invite("Acme");
+      await signUpWith(ctx, first.token, "alice@one.com");
+      const { tenant, token } = ctx.invite("Beta");
+      const results = await Promise.all([
+        signUpWith(ctx, token, "alice@two.com"),
+        signUpWith(ctx, token, "alice@two.com"),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual([303, 410]);
+      expect(ctx.tenants.getUserByTenant(tenant.id)?.username).toMatch(/^alice-\d{4}$/);
+    }
+  });
+
   it("without email, still signs up with a username", async () => {
     const ctx = setup();
     const { tenant, token } = ctx.invite();

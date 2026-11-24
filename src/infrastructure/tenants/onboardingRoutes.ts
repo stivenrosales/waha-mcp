@@ -268,12 +268,18 @@ export function createOnboardingRoutes(deps: {
     // A username made from an email that someone already has gets a random suffix instead.
     for (let i = 0; recovery && user === "username_taken" && i < 5; i++) {
       if (tenants.getUserByTenant(tenantId)) return used();
-      user = await tenants.createUser({
-        tenantId,
-        username: usernameFromEmail(email, true),
-        password: form.get("password") ?? "",
-        role: "member",
-      });
+      try {
+        user = await tenants.createUser({
+          tenantId,
+          username: usernameFromEmail(email, true),
+          password: form.get("password") ?? "",
+          role: "member",
+        });
+      } catch (error) {
+        // A concurrent submit of this same invite won the users.tenant_id race meanwhile.
+        if (tenants.getUserByTenant(tenantId)) return used();
+        throw error;
+      }
     }
     if (user === "username_taken") {
       // A concurrent sign-up with the same username won the race for this very tenant.

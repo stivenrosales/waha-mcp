@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- `send_text` no longer duplicates a message when a send with an unknown outcome is retried: within 10 minutes the same text to the same chat first checks the chat, and an already delivered message is reported with `already_sent: true` instead of being sent again.
+
 ### Features
 
 - The account panel has tabs (Resumen, Recordatorios, Misiones, Actividad), 30-day metrics, the full history of reminders (each run and what went out) and missions (result, collected data and conversation), and a more compact layout.

@@ -12,6 +12,8 @@ export interface SentMessage {
   id: string;
   /** Unix seconds, when WAHA reports it. */
   timestamp: number | null;
+  /** True when an earlier send with unknown outcome had already delivered it; nothing was sent now. */
+  alreadySent?: true;
 }
 
 interface Target {

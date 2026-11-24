@@ -35,17 +35,27 @@ export const sendOutputSchema = z.object({
     .string()
     .optional()
     .describe("The text or caption exactly as sent, after WhatsApp formatting."),
+  already_sent: z
+    .literal(true)
+    .optional()
+    .describe(
+      "An earlier send with unknown outcome had delivered this message; it was not sent again.",
+    ),
 });
 
 export function sentResult(chatId: string, sent: SentMessage, textSent?: string) {
   const echo = textSent === undefined ? "" : `\nText sent:\n${textSent}`;
+  const head = sent.alreadySent
+    ? `Already sent to ${chatId} by the earlier attempt (message ${sent.id}); not sent again.`
+    : `Sent to ${chatId} (message ${sent.id}).`;
   return {
-    text: `Sent to ${chatId} (message ${sent.id}).${echo}`,
+    text: `${head}${echo}`,
     data: {
       chat_id: chatId,
       message_id: sent.id,
       timestamp: sent.timestamp,
       ...(textSent === undefined ? {} : { text_sent: textSent }),
+      ...(sent.alreadySent ? { already_sent: true as const } : {}),
     },
   };
 }

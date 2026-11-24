@@ -10,6 +10,7 @@ import { createScheduleRunner, type ScheduleRunner } from "./application/schedul
 import { createSelfService } from "./application/selfService.js";
 import { createTenantAdmin, type TenantAdmin } from "./application/tenantAdmin.js";
 import type { Config, PolarConfig } from "./config.js";
+import type { Analytics } from "./domain/ports/Analytics.js";
 import type { BillingStore } from "./domain/ports/BillingStore.js";
 import type { EmailSender } from "./domain/ports/EmailSender.js";
 import {
@@ -24,6 +25,7 @@ import type { PolarStore } from "./domain/ports/PolarStore.js";
 import type { ScheduleStore } from "./domain/ports/ScheduleStore.js";
 import type { SessionAdmin, WebhookTarget } from "./domain/ports/SessionAdmin.js";
 import type { TenantStore } from "./domain/ports/TenantStore.js";
+import { createPostHogAnalytics } from "./infrastructure/analytics/posthogAnalytics.js";
 import { bearerGuard } from "./infrastructure/auth/bearer.js";
 import { createOAuthRoutes } from "./infrastructure/auth/oauth.js";
 import { createLoginLimiter } from "./infrastructure/auth/rateLimit.js";
@@ -249,6 +251,9 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
           tenants,
           email: emailSender,
           logger,
+          analytics: config.posthog
+            ? createPostHogAnalytics({ ...config.posthog, logger })
+            : undefined,
         })
       : null;
   const app = createApp({
@@ -477,6 +482,7 @@ function composePolarWebhook(q: {
   tenants: TenantStore;
   email: EmailSender;
   logger: { info(message: string): void };
+  analytics: Analytics | undefined;
 }): Hono {
   const client = createPolarClient({ apiUrl: q.polar.apiUrl, accessToken: q.polar.accessToken });
   return createPolarWebhookRoute({
@@ -497,6 +503,7 @@ function composePolarWebhook(q: {
         },
       },
       logger: q.logger,
+      ...(q.analytics ? { analytics: q.analytics } : {}),
     }),
   });
 }

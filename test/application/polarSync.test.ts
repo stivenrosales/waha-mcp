@@ -5,6 +5,7 @@ import {
   type PolarSubscription,
   ProvisionCapError,
 } from "../../src/application/polarSync.js";
+import type { AnalyticsEvent } from "../../src/domain/ports/Analytics.js";
 import type { OutgoingEmail } from "../../src/domain/ports/EmailSender.js";
 import { openAuthDatabase } from "../../src/infrastructure/auth/store.js";
 import { createSqlitePolarStore } from "../../src/infrastructure/billing/sqlitePolarStore.js";
@@ -24,6 +25,7 @@ function setup(current: PolarSubscription) {
   const store = createSqlitePolarStore(openAuthDatabase(":memory:"));
   const emails = new Map<string, string | null>();
   const deleted = new Set<string>();
+  const events: AnalyticsEvent[] = [];
   const sync = createPolarSync({
     fetchSubscription: async (id) => {
       calls.push(`fetch:${id}`);
@@ -48,9 +50,11 @@ function setup(current: PolarSubscription) {
       },
     },
     logger: { info: () => {} },
+    analytics: { capture: (e) => void events.push(e) },
   });
   return {
     sync,
+    events,
     calls,
     provisioned,
     store,
@@ -139,6 +143,61 @@ describe("polar sync", () => {
     s.set(sub({ status: "something_new" as PolarSubscription["status"] }));
     await s.sync.handle("sub_1");
     expect(s.calls.at(-1)).toBe("fetch:sub_1");
+  });
+});
+
+describe("polar sync analytics", () => {
+  const names = (s: ReturnType<typeof setup>) => s.events.map((e) => e.name);
+
+  it("reports subscription_started once per new subscription, keyed by the account", async () => {
+    const s = setup(sub({ status: "trialing" }));
+    await s.sync.handle("sub_1");
+    await s.sync.handle("sub_1");
+    expect(s.events).toEqual([
+      {
+        name: "subscription_started",
+        distinctId: "tenant_1",
+        properties: { status: "trialing", returning_customer: false },
+      },
+    ]);
+  });
+
+  it("marks a returning customer's new subscription", async () => {
+    const s = setup(sub());
+    await s.sync.handle("sub_1");
+    s.set(sub({ status: "canceled" }));
+    await s.sync.handle("sub_1");
+    s.set(sub({ id: "sub_2", status: "active" }));
+    await s.sync.handle("sub_2");
+    expect(s.events.at(-1)).toEqual({
+      name: "subscription_started",
+      distinctId: "tenant_1",
+      properties: { status: "active", returning_customer: true },
+    });
+  });
+
+  it("reports payment_failed on past_due and subscription_ended when access ends", async () => {
+    const s = setup(sub());
+    await s.sync.handle("sub_1");
+    s.set(sub({ status: "past_due" }));
+    await s.sync.handle("sub_1");
+    s.set(sub({ status: "unpaid" }));
+    await s.sync.handle("sub_1");
+    expect(names(s)).toEqual(["subscription_started", "payment_failed", "subscription_ended"]);
+    expect(s.events.at(-1)).toEqual({
+      name: "subscription_ended",
+      distinctId: "tenant_1",
+      properties: { status: "unpaid" },
+    });
+  });
+
+  it("never sends the customer's email or reports subscriptions it does not know", async () => {
+    const s = setup(sub({ status: "canceled" }));
+    await s.sync.handle("sub_1");
+    expect(s.events).toEqual([]);
+    s.set(sub());
+    await s.sync.handle("sub_1");
+    expect(JSON.stringify(s.events)).not.toContain("example.com");
   });
 });
 

@@ -54,6 +54,8 @@ export interface Config {
   adminEmail: string | null;
   /** Polar billing webhooks; null when off. Needs `email` and multi-tenant mode. */
   polar: PolarConfig | null;
+  /** Server-side product analytics (subscription milestones) to PostHog; null when off. */
+  posthog: PostHogConfig | null;
   /** Server-side Claude agent on WhatsApp missions; null when off (the default). */
   missions: MissionsConfig | null;
   /** Shared secret WAHA signs webhook deliveries with; null turns webhooks off. Never logged. */
@@ -106,6 +108,13 @@ export interface PolarConfig {
   accessToken: string;
   /** No trailing slash; `https://sandbox-api.polar.sh` for the sandbox. */
   apiUrl: string;
+}
+
+export interface PostHogConfig {
+  /** Project token (`phc_…`): write-only. */
+  apiKey: string;
+  /** Ingestion host, no trailing slash. */
+  host: string;
 }
 
 const POLAR_REQUIRED = ["POLAR_WEBHOOK_SECRET", "POLAR_ACCESS_TOKEN"] as const;
@@ -337,6 +346,21 @@ const envSchema = z
       .refine((v) => !v || isValidUrl(v), "POLAR_API_URL must be a valid URL.")
       .refine((v) => !v || isSecureOrLocal(v), "POLAR_API_URL must use https.")
       .transform((v) => (v ? stripTrailingSlashes(v) : undefined)),
+    POSTHOG_API_KEY: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined)
+      .refine(
+        (v) => !v || v.startsWith("phc_"),
+        "POSTHOG_API_KEY must be a project token (phc_…).",
+      ),
+    POSTHOG_HOST: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() || undefined)
+      .refine((v) => !v || isValidUrl(v), "POSTHOG_HOST must be a valid URL.")
+      .refine((v) => !v || isSecureOrLocal(v), "POSTHOG_HOST must use https.")
+      .transform((v) => (v ? stripTrailingSlashes(v) : undefined)),
     ADMIN_EMAIL: z
       .string()
       .optional()
@@ -533,6 +557,9 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
             apiUrl: v.POLAR_API_URL ?? "https://api.polar.sh",
           }
         : null,
+    posthog: v.POSTHOG_API_KEY
+      ? { apiKey: v.POSTHOG_API_KEY, host: v.POSTHOG_HOST ?? "https://us.i.posthog.com" }
+      : null,
     webhookSecret: v.WAHA_WEBHOOK_SECRET ?? null,
     multiTenant: v.MULTI_TENANT,
     missions:

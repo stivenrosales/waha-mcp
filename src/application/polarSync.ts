@@ -1,3 +1,4 @@
+import type { Analytics } from "../domain/ports/Analytics.js";
 import type { EmailSender } from "../domain/ports/EmailSender.js";
 import type { PolarStore } from "../domain/ports/PolarStore.js";
 import type { Billing } from "./billing.js";
@@ -43,6 +44,8 @@ export interface PolarSyncDeps {
     setTenantEmail(tenantId: string, email: string): "ok" | "taken";
   };
   logger: { info(message: string): void };
+  /** Subscription milestones for product analytics, keyed by tenant id. Optional. */
+  analytics?: Analytics;
 }
 
 export interface PolarSync {
@@ -57,6 +60,8 @@ export interface PolarSync {
  */
 export function createPolarSync(deps: PolarSyncDeps): PolarSync {
   const { store, billing, logger } = deps;
+  const report = (name: string, tenantId: string, properties: Record<string, string | boolean>) =>
+    deps.analytics?.capture({ name, distinctId: tenantId, properties });
   return {
     async handle(subscriptionId) {
       const sub = await deps.fetchSubscription(subscriptionId);
@@ -67,11 +72,16 @@ export function createPolarSync(deps: PolarSyncDeps): PolarSync {
         if (!tenantId) {
           // A returning customer (new subscription after a cancel) gets their account back.
           tenantId = existing(store.tenantForCustomer(sub.customerId));
+          const returning = tenantId !== null;
           if (!tenantId) {
             tenantId = await deps.provision({ email });
             logger.info(`polar provision subscription=${sub.id} tenant=${tenantId}`);
           }
           store.link({ subscriptionId: sub.id, tenantId, customerId: sub.customerId });
+          report("subscription_started", tenantId, {
+            status: sub.status,
+            returning_customer: returning,
+          });
         }
         billing.paymentSucceeded(tenantId);
         // The account's user gets the customer's email for recovery, unless they chose one.
@@ -87,9 +97,13 @@ export function createPolarSync(deps: PolarSyncDeps): PolarSync {
         logger.info(`polar ignore subscription=${sub.id} status=${sub.status} reason=no_account`);
         return;
       }
-      if (sub.status === "past_due") billing.paymentFailed(tenantId);
-      else if (ENDED.has(sub.status)) await billing.endAccess(tenantId);
-      else logger.info(`polar ignore subscription=${sub.id} status=${sub.status}`);
+      if (sub.status === "past_due") {
+        billing.paymentFailed(tenantId);
+        report("payment_failed", tenantId, { status: sub.status });
+      } else if (ENDED.has(sub.status)) {
+        await billing.endAccess(tenantId);
+        report("subscription_ended", tenantId, { status: sub.status });
+      } else logger.info(`polar ignore subscription=${sub.id} status=${sub.status}`);
     },
   };
 }

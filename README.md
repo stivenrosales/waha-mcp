@@ -249,7 +249,7 @@ With email on, people sign up with their email and a password (the invite form n
 
 ## Billing with Polar (optional)
 
-Off by default. Set `POLAR_WEBHOOK_SECRET` and `POLAR_ACCESS_TOKEN` together (an organization access token with `subscriptions:read`); `POLAR_API_URL` defaults to `https://api.polar.sh` (use `https://sandbox-api.polar.sh` for the sandbox). Polar needs email configured, because invites are sent by email, and turns invites on; `MULTI_TENANT=false` with Polar is a startup error.
+Off by default. Set `POLAR_WEBHOOK_SECRET` and `POLAR_ACCESS_TOKEN` together (an organization access token with `subscriptions:read`); `POLAR_API_URL` defaults to `https://api.polar.sh` (use `https://sandbox-api.polar.sh` for the sandbox). Polar needs email configured, because invites are sent by email, and turns invites on; `MULTI_TENANT=false` with Polar is a startup error. With `POSTHOG_API_KEY` set, each subscription also sends `subscription_started` (with `status` and `returning_customer`), `payment_failed` and `subscription_ended` to PostHog, keyed by tenant id: no email or name leaves the server, and a PostHog outage never blocks billing.
 
 In Polar, add a webhook endpoint `{PUBLIC_BASE_URL}/webhooks/polar` with the `subscription.*` events. Every delivery is verified (Standard Webhooks signature, 5-minute window) and handled once per `webhook-id`. Polar does not promise event order, so for each `subscription.*` event the server reads the subscription's current state from the Polar API and acts on that:
 
@@ -399,6 +399,8 @@ All configuration is through environment variables.
 | `POLAR_WEBHOOK_SECRET`               | no       |                              | Polar webhook secret (`whsec_…`). Never logged.                                           |
 | `POLAR_ACCESS_TOKEN`                 | no       |                              | Polar organization access token with `subscriptions:read`. Never logged.                  |
 | `POLAR_API_URL`                      | no       | `https://api.polar.sh`       | `https://sandbox-api.polar.sh` for the sandbox.                                           |
+| `POSTHOG_API_KEY`                    | no       |                              | PostHog project token (`phc_…`): sends subscription milestones (see Billing).             |
+| `POSTHOG_HOST`                       | no       | `https://us.i.posthog.com`   | PostHog ingestion host; `https://eu.i.posthog.com` for the EU region.                     |
 | `ADMIN_EMAIL`                        | no       |                              | The owner's email for password recovery; applied on every start.                          |
 | `TRANSCRIPTION_API_URL`              | no       |                              | OpenAI-compatible speech-to-text base URL (`https://openrouter.ai/api/v1`).               |
 | `TRANSCRIPTION_API_KEY`              | no       |                              | API key of that provider.                                                                 |

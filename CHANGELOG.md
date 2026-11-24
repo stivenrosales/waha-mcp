@@ -8,6 +8,7 @@
 
 ### Features
 
+- Subscription analytics (optional): with `POSTHOG_API_KEY` set, the Polar webhook sends `subscription_started`, `payment_failed` and `subscription_ended` to PostHog, keyed by tenant id and without the customer's email. Failures are logged and never block billing.
 - The account panel has tabs (Resumen, Recordatorios, Misiones, Actividad), 30-day metrics, the full history of reminders (each run and what went out) and missions (result, collected data and conversation), and a more compact layout.
 - Zenbox branding on every web page (login, invite, pairing, reset, recovery, panel, privacy): cream and sage palette, Newsreader titles, DM Sans text (self-hosted, OFL), the Zenbox logo and favicon, and Zenbox in titles and emails. Replaces the Satoshi font and the pixel mascot icon.
 - Account panel at `/panel`: sign in with the MCP username and password to see the WhatsApp state, active reminders and missions (with a cancel button), the latest tool calls and the subscription state. Sessions are server-side, last 12 hours and end with any revocation.

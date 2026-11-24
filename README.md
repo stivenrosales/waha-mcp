@@ -245,7 +245,7 @@ Off by default. Set `EMAIL_FROM` and `RESEND_API_KEY` together (setting only one
 
 When on, the sign-in pages (`/authorize` and `/pair`) link to `/forgot`. There a user types the email of the account and always gets the same answer, so the page does not reveal which emails have accounts. When an account has that email, it gets a reset link valid for 1 hour and usable once, which opens the usual `/reset` page; setting the new password signs out every connected app. Requests are limited per IP and per email (5 in 15 minutes). A failed send is logged as `forgot email failed tenant=<id> kind=<kind>`, never with the address or the provider's answer.
 
-With email on, users give their email, optionally, on the invite form (the field is hidden otherwise); the owner's comes from `ADMIN_EMAIL`, applied on every start. A new recovery link replaces any earlier reset link of that account, including one issued with `reset_password`. Each email belongs to one account. Without email configured, `/forgot` answers 404 and the sign-in pages show no link.
+With email on, people sign up with their email and a password (the invite form no longer asks for a username; one is made from the email and never shown), and every sign-in page (`/authorize`, `/pair`, `/panel/login`, `/logout`) accepts the email or the username. Accounts made before keep their username, which still works. The owner's email comes from `ADMIN_EMAIL`, applied on every start. A new recovery link replaces any earlier reset link of that account, including one issued with `reset_password`.
 
 ## Billing with Polar (optional)
 

@@ -76,8 +76,14 @@ function setup(
     const { token } = tenants.issueLink(tenant.id, "invite", 72 * HOUR);
     return { tenant, token };
   };
+  /** Sends both a username and an email: the form uses the email when email is on. */
   const signUp = (token: string, username = "alice", password = PASSWORD) =>
-    post(`/invite/${token}`, { username, password, password_confirm: password });
+    post(`/invite/${token}`, {
+      username,
+      email: `${username}@example.com`,
+      password,
+      password_confirm: password,
+    });
   /** A tenant whose user signed up through its invite; returns the pairing cookie. */
   const onboarded = async (name = "Acme", username = "alice") => {
     const { tenant, token } = invite(name);
@@ -693,63 +699,63 @@ describe("privacy", () => {
 });
 
 describe("invite email", () => {
-  const signUpWith = (
-    ctx: ReturnType<typeof setup>,
-    token: string,
-    email: string,
-    username = "alice",
-  ) =>
-    ctx.post(`/invite/${token}`, {
-      username,
-      email,
-      password: PASSWORD,
-      password_confirm: PASSWORD,
-    });
+  const signUpWith = (ctx: ReturnType<typeof setup>, token: string, email: string) =>
+    ctx.post(`/invite/${token}`, { email, password: PASSWORD, password_confirm: PASSWORD });
+  const withEmail = () => setup({ email: { send: async () => {} } });
 
   it("the invite page has no email field when email is off", async () => {
     const ctx = setup();
     const { token } = ctx.invite();
-    expect(await (await ctx.request(`/invite/${token}`)).text()).not.toContain('name="email"');
+    const body = await (await ctx.request(`/invite/${token}`)).text();
+    expect(body).not.toContain('name="email"');
+    expect(body).toContain('name="username"');
   });
 
-  it("the invite page asks for an optional email", async () => {
-    const ctx = setup({ email: { send: async () => {} } });
+  it("with email on, the invite page asks for the email instead of a username", async () => {
+    const ctx = withEmail();
     const { token } = ctx.invite();
     const body = await (await ctx.request(`/invite/${token}`)).text();
-    expect(body).toContain('name="email"');
-    expect(body).toContain('type="email"');
+    expect(body).toMatch(/<input id="email" name="email" type="email"[^>]*required/);
+    expect(body).not.toContain('name="username"');
   });
 
-  it("stores the email, lowercased, with the new user", async () => {
-    const ctx = setup({ email: { send: async () => {} } });
+  it("creates the user from the email, lowercased, with a username made from it", async () => {
+    const ctx = withEmail();
     const { tenant, token } = ctx.invite();
-    expect((await signUpWith(ctx, token, " Alice@Example.com ")).status).toBe(303);
-    expect(ctx.tenants.getUserByTenant(tenant.id)?.email).toBe("alice@example.com");
+    expect((await signUpWith(ctx, token, " Alice.Perez@Example.com ")).status).toBe(303);
+    const user = ctx.tenants.getUserByTenant(tenant.id);
+    expect(user?.email).toBe("alice.perez@example.com");
+    expect(user?.username).toBe("alice.perez");
+    expect(await ctx.tenants.verifyPassword("alice.perez", PASSWORD)).not.toBeNull();
   });
 
-  it("rejects an invalid email and keeps the link usable", async () => {
-    const ctx = setup({ email: { send: async () => {} } });
-    const { tenant, token } = ctx.invite();
-    const res = await signUpWith(ctx, token, "not-an-email");
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain("Ese correo no es válido.");
-    expect(ctx.tenants.getUserByTenant(tenant.id)).toBeNull();
-    expect((await ctx.signUp(token)).status).toBe(303);
-  });
-
-  it("rejects an email another account uses, without creating the user", async () => {
-    const ctx = setup({ email: { send: async () => {} } });
+  it("gives a second person with the same name before the @ a different username", async () => {
+    const ctx = withEmail();
     const first = ctx.invite("Acme");
-    await signUpWith(ctx, first.token, "same@example.com");
+    await signUpWith(ctx, first.token, "ana@one.com");
     const second = ctx.invite("Beta");
-    const res = await signUpWith(ctx, second.token, "SAME@example.com", "bob");
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain("Ese correo ya está en uso.");
-    expect(ctx.tenants.getUserByTenant(second.tenant.id)).toBeNull();
+    expect((await signUpWith(ctx, second.token, "ana@two.com")).status).toBe(303);
+    expect(ctx.tenants.getUserByTenant(second.tenant.id)?.username).toMatch(/^ana-\d{4}$/);
   });
 
-  it("still signs up without an email", async () => {
-    const ctx = setup({ email: { send: async () => {} } });
+  it("requires a valid email that no other account uses, and keeps the link usable", async () => {
+    const ctx = withEmail();
+    const { tenant, token } = ctx.invite();
+    const missing = await signUpWith(ctx, token, "");
+    expect(missing.status).toBe(400);
+    expect(await missing.text()).toContain("Escribe tu correo.");
+    const invalid = await signUpWith(ctx, token, "not-an-email");
+    expect(await invalid.text()).toContain("Ese correo no es válido.");
+    expect(ctx.tenants.getUserByTenant(tenant.id)).toBeNull();
+    const other = ctx.invite("Beta");
+    await signUpWith(ctx, other.token, "taken@example.com");
+    const taken = await signUpWith(ctx, token, "TAKEN@example.com");
+    expect(await taken.text()).toContain("Ese correo ya está en uso.");
+    expect((await signUpWith(ctx, token, "free@example.com")).status).toBe(303);
+  });
+
+  it("without email, still signs up with a username", async () => {
+    const ctx = setup();
     const { tenant, token } = ctx.invite();
     expect((await ctx.signUp(token)).status).toBe(303);
     expect(ctx.tenants.getUserByTenant(tenant.id)?.email).toBeNull();

@@ -83,7 +83,7 @@ export function panelLoginPage(
   return layout(
     "Tu panel",
     `<h1>Entra a tu panel</h1>
-<p class="lead">Usa el mismo usuario y contraseña con los que conectas tu asistente.</p>
+<p class="lead">Entra con tu correo (o tu usuario) y la misma contraseña con la que conectas tu asistente.</p>
 ${errorLine(opts.error)}
 <form method="post" action="/panel/login">
 ${credentialFields(opts.username)}

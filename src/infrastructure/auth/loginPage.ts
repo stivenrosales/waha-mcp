@@ -1,4 +1,9 @@
-/** Self-contained HTML pages for login, logout and onboarding. No scripts; one self-hosted font. */
+import { createHash } from "node:crypto";
+
+/**
+ * Self-contained HTML pages for login, logout and onboarding. One inline script (the show-password
+ * toggle, allowed by its hash) and self-hosted fonts.
+ */
 
 const ESCAPES: Record<string, string> = {
   "&": "&amp;",
@@ -11,15 +16,22 @@ const ESCAPES: Record<string, string> = {
 export const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (ch) => ESCAPES[ch]);
 
 /**
- * Security headers for every HTML page: no framing (clickjacking), no scripts,
+ * Security headers for every HTML page: no framing (clickjacking), no scripts but the toggle,
  * no external resources (only the page font, served by this server), no caching,
  * no referrer leaking query parameters.
  * `form-action` is deliberately not set: browsers apply it to the redirect that
  * follows a successful login, which would block the redirect to the client.
  */
+/**
+ * The only script any page runs: the show-password toggle next to each password field. Without
+ * it the fields work as plain password inputs. The CSP allows exactly this text, by its hash.
+ */
+export const TOGGLE_SCRIPT =
+  'for(const b of document.querySelectorAll(".pw-toggle"))b.addEventListener("click",()=>{const i=b.previousElementSibling;const show=i.type==="password";i.type=show?"text":"password";b.setAttribute("aria-pressed",String(show));b.setAttribute("aria-label",show?"Ocultar contraseña":"Mostrar contraseña")})';
+const TOGGLE_HASH = createHash("sha256").update(TOGGLE_SCRIPT).digest("base64");
+
 export const HTML_SECURITY_HEADERS: Record<string, string> = {
-  "Content-Security-Policy":
-    "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+  "Content-Security-Policy": `default-src 'none'; script-src 'sha256-${TOGGLE_HASH}'; style-src 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'`,
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
@@ -59,6 +71,11 @@ input[type=text]:hover,input[type=password]:hover,input[type=email]:hover{border
 input:focus{outline:none;border-color:var(--moss);background:#fff;box-shadow:0 0 0 3px rgba(94,139,126,.18)}
 input[type=file]{display:block;width:100%;margin:0 0 1.35rem;padding:1.1rem;border:1px dashed var(--line);border-radius:.75rem;background:var(--paper-hi);font:inherit;font-size:.9rem;color:var(--muted)}
 input[type=file]::file-selector-button{margin-right:.9rem;padding:.5rem 1rem;border:1px solid var(--moss);border-radius:999px;background:transparent;color:var(--moss-deep);font:inherit;font-weight:500;cursor:pointer}
+.pw{position:relative;margin:0 0 1.35rem}
+.pw input{margin:0;padding-right:3rem}
+.pw .pw-toggle{position:absolute;top:0;right:0;width:3rem;height:3rem;margin:0;padding:0;display:flex;align-items:center;justify-content:center;border-radius:.75rem;background:transparent;color:var(--muted)}
+.pw .pw-toggle:hover{background:transparent;color:var(--moss-deep)}
+.pw .pw-toggle[aria-pressed=true]{color:var(--moss)}
 button{display:block;width:100%;height:3.1rem;margin-top:.5rem;border:0;border-radius:999px;background:var(--moss);color:var(--paper-hi);font:inherit;font-weight:500;cursor:pointer;transition:background .2s}
 button:hover{background:var(--moss-deep)}
 button:focus-visible,a:focus-visible{outline:2px solid var(--moss);outline-offset:3px}
@@ -104,18 +121,22 @@ ${head}<title>${escapeHtml(title)} · Zenbox</title>
 ${body}
 </main>
 <footer>Zenbox · <a href="https://usezenbox.com">usezenbox.com</a></footer>
-</body>
+${body.includes('class="pw-toggle"') ? `<script>${TOGGLE_SCRIPT}</script>\n` : ""}</body>
 </html>`;
 
 export const errorLine = (error?: string): string =>
   error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : "";
 
-/** Username and current-password fields shared by every sign-in form. */
+/** A password input with its show/hide button (the button does nothing without the script). */
+export const passwordField = (id: string, label: string, attrs: string): string =>
+  `<label for="${id}">${escapeHtml(label)}</label>
+<div class="pw"><input id="${id}" name="${id}" type="password" ${attrs} required><button type="button" class="pw-toggle" aria-label="Mostrar contraseña" aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>`;
+
+/** Email-or-username and current-password fields shared by every sign-in form. */
 export const credentialFields = (username = ""): string =>
-  `<label for="username">Usuario</label>
-<input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" value="${escapeHtml(username)}" required autofocus>
-<label for="password">Contraseña</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required>`;
+  `<label for="username">Correo o usuario</label>
+<input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" value="${escapeHtml(username)}" required autofocus>
+${passwordField("password", "Contraseña", 'autocomplete="current-password"')}`;
 
 /** "Forgot password?" link under a sign-in form; empty when password recovery is off. */
 export const forgotLink = (forgotUrl?: string): string =>

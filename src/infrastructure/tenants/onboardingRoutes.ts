@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { getCookie } from "hono/cookie";
@@ -41,6 +41,16 @@ const LINK_USED = "Este enlace ya se usó.";
 const RECOVERY_LINK_TTL_MS = 60 * 60_000;
 const FORGOT_SENT =
   "Si hay una cuenta con ese correo, te enviamos un enlace para elegir una contraseña nueva. Revisa también la carpeta de spam.";
+
+/**
+ * The internal username of an account created from its email: the part before the @, cut to
+ * the allowed characters and length; `suffixed` adds a random 4-digit tail for collisions.
+ */
+function usernameFromEmail(email: string, suffixed = false): string {
+  let base = (email.split("@")[0] ?? "").replace(/[^A-Za-z0-9._-]/g, "").slice(0, 26);
+  if (base.length < 3) base = `${base}user`.slice(0, 26);
+  return suffixed ? `${base}-${randomInt(1000, 10000)}` : base;
+}
 
 /** The password-recovery email, plain text plus a minimal HTML copy. */
 function resetEmail(username: string, to: string, url: string): OutgoingEmail {
@@ -216,19 +226,30 @@ export function createOnboardingRoutes(deps: {
     if (tenants.getTenant(tenantId)?.status !== "invited") return used();
 
     const form = await readForm(c);
-    const username = form.get("username") ?? "";
-    // Only asked for when recovery by email is on; ignored otherwise.
+    // With email on, people sign up with their email (the username is made from it and never
+    // shown); without it, they choose a username.
     const email = recovery ? (form.get("email") ?? "").trim().toLowerCase() : "";
     const retry = (error: string) =>
-      html(invitePage({ username, email, error, askEmail: Boolean(recovery) }), 400);
-    if (!USERNAME_PATTERN.test(username)) {
+      html(
+        invitePage({
+          username: form.get("username") ?? "",
+          email,
+          error,
+          askEmail: Boolean(recovery),
+        }),
+        400,
+      );
+    if (recovery) {
+      if (!email) return retry("Escribe tu correo.");
+      if (email.length > 254 || !EMAIL_PATTERN.test(email))
+        return retry("Ese correo no es válido.");
+      if (tenants.getUserByEmail(email)) return retry("Ese correo ya está en uso.");
+    } else if (!USERNAME_PATTERN.test(form.get("username") ?? "")) {
       return retry(`Username must be ${USERNAME_RULE}.`);
     }
-    if (email && (email.length > 254 || !EMAIL_PATTERN.test(email)))
-      return retry("Ese correo no es válido.");
-    if (email && tenants.getUserByEmail(email)) return retry("Ese correo ya está en uso.");
     const problem = passwordError(form);
     if (problem) return retry(problem);
+    const username = recovery ? usernameFromEmail(email) : (form.get("username") ?? "");
 
     // users.tenant_id is UNIQUE: of two concurrent sign-ups exactly one insert succeeds, so the
     // user is created before the link is consumed and a taken username leaves the link usable.
@@ -243,6 +264,16 @@ export function createOnboardingRoutes(deps: {
     } catch (error) {
       if (tenants.getUserByTenant(tenantId)) return used();
       throw error;
+    }
+    // A username made from an email that someone already has gets a random suffix instead.
+    for (let i = 0; recovery && user === "username_taken" && i < 5; i++) {
+      if (tenants.getUserByTenant(tenantId)) return used();
+      user = await tenants.createUser({
+        tenantId,
+        username: usernameFromEmail(email, true),
+        password: form.get("password") ?? "",
+        role: "member",
+      });
     }
     if (user === "username_taken") {
       // A concurrent sign-up with the same username won the race for this very tenant.

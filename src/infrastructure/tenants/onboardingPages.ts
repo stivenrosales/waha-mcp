@@ -1,5 +1,12 @@
 /** HTML pages for invite sign-up, password reset and WhatsApp pairing. No scripts. */
-import { credentialFields, errorLine, escapeHtml, forgotLink, layout } from "../auth/loginPage.js";
+import {
+  credentialFields,
+  errorLine,
+  escapeHtml,
+  forgotLink,
+  layout,
+  passwordField,
+} from "../auth/loginPage.js";
 
 export const TRUST_NOTICE =
   "El administrador de este servidor puede acceder técnicamente a tus datos de WhatsApp. Continúa solo si confías en quien lo administra.";
@@ -14,10 +21,8 @@ export const PRIVACY_PATH = "/privacidad";
 
 const notice = `<p class="notice">${escapeHtml(TRUST_NOTICE)} <a href="${PRIVACY_PATH}">Cómo se tratan tus datos</a></p>`;
 
-const newPasswordFields = `<label for="password">Contraseña (mínimo 12 caracteres)</label>
-<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required>
-<label for="password_confirm">Repite la contraseña</label>
-<input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" minlength="12" required>`;
+const newPasswordFields = `${passwordField("password", "Contraseña (mínimo 12 caracteres)", 'autocomplete="new-password" minlength="12"')}
+${passwordField("password_confirm", "Repite la contraseña", 'autocomplete="new-password" minlength="12"')}`;
 
 /** Forms post back to the page's own URL (no `action`), so the link token stays out of the markup. */
 export function invitePage(
@@ -26,18 +31,22 @@ export function invitePage(
   return layout(
     "Crea tu cuenta",
     `<h1>Crea tu cuenta</h1>
-<p class="lead">Elige un usuario y una contraseña. Después vincularás tu WhatsApp escaneando un código QR.</p>
+${
+  opts.askEmail
+    ? `<p class="lead">Escribe tu correo y elige una contraseña. Con ellos entrarás a tu cuenta, y el correo te sirve para recuperarla. Después vincularás tu WhatsApp escaneando un código QR.</p>
+${notice}
+${errorLine(opts.error)}
+<form method="post">
+<label for="email">Correo</label>
+<input id="email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" value="${escapeHtml(opts.email ?? "")}" required autofocus>
+`
+    : `<p class="lead">Elige un usuario y una contraseña. Después vincularás tu WhatsApp escaneando un código QR.</p>
 ${notice}
 ${errorLine(opts.error)}
 <form method="post">
 <label for="username">Usuario</label>
 <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" value="${escapeHtml(opts.username ?? "")}" required autofocus>
-${
-  opts.askEmail
-    ? `<label for="email">Correo (opcional, para recuperar tu contraseña)</label>
-<input id="email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" value="${escapeHtml(opts.email ?? "")}">
 `
-    : ""
 }${newPasswordFields}
 <button type="submit">Crear cuenta</button>
 </form>`,

@@ -986,7 +986,7 @@ for (const cache of [false, true])
       expect(icons).toHaveLength(1);
       expect(icons[0]?.mimeType).toBe("image/svg+xml");
       expect(icons[0]?.src.startsWith("data:image/svg+xml;base64,")).toBe(true);
-      for (const path of ["/favicon.svg", "/icon.svg"]) {
+      for (const path of ["/favicon.svg", "/icon.svg", "/favicon.ico"]) {
         const res = await s.app.fetch(new Request(`${BASE}${path}`));
         expect(res.status).toBe(200);
         expect(res.headers.get("content-type")).toBe("image/svg+xml");

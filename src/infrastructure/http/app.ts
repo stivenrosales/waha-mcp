@@ -43,7 +43,8 @@ export interface CreateAppDeps {
 
 /**
  * - `GET /health`: no auth (container healthcheck).
- * - `GET /favicon.svg`, `GET /icon.svg`: the Zenbox icon, no auth.
+ * - `GET /favicon.svg`, `GET /icon.svg`, `GET /favicon.ico`: the Zenbox icon (SVG), no auth.
+ * - `GET /`: redirects to `/panel` when the panel is mounted; 404 otherwise.
  * - `GET /assets/satoshi.woff2`: the font of the HTML pages, no auth, cached for a year.
  * - OAuth and onboarding routes, mounted at the root (a PUBLIC_BASE_URL with a path is unsupported).
  * - `ALL /mcp`: behind the bearer guard; the verified client is passed as `authInfo`.
@@ -79,9 +80,11 @@ export function createApp(deps: CreateAppDeps): Hono {
   };
 
   app.get("/health", (c) => c.json({ status: "ok" }));
-  for (const path of ["/favicon.svg", "/icon.svg"]) {
+  // Browsers ask for /favicon.ico on pages without an icon link (plain-text answers included).
+  for (const path of ["/favicon.svg", "/icon.svg", "/favicon.ico"]) {
     app.get(path, () => new Response(ICON_SVG, { headers: ICON_HEADERS }));
   }
+  if (deps.panel) app.get("/", (c) => c.redirect("/panel", 302));
   for (const path of Object.keys(FONT_FILES)) {
     app.get(path, () => {
       const font = fontBytes(path);

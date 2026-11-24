@@ -76,7 +76,7 @@ function runtimeFor(tenantId: string): TenantRuntime {
   };
 }
 
-function appWith(runtimes: Record<string, TenantRuntime>) {
+function appWith(runtimes: Record<string, TenantRuntime>, panel: Hono | null = null) {
   const { registry, held } = fakeRegistry(runtimes);
   const app = createApp({
     oauth: new Hono(),
@@ -84,6 +84,7 @@ function appWith(runtimes: Record<string, TenantRuntime>) {
     guard: async (_c, next) => next(),
     mcpHandler: async () => new Response("unused"),
     registry,
+    panel,
   });
   return { app, held };
 }
@@ -139,6 +140,18 @@ describe("createApp tenant routing", () => {
   it("mounts the onboarding routes at the root", async () => {
     const { app } = appWith({});
     expect(await (await app.fetch(new Request(`${BASE}/pair`))).text()).toBe("pair page");
+  });
+
+  it("sends the root to the panel when the panel is mounted, and keeps the 404 otherwise", async () => {
+    const withPanel = appWith(
+      {},
+      new Hono().get("/panel", (c) => c.text("panel")),
+    );
+    const res = await withPanel.app.fetch(new Request(`${BASE}/`));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/panel");
+    const without = appWith({});
+    expect((await without.app.fetch(new Request(`${BASE}/`))).status).toBe(404);
   });
 
   it("serves both Zenbox fonts with long-lived caching and no auth", async () => {

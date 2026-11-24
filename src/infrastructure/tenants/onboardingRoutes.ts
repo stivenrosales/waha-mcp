@@ -3,6 +3,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { getCookie } from "hono/cookie";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { brandedEmail } from "../../application/emailTemplate.js";
 import { DEFAULT_CACHE_RETENTION_DAYS, EMAIL_PATTERN } from "../../config.js";
 import { EmailSendError } from "../../domain/errors.js";
 import type { EmailSender, OutgoingEmail } from "../../domain/ports/EmailSender.js";
@@ -53,11 +54,23 @@ function usernameFromEmail(email: string, suffixed = false): string {
   return suffixed ? `${base}-${randomInt(1000, 10000)}` : base;
 }
 
-/** The password-recovery email, plain text plus a minimal HTML copy. */
+/** The password-recovery email, in the Zenbox layout with a plain-text copy. */
 function resetEmail(username: string, to: string, url: string): OutgoingEmail {
-  const text = `Hola ${username}:\n\nPara elegir una contraseña nueva, abre este enlace. Vale 1 hora y se usa una sola vez:\n${url}\n\nSi no lo pediste, ignora este correo: tu contraseña no cambia.`;
-  const html = `<p>Hola ${escapeHtml(username)}:</p><p>Para elegir una contraseña nueva, abre este enlace. Vale 1 hora y se usa una sola vez:</p><p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p><p>Si no lo pediste, ignora este correo: tu contraseña no cambia.</p>`;
-  return { to, subject: "Restablece tu contraseña de Zenbox", text, html };
+  return {
+    to,
+    subject: "Restablece tu contraseña de Zenbox",
+    ...brandedEmail({
+      preheader: "Tu enlace para elegir una contraseña nueva.",
+      title: "Elige una contraseña nueva",
+      paragraphs: [
+        `Hola ${username}:`,
+        "Recibimos un pedido para cambiar la contraseña de tu cuenta de Zenbox.",
+      ],
+      button: { label: "Cambiar contraseña", url },
+      note: "El enlace vale 1 hora y se usa una sola vez.",
+      footer: "Si no lo pediste, ignora este correo: tu contraseña no cambia.",
+    }),
+  };
 }
 const INVITE_GONE = "Esta invitación ya no es válida.";
 const LINK_INVALID = "Este enlace no es válido o ya venció.";

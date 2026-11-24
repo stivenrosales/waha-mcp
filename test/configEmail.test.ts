@@ -11,8 +11,7 @@ const minimal = {
 };
 const email = {
   EMAIL_FROM: "Zenbox <hola@usezenbox.com>",
-  CLOUDFLARE_ACCOUNT_ID: "acc123",
-  CLOUDFLARE_EMAIL_API_TOKEN: "cf-secret",
+  RESEND_API_KEY: "cf-secret",
 };
 
 describe("email config", () => {
@@ -22,25 +21,21 @@ describe("email config", () => {
     expect(c.adminEmail).toBeNull();
   });
 
-  it("is on when all three variables are set", () => {
+  it("is on when both variables are set", () => {
     const c = loadConfig({ ...minimal, ...email, ADMIN_EMAIL: " Owner@Example.com " });
-    expect(c.email).toEqual({
-      from: "Zenbox <hola@usezenbox.com>",
-      accountId: "acc123",
-      apiToken: "cf-secret",
-    });
+    expect(c.email).toEqual({ from: "Zenbox <hola@usezenbox.com>", apiKey: "cf-secret" });
     expect(c.adminEmail).toBe("owner@example.com");
   });
 
   it("names each missing variable when only some are set, without the token", () => {
     let message = "";
     try {
-      loadConfig({ ...minimal, CLOUDFLARE_EMAIL_API_TOKEN: "cf-secret" });
+      loadConfig({ ...minimal, RESEND_API_KEY: "cf-secret" });
     } catch (e) {
       message = (e as Error).message;
     }
     expect(message).toContain("EMAIL_FROM is required when email is configured");
-    expect(message).toContain("CLOUDFLARE_ACCOUNT_ID is required when email is configured");
+    expect(message).not.toContain("RESEND_API_KEY is required");
     expect(message).not.toContain("cf-secret");
   });
 

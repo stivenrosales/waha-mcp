@@ -31,7 +31,7 @@ import type { AuthStore } from "./infrastructure/auth/store.js";
 import { createPolarClient } from "./infrastructure/billing/polarClient.js";
 import { createPolarWebhookRoute } from "./infrastructure/billing/polarWebhook.js";
 import { generateDek, wrapDek } from "./infrastructure/crypto/envelope.js";
-import { createCloudflareEmailSender } from "./infrastructure/email/cloudflareEmailSender.js";
+import { createResendEmailSender } from "./infrastructure/email/resendEmailSender.js";
 import { createApp } from "./infrastructure/http/app.js";
 import { createOpenRouterClaude } from "./infrastructure/llm/openRouterClaude.js";
 import type { Logger } from "./infrastructure/mcp/defineTool.js";
@@ -226,8 +226,8 @@ export function composeApp(deps: ComposeDeps): ComposedApp {
   const cookieSecret = new Uint8Array(
     createHmac("sha256", mediaSecret).update("pair-cookie").digest(),
   );
-  // Password recovery by email: only with EMAIL_FROM and the Cloudflare credentials set.
-  const emailSender = config.email ? createCloudflareEmailSender(config.email) : null;
+  // Password recovery and invites by email: only with EMAIL_FROM and RESEND_API_KEY set.
+  const emailSender = config.email ? createResendEmailSender(config.email) : null;
   const passwordRecovery = emailSender
     ? {
         email: emailSender,

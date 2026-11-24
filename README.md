@@ -241,7 +241,7 @@ The panel session is a random token in a cookie (`HttpOnly; Secure; SameSite=Str
 
 ## Password recovery by email (optional)
 
-Off by default. Set `EMAIL_FROM`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_EMAIL_API_TOKEN` together (setting only some of them is a startup error). The server sends through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/) (`POST /accounts/{id}/email/sending/send`), which needs the Workers Paid plan and the sender's domain onboarded under Email Service > Email Sending. The provider sits behind an `EmailSender` port, so another one can replace it.
+Off by default. Set `EMAIL_FROM` and `RESEND_API_KEY` together (setting only one of them is a startup error). The server sends through [Resend](https://resend.com) (`POST https://api.resend.com/emails`); the sender's domain must be verified in Resend (its free plan covers 3,000 emails a month). The provider sits behind an `EmailSender` port, so another one can replace it.
 
 When on, the sign-in pages (`/authorize` and `/pair`) link to `/forgot`. There a user types the email of the account and always gets the same answer, so the page does not reveal which emails have accounts. When an account has that email, it gets a reset link valid for 1 hour and usable once, which opens the usual `/reset` page; setting the new password signs out every connected app. Requests are limited per IP and per email (5 in 15 minutes). A failed send is logged as `forgot email failed tenant=<id> kind=<kind>`, never with the address or the provider's answer.
 
@@ -395,8 +395,7 @@ All configuration is through environment variables.
 | `CACHE_RETENTION_DAYS`               | no       | `90`                         | Delete cached messages and transcripts older than N days, daily (`0` keeps them forever). |
 | `CACHE_MAX_AGE_DAYS`                 | no       |                              | Legacy name of `CACHE_RETENTION_DAYS`, read only when that one is unset.                  |
 | `EMAIL_FROM`                         | no       |                              | Sender for password-recovery email, e.g. `Zenbox <hola@usezenbox.com>`.                   |
-| `CLOUDFLARE_ACCOUNT_ID`              | no       |                              | Cloudflare account that sends the email (Email Service).                                  |
-| `CLOUDFLARE_EMAIL_API_TOKEN`         | no       |                              | Cloudflare API token with Email Sending permission. Never logged.                         |
+| `RESEND_API_KEY`                     | no       |                              | Resend API key that sends the email. Never logged.                                        |
 | `POLAR_WEBHOOK_SECRET`               | no       |                              | Polar webhook secret (`whsec_…`). Never logged.                                           |
 | `POLAR_ACCESS_TOKEN`                 | no       |                              | Polar organization access token with `subscriptions:read`. Never logged.                  |
 | `POLAR_API_URL`                      | no       | `https://api.polar.sh`       | `https://sandbox-api.polar.sh` for the sandbox.                                           |

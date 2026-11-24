@@ -48,7 +48,7 @@ export interface Config {
   cacheRetentionDays: number;
   /** Voice-note transcription via an OpenAI-compatible API; null when off (the default). */
   transcription: TranscriptionConfig | null;
-  /** Transactional email (password recovery) via Cloudflare Email Service; null when off. */
+  /** Transactional email (password recovery, invites) via Resend; null when off. */
   email: EmailConfig | null;
   /** `ADMIN_EMAIL`, lowercased: the owner's address for password recovery; null when unset. */
   adminEmail: string | null;
@@ -95,9 +95,8 @@ export interface TranscriptionConfig {
 export interface EmailConfig {
   /** Sender, e.g. `Zenbox <hola@usezenbox.com>`. */
   from: string;
-  accountId: string;
-  /** Never logged. */
-  apiToken: string;
+  /** Resend API key; never logged. */
+  apiKey: string;
 }
 
 export interface PolarConfig {
@@ -111,11 +110,7 @@ export interface PolarConfig {
 
 const POLAR_REQUIRED = ["POLAR_WEBHOOK_SECRET", "POLAR_ACCESS_TOKEN"] as const;
 
-const EMAIL_REQUIRED = [
-  "EMAIL_FROM",
-  "CLOUDFLARE_ACCOUNT_ID",
-  "CLOUDFLARE_EMAIL_API_TOKEN",
-] as const;
+const EMAIL_REQUIRED = ["EMAIL_FROM", "RESEND_API_KEY"] as const;
 
 /** Loose on purpose: the provider is the real validator; this only catches typos. */
 export const EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -319,11 +314,7 @@ const envSchema = z
       .string()
       .optional()
       .transform((v) => v?.trim() || undefined),
-    CLOUDFLARE_ACCOUNT_ID: z
-      .string()
-      .optional()
-      .transform((v) => v?.trim() || undefined),
-    CLOUDFLARE_EMAIL_API_TOKEN: z
+    RESEND_API_KEY: z
       .string()
       .optional()
       .transform((v) => v?.trim() || undefined),
@@ -440,7 +431,7 @@ const envSchema = z
           "OPENROUTER_API_KEY needs WAHA_WEBHOOK_SECRET (missions receive messages through webhooks).",
       });
 
-    // Email: all three or none, like transcription below.
+    // Email: both or none, like transcription below.
     const emailSet = EMAIL_REQUIRED.filter((name) => Boolean(env[name]));
     if (emailSet.length > 0 && emailSet.length < EMAIL_REQUIRED.length)
       for (const name of EMAIL_REQUIRED)
@@ -448,7 +439,7 @@ const envSchema = z
           ctx.addIssue({
             code: "custom",
             path: [name],
-            message: `${name} is required when email is configured (set EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_EMAIL_API_TOKEN together).`,
+            message: `${name} is required when email is configured (set EMAIL_FROM and RESEND_API_KEY together).`,
           });
 
     // Polar: both or none; it sends invites by email and gives each customer an account.
@@ -465,8 +456,7 @@ const envSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["POLAR_WEBHOOK_SECRET"],
-        message:
-          "Polar needs email (EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_EMAIL_API_TOKEN): invites are sent by email.",
+        message: "Polar needs email (EMAIL_FROM, RESEND_API_KEY): invites are sent by email.",
       });
     if (polarSet.length > 0 && env.MULTI_TENANT === false)
       ctx.addIssue({
@@ -533,13 +523,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
           }
         : null,
     email:
-      v.EMAIL_FROM && v.CLOUDFLARE_ACCOUNT_ID && v.CLOUDFLARE_EMAIL_API_TOKEN
-        ? {
-            from: v.EMAIL_FROM,
-            accountId: v.CLOUDFLARE_ACCOUNT_ID,
-            apiToken: v.CLOUDFLARE_EMAIL_API_TOKEN,
-          }
-        : null,
+      v.EMAIL_FROM && v.RESEND_API_KEY ? { from: v.EMAIL_FROM, apiKey: v.RESEND_API_KEY } : null,
     adminEmail: v.ADMIN_EMAIL ?? null,
     polar:
       v.POLAR_WEBHOOK_SECRET && v.POLAR_ACCESS_TOKEN

@@ -11,8 +11,7 @@ const minimal = {
 };
 const email = {
   EMAIL_FROM: "Zenbox <hola@usezenbox.com>",
-  CLOUDFLARE_ACCOUNT_ID: "acc",
-  CLOUDFLARE_EMAIL_API_TOKEN: "cf",
+  RESEND_API_KEY: "cf",
 };
 const polar = { POLAR_WEBHOOK_SECRET: "whsec_c2VjcmV0", POLAR_ACCESS_TOKEN: "polar_oat_secret" };
 const messageOf = (env: Record<string, string>) => {
@@ -55,7 +54,7 @@ describe("polar config", () => {
 
   it("needs email, and refuses MULTI_TENANT=false", () => {
     expect(messageOf({ ...minimal, ...polar })).toContain(
-      "Polar needs email (EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_EMAIL_API_TOKEN): invites are sent by email.",
+      "Polar needs email (EMAIL_FROM, RESEND_API_KEY): invites are sent by email.",
     );
     expect(messageOf({ ...minimal, ...email, ...polar, MULTI_TENANT: "false" })).toContain(
       "Polar needs MULTI_TENANT on (each customer gets an account).",

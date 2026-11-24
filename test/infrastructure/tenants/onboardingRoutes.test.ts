@@ -12,7 +12,7 @@ const BASE = "https://mcp.example.com";
 const HOUR = 3600_000;
 const PASSWORD = "a long enough password";
 const TRUST =
-  "El administrador de este servidor puede acceder técnicamente a tus datos de WhatsApp. Continúa solo si confías en quien lo administra.";
+  "Tus mensajes se guardan cifrados con una llave propia de tu cuenta y puedes borrarlos cuando quieras.";
 const PRIVACY_LINK = '<a href="/privacidad">Cómo se tratan tus datos</a>';
 const USED = "Este enlace ya se usó.";
 const TAKEN = "Este número de WhatsApp ya está conectado a otra cuenta.";
@@ -666,7 +666,7 @@ describe("privacy", () => {
     const html = await res.text();
     expect(html).toContain("<h1>Cómo se tratan tus datos</h1>");
     expect(html).toContain("no tiene cifrado de extremo a extremo");
-    expect(html).toContain("puede acceder técnicamente a tus datos");
+    expect(html).toContain("no tiene herramientas para leer tus chats");
     expect(html).toContain("servicio de transcripción");
     expect(html).toContain("Nunca el contenido de tus mensajes");
     expect(html).toContain("Dispositivos vinculados");

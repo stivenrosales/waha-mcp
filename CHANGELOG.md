@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Calmer, still honest privacy copy: the invite and pairing pages now say messages are stored encrypted with a per-account key and can be deleted anytime, instead of warning that the administrator can access them; the privacy page explains why there is no end-to-end encryption.
 - `send_text` no longer duplicates a message when a send with an unknown outcome is retried: within 10 minutes the same text to the same chat first checks the chat, and an already delivered message is reported with `already_sent: true` instead of being sent again.
 
 ### Features

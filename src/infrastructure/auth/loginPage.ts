@@ -31,7 +31,8 @@ const TOGGLE_HASH = createHash("sha256").update(TOGGLE_SCRIPT).digest("base64");
  * follows a successful login, which would block the redirect to the client.
  */
 export const HTML_SECURITY_HEADERS: Record<string, string> = {
-  "Content-Security-Policy": `default-src 'none'; script-src 'sha256-${TOGGLE_HASH}'; style-src 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'`,
+  // img-src 'self' lets the tab icon (/favicon.svg) load; browsers apply img-src to favicons.
+  "Content-Security-Policy": `default-src 'none'; script-src 'sha256-${TOGGLE_HASH}'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'`,
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
@@ -95,7 +96,7 @@ footer a{color:var(--muted)}
 @media (prefers-reduced-motion:reduce){main{animation:none}*{transition:none!important}}
 `;
 
-/** The Zenbox ensō, inline so pages need no image request (the CSP has no img-src). */
+/** The Zenbox ensō, inline so the page logo needs no image request. */
 const MARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="73.3 52.8 880.4 880.4" width="28" height="28" aria-hidden="true" focusable="false">  <g transform="translate(0.000000,1024.000000) scale(0.100000,-0.100000)" fill="#5E8B7E" stroke="none"> <path d="M4910 8854 c-747 -41 -1474 -318 -2030 -772 -1112 -910 -1535 -2457 -980 -3587 135 -276 258 -371 470 -363 160 5 292 92 363 237 50 102 47 246 -7 381 -249 627 -226 1214 73 1823 376 768 1063 1254 1921 1361 1057 131 2004 -270 2546 -1080 465 -696 550 -1619 219 -2395 -364 -852 -1147 -1430 -2080 -1534 -515 -58 -1001 31 -1470 268 -77 39 -174 88 -215 109 -154 78 -310 68 -438 -26 -65 -47 -87 -78 -162 -221 -224 -428 -500 -810 -761 -1049 -76 -70 -88 -89 -89 -140 0 -63 51 -106 127 -106 265 0 883 213 1373 474 l125 67 125 -50 c575 -228 1196 -279 1810 -150 1471 310 2550 1436 2757 2879 25 177 25 718 0 900 -211 1499 -1348 2661 -2862 2925 -226 39 -592 61 -815 49z"/> </g> <g transform="translate(0.000000,1024.000000) scale(0.100000,-0.100000)" fill="#2F3437" stroke="none"> <path d="M3810 5736 c-126 -27 -229 -109 -284 -226 -47 -98 -46 -244 1 -341 39 -80 120 -159 200 -197 90 -42 241 -40 335 5 357 169 288 689 -102 763 -64 12 -79 12 -150 -4z"/> <path d="M5032 5735 c-120 -27 -222 -109 -276 -225 -46 -98 -45 -245 1 -341 39 -80 120 -159 200 -197 90 -41 241 -40 334 4 162 77 252 245 227 425 -31 232 -255 386 -486 334z"/> <path d="M6264 5735 c-375 -81 -434 -594 -87 -758 101 -48 247 -48 344 0 80 40 159 120 197 200 40 85 40 241 0 326 -58 124 -153 203 -278 231 -81 19 -95 19 -176 1z"/> </g> </svg>`;
 
 /**

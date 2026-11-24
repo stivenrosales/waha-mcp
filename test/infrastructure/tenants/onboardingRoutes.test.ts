@@ -345,7 +345,9 @@ describe("pair", () => {
     expect(html).toContain(TRUST);
     expect(html).toContain(PRIVACY_LINK);
     const csp = res.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain("img-src data:");
+    // One img-src only: browsers ignore a repeated directive, which would block the QR or the icon.
+    expect(csp.match(/img-src/g)).toHaveLength(1);
+    expect(csp).toContain("img-src 'self' data:");
     expect(csp).toContain("default-src 'none'");
     expect(res.headers.get("x-frame-options")).toBe("DENY");
   });
@@ -438,7 +440,9 @@ describe("pair", () => {
     const ctx = setup();
     const { token } = ctx.invite();
     const res = await ctx.request(`/invite/${token}`);
-    expect(res.headers.get("content-security-policy")).not.toContain("img-src");
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("img-src 'self'");
+    expect(csp).not.toContain("data:");
   });
 
   it("pair WORKING with a free waId → tenant active", async () => {

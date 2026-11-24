@@ -257,6 +257,8 @@ describe("authorization code flow", () => {
     expect(page.headers.get("content-type")).toMatch(/text\/html/);
     expect(page.headers.get("x-frame-options")).toBe("DENY");
     expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    // The tab icon (/favicon.svg) is an image load: without img-src 'self' browsers block it.
+    expect(page.headers.get("content-security-policy")).toContain("img-src 'self'");
 
     const res = await login(ctx, params, PASSWORD);
     expect(res.status).toBe(302);

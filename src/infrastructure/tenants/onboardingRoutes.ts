@@ -128,11 +128,11 @@ export function createOnboardingRoutes(deps: {
       c.header("Referrer-Policy", "same-origin");
       if (opts.qr) {
         // Pair pages also run the background check: its script hash, and fetches of themselves.
-        const base = HTML_SECURITY_HEADERS["Content-Security-Policy"].replace(
-          "script-src ",
-          `script-src 'sha256-${PAIR_POLL_HASH}' `,
-        );
-        c.header("Content-Security-Policy", `${base}; connect-src 'self'; img-src data:`);
+        // and the QR as a data: image (edited in place: a repeated img-src would be ignored).
+        const base = HTML_SECURITY_HEADERS["Content-Security-Policy"]
+          .replace("script-src ", `script-src 'sha256-${PAIR_POLL_HASH}' `)
+          .replace("img-src 'self'", "img-src 'self' data:");
+        c.header("Content-Security-Policy", `${base}; connect-src 'self'`);
       }
       return c.html(body, status);
     };

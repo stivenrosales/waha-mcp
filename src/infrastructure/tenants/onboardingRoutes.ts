@@ -17,6 +17,7 @@ import type { Logger } from "../mcp/defineTool.js";
 import {
   forgotPage,
   invitePage,
+  PAIR_POLL_HASH,
   PRIVACY_PATH,
   pairDonePage,
   pairLoginPage,
@@ -113,10 +114,12 @@ export function createOnboardingRoutes(deps: {
       for (const [name, value] of Object.entries(HTML_SECURITY_HEADERS)) c.header(name, value);
       c.header("Referrer-Policy", "same-origin");
       if (opts.qr) {
-        c.header(
-          "Content-Security-Policy",
-          `${HTML_SECURITY_HEADERS["Content-Security-Policy"]}; img-src data:`,
+        // Pair pages also run the background check: its script hash, and fetches of themselves.
+        const base = HTML_SECURITY_HEADERS["Content-Security-Policy"].replace(
+          "script-src ",
+          `script-src 'sha256-${PAIR_POLL_HASH}' `,
         );
+        c.header("Content-Security-Policy", `${base}; connect-src 'self'; img-src data:`);
       }
       return c.html(body, status);
     };

@@ -1,4 +1,5 @@
-/** HTML pages for invite sign-up, password reset and WhatsApp pairing (password toggle only). */
+/** HTML pages for invite sign-up, password reset and WhatsApp pairing. */
+import { createHash } from "node:crypto";
 import {
   credentialFields,
   errorLine,
@@ -11,10 +12,22 @@ import {
 export const TRUST_NOTICE =
   "El administrador de este servidor puede acceder técnicamente a tus datos de WhatsApp. Continúa solo si confías en quien lo administra.";
 
-/** Seconds between automatic reloads of a pairing page that is waiting on WhatsApp. */
-const REFRESH_SECONDS = 5;
-const refresh = `<meta http-equiv="refresh" content="${REFRESH_SECONDS}">\n`;
-const AUTO_REFRESH = `<p class="muted">Esta página se actualiza sola cada pocos segundos.</p>`;
+/** Seconds between background checks of a pairing page that is waiting on WhatsApp. */
+const POLL_SECONDS = 4;
+/** Without JavaScript the page reloads itself instead, less often than the background check. */
+const NOSCRIPT_REFRESH_SECONDS = 10;
+
+/**
+ * Fetches the page in the background and reloads it only when what it shows changes (a new QR,
+ * pairing done, an error). Reloading on a timer swapped the QR while people were scanning it.
+ * The CSP allows exactly this text, by its hash (see the pair routes).
+ */
+export const PAIR_POLL_SCRIPT = `(()=>{const key=d=>{const i=d.querySelector(".qr img");return(d.querySelector("h1")?.textContent??"")+"|"+(i?i.getAttribute("src"):"")};const now=key(document);const tick=async()=>{try{const r=await fetch(location.href,{credentials:"same-origin",cache:"no-store"});const d=new DOMParser().parseFromString(await r.text(),"text/html");if(key(d)!==now){location.reload();return}}catch{}setTimeout(tick,${POLL_SECONDS * 1000})};setTimeout(tick,${POLL_SECONDS * 1000})})()`;
+export const PAIR_POLL_HASH = createHash("sha256").update(PAIR_POLL_SCRIPT).digest("base64");
+
+const refresh = `<noscript><meta http-equiv="refresh" content="${NOSCRIPT_REFRESH_SECONDS}"></noscript>\n`;
+const AUTO_REFRESH = `<p class="muted">Esta página se actualiza sola cuando hay novedades.</p>
+<script>${PAIR_POLL_SCRIPT}</script>`;
 
 /** Path of the public page that explains who can see a tenant's data. */
 export const PRIVACY_PATH = "/privacidad";

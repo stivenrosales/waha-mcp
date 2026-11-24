@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { EmailSender, OutgoingEmail } from "../../../src/domain/ports/EmailSender.js";
 import { createLoginLimiter } from "../../../src/infrastructure/auth/rateLimit.js";
 import { createAuthStore, openAuthDatabase } from "../../../src/infrastructure/auth/store.js";
+import { PAIR_POLL_SCRIPT } from "../../../src/infrastructure/tenants/onboardingPages.js";
 import { createOnboardingRoutes } from "../../../src/infrastructure/tenants/onboardingRoutes.js";
 import { createSqliteTenantStore } from "../../../src/infrastructure/tenants/sqliteTenantStore.js";
 import { FakeSessionAdmin } from "../../fakes/FakeSessionAdmin.js";
@@ -339,13 +341,28 @@ describe("pair", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('<img src="data:image/png;base64,ZmFrZS1xcg=="');
-    expect(html).toContain('<meta http-equiv="refresh" content="5">');
+    expect(html).toContain('<noscript><meta http-equiv="refresh" content="10"></noscript>');
     expect(html).toContain(TRUST);
     expect(html).toContain(PRIVACY_LINK);
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("img-src data:");
     expect(csp).toContain("default-src 'none'");
     expect(res.headers.get("x-frame-options")).toBe("DENY");
+  });
+
+  it("pair pages check for changes in the background instead of reloading every few seconds", async () => {
+    const ctx = setup();
+    const { tenant, cookie } = await ctx.onboarded();
+    ctx.sessions.setState(tenant.wahaSession, "SCAN_QR_CODE");
+    const res = await ctx.pairPage(cookie);
+    const html = await res.text();
+    expect(html).toContain(`<script>${PAIR_POLL_SCRIPT}</script>`);
+    expect(html).not.toMatch(/<meta http-equiv="refresh"[^>]*>(?!<\/noscript>)/);
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain(
+      `'sha256-${createHash("sha256").update(PAIR_POLL_SCRIPT).digest("base64")}'`,
+    );
+    expect(csp).toContain("connect-src 'self'");
   });
 
   // WAHA still counts a FAILED session as running: /start is a no-op there, only /restart
@@ -365,7 +382,7 @@ describe("pair", () => {
       const other = action === "start" ? "restart" : "start";
       expect(ctx.sessions.calls).not.toContain(`${other}:${tenant.wahaSession}`);
       expect(html).toContain("Preparando tu sesión de WhatsApp…");
-      expect(html).toContain('<meta http-equiv="refresh" content="5">');
+      expect(html).toContain('<noscript><meta http-equiv="refresh" content="10"></noscript>');
       expect(html).not.toContain("Pide al administrador");
       expect(await ctx.sessions.state(tenant.wahaSession)).toBe("STARTING");
     });
@@ -496,14 +513,16 @@ describe("pair", () => {
     ctx.sessions.setState(tenant.wahaSession, "STARTING");
     const starting = await ctx.pairPage(cookie);
     expect(starting.status).toBe(200);
-    expect(await starting.text()).toContain('<meta http-equiv="refresh" content="5">');
+    expect(await starting.text()).toContain(
+      '<noscript><meta http-equiv="refresh" content="10"></noscript>',
+    );
     ctx.sessions.state = async () => {
       throw new Error("WAHA at http://waha.internal:3000 with key secret-key failed");
     };
     const down = await ctx.pairPage(cookie);
     expect(down.status).toBe(502);
     const html = await down.text();
-    expect(html).toContain('<meta http-equiv="refresh" content="5">');
+    expect(html).toContain('<noscript><meta http-equiv="refresh" content="10"></noscript>');
     expect(html).not.toContain("waha.internal");
     expect(html).not.toContain("secret-key");
   });

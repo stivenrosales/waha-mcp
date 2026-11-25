@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 520" role="img" aria-labelledby="t d" shape-rendering="crispEdges">
-<title id="t">waha-mcp</title><desc id="d">Pixel-art mascot: a small green chat-bubble creature holding a magnifying glass next to a pending checklist.</desc>
+<title id="t">Zenbox</title><desc id="d">Pixel-art mascot: a small green chat-bubble creature holding a magnifying glass next to a pending checklist.</desc>
 <rect width="1280" height="520" fill="#141413"/>
 <g font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">
-<text x="80" y="210" fill="#F5F4EE" font-size="84" font-weight="800" letter-spacing="-2">waha-mcp</text>
-<text x="84" y="262" fill="#B9B6AC" font-size="24">Let your AI read WhatsApp —</text>
-<text x="84" y="296" fill="#B9B6AC" font-size="24">and tell you who's still waiting.</text>
+<text x="80" y="210" fill="#F5F4EE" font-size="84" font-weight="800" letter-spacing="-2">Zenbox</text>
+<text x="84" y="262" fill="#B9B6AC" font-size="24">Let your AI read your WhatsApp —</text>
+<text x="84" y="296" fill="#B9B6AC" font-size="24">and send messages for you.</text>
 <g font-size="17" font-weight="700">
-<rect x="84" y="330" width="140" height="36" fill="#25D366" fill-opacity="0.15" stroke="#25D366"/><text x="154" y="354" fill="#5BE38E" text-anchor="middle">READ-ONLY</text>
-<rect x="238" y="330" width="120" height="36" fill="#D97757" fill-opacity="0.15" stroke="#D97757"/><text x="298" y="354" fill="#E9A086" text-anchor="middle">13 TOOLS</text>
-<rect x="372" y="330" width="130" height="36" fill="#fff" fill-opacity="0.05" stroke="#5B5A55"/><text x="437" y="354" fill="#D9D6CC" text-anchor="middle">OAUTH 2.1</text>
+<rect x="84" y="330" width="140" height="36" fill="#25D366" fill-opacity="0.15" stroke="#25D366"/><text x="154" y="354" fill="#5BE38E" text-anchor="middle">READ &amp; SEND</text>
+<rect x="238" y="330" width="150" height="36" fill="#D97757" fill-opacity="0.15" stroke="#D97757"/><text x="313" y="354" fill="#E9A086" text-anchor="middle">SELF-HOSTED</text>
+<rect x="402" y="330" width="130" height="36" fill="#fff" fill-opacity="0.05" stroke="#5B5A55"/><text x="467" y="354" fill="#D9D6CC" text-anchor="middle">OAUTH 2.1</text>
 </g>
 <g font-size="16" fill="#9A978D">
 <text x="84" y="406">Works with WAHA · for Claude, ChatGPT &amp; Gemini CLI</text>

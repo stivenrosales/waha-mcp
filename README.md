@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero-pixel.svg" alt="Zenbox pixel-art mascot: a green chat bubble holding a magnifying glass next to a checklist of pending replies" width="760">
+  <img src="docs/assets/hero-pixel.svg" alt="Zenbox: let your AI read your WhatsApp and send messages for you" width="760">
 </p>
 
 <h1 align="center">Zenbox</h1>
